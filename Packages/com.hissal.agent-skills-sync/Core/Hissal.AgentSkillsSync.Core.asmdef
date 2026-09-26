@@ -1,0 +1,16 @@
+{
+    "name": "Hissal.AgentSkillsSync.Core",
+    "rootNamespace": "Hissal.AgentSkillsSync",
+    "references": [],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

@@ -1,0 +1,25 @@
+{
+    "name": "Hissal.AgentSkillsSync.Tests.EditMode",
+    "rootNamespace": "Hissal.AgentSkillsSync.Tests",
+    "references": [
+        "GUID:721d9098d5914dba8e97a2a358f8b81d",
+        "GUID:a1c688987a464305bf4062804a34d99d",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

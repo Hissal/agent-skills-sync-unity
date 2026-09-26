@@ -1,0 +1,23 @@
+{
+  "name": "com.hissal.agent-skills-sync",
+  "version": "0.1.0",
+  "displayName": "Agent Skills Sync",
+  "description": "Editor tool that installs a project's locked agent skills (skills-lock.json) into .agents/skills and .claude/skills, detecting skills contributors already have at user scope.",
+  "unity": "6000.3",
+  "keywords": [
+    "agent",
+    "skills",
+    "claude",
+    "codex",
+    "ai"
+  ],
+  "author": {
+    "name": "Hissal",
+    "url": "https://github.com/Hissal"
+  },
+  "license": "MIT",
+  "documentationUrl": "https://github.com/Hissal/agent-skills-sync-unity#readme",
+  "changelogUrl": "https://github.com/Hissal/agent-skills-sync-unity/blob/main/Packages/com.hissal.agent-skills-sync/CHANGELOG.md",
+  "licensesUrl": "https://github.com/Hissal/agent-skills-sync-unity/blob/main/LICENSE",
+  "dependencies": {}
+}
