@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 
 namespace Hissal.AgentSkillsSync.Tests
@@ -68,10 +69,85 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             _fetcher.Failing.Add("code-review");
 
-            Assert.Throws<SkillFetchException>(() => new SkillSync(_project, _fetcher).Run());
+            Assert.Throws<SyncAbortedException>(() => new SkillSync(_project, _fetcher).Run());
 
             Assert.That(Directory.Exists(Path.Combine(_project, ".agents")), Is.False);
             Assert.That(Directory.Exists(Path.Combine(_project, ".claude")), Is.False);
+        }
+
+        [Test]
+        public void Run_SeveralFetchesFail_ReportsEveryFailedSkill()
+        {
+            _fetcher.Failing.Add("tdd");
+            _fetcher.Failing.Add("code-review");
+
+            var error = Assert.Throws<SyncAbortedException>(() => new SkillSync(_project, _fetcher).Run());
+
+            Assert.That(error.Failures.Keys, Is.EquivalentTo(new[] { "tdd", "code-review" }));
+        }
+
+        // Verification end to end: the real fetcher over a faked GitHub.
+
+        const string VerifiedLock = @"{
+  ""version"": 1,
+  ""skills"": {
+    ""installed"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/installed/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" },
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" },
+    ""code-review"": { ""source"": ""other/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/code-review/SKILL.md"", ""computedHash"": """ + FakeGitHub.NestedHash + @""" }
+  }
+}";
+
+        FakeGitHub VerifiedProject()
+        {
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), VerifiedLock);
+            var existing = Path.Combine(_project, ".agents/skills/installed");
+            Directory.CreateDirectory(existing);
+            File.WriteAllText(Path.Combine(existing, "SKILL.md"), "# installed earlier");
+            return new FakeGitHub()
+                .Fixture("owner/skills", "skills/tdd", "minimal")
+                .Fixture("other/skills", "skills/code-review", "nested");
+        }
+
+        SkillSync VerifyingSync(FakeGitHub github) =>
+            new SkillSync(_project, new GitHubSkillFetcher(Path.Combine(_root, "cache"), github));
+
+        static IEnumerable<string> Tree(string folder) =>
+            Directory.GetFileSystemEntries(folder, "*", SearchOption.AllDirectories).Select(p => p.Substring(folder.Length)).OrderBy(p => p);
+
+        [Test]
+        public void Run_SourcesMatchTheLock_Installs()
+        {
+            var summary = VerifyingSync(VerifiedProject()).Run();
+
+            Assert.That(summary.Installed, Is.EquivalentTo(new[] { "tdd", "code-review" }));
+        }
+
+        [Test]
+        public void Run_Offline_LeavesTheProjectUntouchedAndReportsADownloadFailurePerSkill()
+        {
+            var github = VerifiedProject();
+            github.Offline = true;
+            var before = Tree(_project).ToList();
+
+            var error = Assert.Throws<SyncAbortedException>(() => VerifyingSync(github).Run());
+
+            Assert.That(Tree(_project), Is.EqualTo(before));
+            Assert.That(error.Failures.Keys, Is.EquivalentTo(new[] { "tdd", "code-review" }));
+            Assert.That(error.Failures.Values.Select(f => f.Failure), Is.All.EqualTo(SkillFetchFailure.Download));
+        }
+
+        [Test]
+        public void Run_SourceChangedSinceLocked_LeavesTheProjectUntouchedAndReportsAHashMismatch()
+        {
+            var github = VerifiedProject().File("other/skills", "skills/code-review/SKILL.md", "# changed upstream");
+            var before = Tree(_project).ToList();
+
+            var error = Assert.Throws<SyncAbortedException>(() => VerifyingSync(github).Run());
+
+            Assert.That(Tree(_project), Is.EqualTo(before));
+            Assert.That(error.Failures.Keys, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(error.Failures["code-review"].Failure, Is.EqualTo(SkillFetchFailure.HashMismatch));
+            Assert.That(error.Message, Does.Contain("npx skills update"));
         }
 
         [Test]

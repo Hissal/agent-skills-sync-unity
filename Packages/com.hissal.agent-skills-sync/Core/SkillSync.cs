@@ -5,7 +5,8 @@ namespace Hissal.AgentSkillsSync
 {
     /// <summary>
     /// One sync of a project: read the lock, scan the folders, plan, fetch everything the plan needs, then apply it.
-    /// Fetching finishes before the first filesystem change, so a failed fetch (e.g. offline) leaves the project untouched.
+    /// Fetching (and hash verification) finishes before the first filesystem change, so a failed fetch (offline, or a
+    /// source changed since it was locked) leaves the project untouched. Every skill is attempted so all failures are reported.
     /// </summary>
     public sealed class SkillSync
     {
@@ -29,13 +30,25 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>Plans and applies. Call only after the contributor consented.</summary>
         /// <exception cref="LockfileException">The lockfile is missing or unusable; nothing was changed.</exception>
-        /// <exception cref="SkillFetchException">A skill could not be fetched; nothing was changed.</exception>
+        /// <exception cref="SyncAbortedException">One or more skills could not be fetched or verified; nothing was changed.</exception>
         public SyncSummary Run()
         {
             var plan = Plan();
             var fetched = new Dictionary<string, string>();
+            var failures = new Dictionary<string, SkillFetchException>();
             foreach (var action in plan.Actions.Where(a => a.Kind == PlanActionKind.Install))
-                fetched[action.SkillName] = _fetcher.Fetch(action.Skill);
+            {
+                try
+                {
+                    fetched[action.SkillName] = _fetcher.Fetch(action.Skill);
+                }
+                catch (SkillFetchException e)
+                {
+                    failures[action.SkillName] = e;
+                }
+            }
+
+            if (failures.Count > 0) throw new SyncAbortedException(failures);
             return _executor.Execute(_projectRoot, plan, fetched);
         }
     }

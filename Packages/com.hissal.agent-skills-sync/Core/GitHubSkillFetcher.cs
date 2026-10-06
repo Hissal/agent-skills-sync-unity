@@ -6,8 +6,9 @@ using System.IO.Compression;
 namespace Hissal.AgentSkillsSync
 {
     /// <summary>
-    /// Fetches skills from GitHub repo archives into a per-user cache. Each repo is downloaded at most once per
-    /// fetcher instance (one sync); its skill folders are extracted fresh on every fetch.
+    /// Fetches skills from GitHub repo archives into a per-user cache and verifies each against its locked
+    /// <c>computedHash</c>. Each repo is downloaded at most once per fetcher instance (one sync), and a failed
+    /// download is not retried within it; skill folders are extracted fresh on every fetch.
     /// </summary>
     public sealed class GitHubSkillFetcher : ISkillFetcher
     {
@@ -16,6 +17,13 @@ namespace Hissal.AgentSkillsSync
         readonly string _cacheRoot;
         readonly IArchiveDownloader _downloader;
         readonly Dictionary<string, string> _archives = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, Exception> _failedDownloads = new Dictionary<string, Exception>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Owners (and owner/repo sources) the <c>skills</c> CLI installs from skills.sh snapshots, locking a server hash
+        /// of another algorithm. See docs/skills-cli-findings.md §1 "Blob-installed sources".
+        /// </summary>
+        static readonly string[] SkillsShHashedSources = { "vercel", "vercel-labs", "heygen-com", "remotion-dev", "zapier/connectors" };
 
         /// <param name="cacheRoot">Cache folder; defaults to <see cref="DefaultCacheRoot"/>.</param>
         /// <param name="downloader">Network access; defaults to <see cref="HttpArchiveDownloader"/>.</param>
@@ -35,19 +43,65 @@ namespace Hissal.AgentSkillsSync
             }
         }
 
+        /// <summary>
+        /// Whether the skill's <c>computedHash</c> can be checked. False for sources the CLI locks with a skills.sh
+        /// server hash, which <see cref="SkillFolderHash"/> does not reproduce; those are fetched unverified.
+        /// </summary>
+        public static bool CanVerify(LockedSkill skill)
+        {
+            string owner, name;
+            try
+            {
+                (owner, name) = ParseRepo(skill);
+            }
+            catch (SkillFetchException)
+            {
+                return true; // Fetch refuses it anyway.
+            }
+
+            foreach (var source in SkillsShHashedSources)
+                if (string.Equals(source, owner, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(source, owner + "/" + name, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            return true;
+        }
+
         public string Fetch(LockedSkill skill)
         {
             var repo = ParseRepo(skill);
             var archive = DownloadOnce(repo, skill);
             var destination = Path.Combine(_cacheRoot, "skills", repo.Owner, repo.Name, skill.Name);
             Extract(archive, SkillFolderInRepo(skill), destination, skill);
+            if (CanVerify(skill)) Verify(destination, skill);
             return destination;
         }
+
+        static void Verify(string folder, LockedSkill skill)
+        {
+            var actual = SkillFolderHash.Compute(folder);
+            var locked = skill.ComputedHash?.Trim() ?? "";
+            if (string.Equals(actual, locked, StringComparison.OrdinalIgnoreCase)) return;
+
+            try
+            {
+                Directory.Delete(folder, recursive: true); // never leave unverified content where it could be picked up
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+
+            var lockedText = locked.Length == 0 ? "no hash" : Short(locked);
+            throw new SkillFetchException(skill.Name, SkillFetchFailure.HashMismatch,
+                $"Skill \"{skill.Name}\": source {skill.Source} changed since it was locked (locked {lockedText}, now {Short(actual)}). " +
+                $"Run `npx skills update` and commit {Lockfile.FileName}.");
+        }
+
+        static string Short(string hash) => hash.Length > 12 ? hash.Substring(0, 12) : hash;
 
         string DownloadOnce((string Owner, string Name) repo, LockedSkill skill)
         {
             var key = repo.Owner + "/" + repo.Name;
             if (_archives.TryGetValue(key, out var cached)) return cached;
+            if (_failedDownloads.TryGetValue(key, out var failure)) throw DownloadFailed(key, skill, failure);
 
             var archive = Path.Combine(_cacheRoot, "archives", repo.Owner, repo.Name + ".zip");
             var partial = archive + ".part";
@@ -62,12 +116,18 @@ namespace Hissal.AgentSkillsSync
             }
             catch (Exception e)
             {
-                throw new SkillFetchException($"Could not download {key} for skill \"{skill.Name}\": {e.Message}", e);
+                _failedDownloads[key] = e;
+                throw DownloadFailed(key, skill, e);
             }
 
             _archives[key] = archive;
             return archive;
         }
+
+        static SkillFetchException DownloadFailed(string repo, LockedSkill skill, Exception cause) =>
+            new SkillFetchException(skill.Name, SkillFetchFailure.Download,
+                $"Skill \"{skill.Name}\": could not download {repo}. Check your network connection; " +
+                $"if you are online, the repo may have been deleted or made private. ({cause.Message})", cause);
 
         /// <summary>The skill's folder inside the repo, from <c>skillPath</c>; "" for the repo root, null when the lock omits it.</summary>
         static string SkillFolderInRepo(LockedSkill skill)
@@ -112,7 +172,7 @@ namespace Hissal.AgentSkillsSync
                     }
 
                     if (!found)
-                        throw new SkillFetchException(
+                        throw new SkillFetchException(skill.Name, SkillFetchFailure.SourceUnusable,
                             $"Skill \"{skill.Name}\" was not found in {skill.Source} at \"{folderInRepo}\". " +
                             "The source may have moved it since it was locked.");
                 }
@@ -123,7 +183,7 @@ namespace Hissal.AgentSkillsSync
             }
             catch (Exception e)
             {
-                throw new SkillFetchException($"Could not extract skill \"{skill.Name}\" from {skill.Source}: {e.Message}", e);
+                throw new SkillFetchException(skill.Name, SkillFetchFailure.SourceUnusable, $"Could not extract skill \"{skill.Name}\" from {skill.Source}: {e.Message}", e);
             }
         }
 
@@ -144,7 +204,7 @@ namespace Hissal.AgentSkillsSync
 
             var parts = source.Trim('/').Split('/');
             if (parts.Length != 2 || parts[0].Length == 0 || parts[1].Length == 0 || parts[1] == ".." || parts[0] == "..")
-                throw new SkillFetchException($"Skill \"{skill.Name}\" has source \"{skill.Source}\", which is not an owner/repo GitHub source.");
+                throw new SkillFetchException(skill.Name, SkillFetchFailure.SourceUnusable, $"Skill \"{skill.Name}\" has source \"{skill.Source}\", which is not an owner/repo GitHub source.");
             return (parts[0], parts[1]);
         }
     }
