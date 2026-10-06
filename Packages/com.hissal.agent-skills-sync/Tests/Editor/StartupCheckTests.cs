@@ -253,6 +253,33 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void ShouldNotify_DeclinedThenSelectionChangedWithSameSkillMissing_Notifies()
+        {
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), @"{
+  ""version"": 1,
+  ""skills"": {
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" }
+  }
+}");
+            var layout = FolderLayout.Default;
+            var agentsOnly = Only(".agents/skills");
+            var plan = InstallPlanner.Plan(Lockfile.Load(_project), ProjectScanner.Scan(_project, layout), layout, selected: agentsOnly);
+            new PlanExecutor().Execute(_project, plan, new Dictionary<string, string> { ["tdd"] = Path.Combine(FixturesRoot, "minimal") });
+            var prefs = Prefs;
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(_project, selected: agentsOnly));
+            prefs.Save();
+            TempDirectory.Delete(Path.Combine(_project, ".agents/skills/tdd"));
+            prefs = Prefs;
+            StartupCheck.RecordDeclined(prefs, SyncStatus.Read(_project, selected: agentsOnly));
+            prefs.Save();
+
+            var widened = SyncStatus.Read(_project, selected: Only(".agents/skills", ".claude/skills"));
+
+            Assert.That(widened.MissingSkills, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(StartupCheck.ShouldNotify(widened, Prefs), Is.True);
+        }
+
+        [Test]
         public void Read_OnlyAgentsSelectedAndInstalledThere_ReportsNothingMissing()
         {
             var layout = FolderLayout.Default;
