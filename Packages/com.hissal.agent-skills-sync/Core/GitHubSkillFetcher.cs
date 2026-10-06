@@ -85,7 +85,12 @@ namespace Hissal.AgentSkillsSync
             var locked = skill.ComputedHash?.Trim() ?? "";
             if (string.Equals(actual, locked, StringComparison.OrdinalIgnoreCase)) return;
             // Locked from a checkout with core.autocrlf=true: the CLI hashed CRLF text files, the archive has LF.
-            if (string.Equals(SkillFolderHash.ComputeAsCrlfCheckout(folder), locked, StringComparison.OrdinalIgnoreCase)) return;
+            // Hand out that checkout's bytes, so the installed copy hashes to the lock and is not seen as outdated.
+            if (string.Equals(SkillFolderHash.ComputeAsCrlfCheckout(folder), locked, StringComparison.OrdinalIgnoreCase))
+            {
+                SkillFolderHash.ConvertToCrlfCheckout(folder);
+                return;
+            }
             var nonAsciiPaths = SkillFolderHash.HasNonAsciiPath(folder);
 
             try

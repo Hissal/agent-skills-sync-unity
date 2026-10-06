@@ -27,6 +27,22 @@ namespace Hissal.AgentSkillsSync
         /// </summary>
         internal static string ComputeAsCrlfCheckout(string skillDirectory) => Compute(skillDirectory, crlfCheckout: true);
 
+        /// <summary>
+        /// Rewrites the folder's text files as a <c>core.autocrlf=true</c> checkout has them, so the folder then
+        /// hashes (<see cref="Compute(string)"/>) to what <see cref="ComputeAsCrlfCheckout"/> returned before.
+        /// </summary>
+        internal static void ConvertToCrlfCheckout(string skillDirectory)
+        {
+            var files = new List<(string Path, string FullName)>();
+            CollectFiles(new DirectoryInfo(skillDirectory), "", files);
+            foreach (var file in files)
+            {
+                var content = File.ReadAllBytes(file.FullName);
+                var converted = ToCrlf(content);
+                if (converted != content) File.WriteAllBytes(file.FullName, converted);
+            }
+        }
+
         /// <summary>Whether any file path in the folder has a non-ASCII character, where the path order (and so the hash) is not exact.</summary>
         internal static bool HasNonAsciiPath(string skillDirectory)
         {

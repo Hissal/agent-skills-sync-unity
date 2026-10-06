@@ -159,6 +159,17 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(FilesUnder(folder), Does.Contain("SKILL.md").And.Contain("assets/binary.bin"));
         }
 
+        // Otherwise the installed copy would never hash to the lock, and every re-sync would see it as outdated.
+        [Test]
+        public void Fetch_LockHashedFromACrlfCheckout_ReturnsTheCopyAsItWasLocked()
+        {
+            _github.Fixture("owner/skills", "skills/byte-exact", "byte-exact");
+
+            var folder = Fetcher().Fetch(Skill("byte-exact", ByteExactCrlfCheckoutHash));
+
+            Assert.That(SkillFolderHash.Compute(folder), Is.EqualTo(ByteExactCrlfCheckoutHash));
+        }
+
         [Test]
         public void Fetch_NonAsciiPathAndHashDiffers_RefusesAsUnverifiableNotChanged()
         {
