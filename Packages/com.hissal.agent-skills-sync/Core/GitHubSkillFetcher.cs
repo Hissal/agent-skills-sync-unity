@@ -111,6 +111,20 @@ namespace Hissal.AgentSkillsSync
                 $"Run `npx skills update` and commit {Lockfile.FileName}.");
         }
 
+        /// <summary>Whether <paramref name="hash"/> (a <see cref="SkillFolderHash"/>) is the skill's locked <c>computedHash</c>.</summary>
+        internal static bool MatchesLock(LockedSkill skill, string hash) =>
+            hash != null && string.Equals(hash, skill.ComputedHash?.Trim() ?? "", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Whether <paramref name="folder"/> (a copy of the skill) verifiably differs from the lock: false when it hashes
+        /// to the lock as it is or as a CRLF checkout, and when a mismatch can't tell (skills.sh hash, non-ASCII paths).
+        /// </summary>
+        internal static bool DiffersFromLock(LockedSkill skill, string folder) =>
+            CanVerify(skill)
+            && !MatchesLock(skill, SkillFolderHash.Compute(folder))
+            && !MatchesLock(skill, SkillFolderHash.ComputeAsCrlfCheckout(folder))
+            && !SkillFolderHash.HasNonAsciiPath(folder);
+
         static SkillFetchException Unverifiable(LockedSkill skill, string reason) =>
             new SkillFetchException(skill.Name, SkillFetchFailure.Unverifiable,
                 $"Skill \"{skill.Name}\": can't verify this source's lock hash ({reason}). " +

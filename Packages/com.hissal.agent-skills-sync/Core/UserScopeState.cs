@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace Hissal.AgentSkillsSync
@@ -46,6 +47,30 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>Who reads the copy there, for display; may be null.</summary>
         public string Agents { get; }
+
+        readonly Dictionary<string, bool> _differsByLockHash = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Whether this copy's content verifiably differs from <paramref name="skill"/>'s locked hash. False whenever the
+        /// difference can't be judged: a skills.sh hash, a CRLF-checkout match, non-ASCII paths, or a copy that can't be
+        /// read (gone since the scan, no path). It only says "differs", never which side is newer. Reads the copy once per
+        /// locked hash.
+        /// </summary>
+        public bool DiffersFromLock(LockedSkill skill)
+        {
+            if (skill == null || string.IsNullOrEmpty(Path)) return false;
+            var key = skill.Source + "|" + (skill.ComputedHash ?? "");
+            if (_differsByLockHash.TryGetValue(key, out var differs)) return differs;
+            try
+            {
+                differs = GitHubSkillFetcher.DiffersFromLock(skill, Path);
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                differs = false;
+            }
+            return _differsByLockHash[key] = differs;
+        }
 
         public override string ToString() => $"{Folder.RelativePath}/{SkillName} at {FoundIn}";
     }

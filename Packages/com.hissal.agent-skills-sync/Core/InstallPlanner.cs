@@ -5,8 +5,8 @@ using System.Linq;
 namespace Hissal.AgentSkillsSync
 {
     /// <summary>
-    /// Decides what a sync does. Pure: the same lock and project state always give the same plan,
-    /// and nothing touches the filesystem.
+    /// Decides what a sync does. The same lock, project state and user-scope copies always give the same plan, and
+    /// nothing changes the filesystem (the only read is hashing a skipped skill's user-scope copy).
     /// </summary>
     /// <remarks>
     /// Per locked skill and folder: no entry -> Install (canonical) or Link (link folder); a managed canonical copy that
@@ -28,7 +28,9 @@ namespace Hissal.AgentSkillsSync
     /// (<see cref="UserScopeState"/>) -> SkipUserScope, and the folder is not needed for that skill (its managed entry
     /// goes as above). The canonical copy stays while any selected folder still needs it for that skill, so a skip of
     /// the canonical folder only takes effect once no selected link folder links to it. Project-authored skills are
-    /// never skipped.
+    /// never skipped. Where a skipped folder's user-scope copy verifiably differs from the lock
+    /// (<see cref="UserScopeCopy.DiffersFromLock"/>) -> WarnUserScopeDiffers right after its SkipUserScope. That check
+    /// hashes the copy, the planner's only read of the filesystem.
     /// </para>
     /// </remarks>
     public static class InstallPlanner
@@ -86,7 +88,12 @@ namespace Hissal.AgentSkillsSync
                     {
                         Withdraw(skill.Name, folder, state);
                         if (Skipped(folder, skill.Name))
-                            actions.Add(PlanAction.SkipUserScope(skill, folder, userScope.CopiesOf(folder, skill.Name)));
+                        {
+                            var copies = userScope.CopiesOf(folder, skill.Name);
+                            actions.Add(PlanAction.SkipUserScope(skill, folder, copies));
+                            var differing = copies.Where(c => c.DiffersFromLock(skill)).ToList();
+                            if (differing.Count > 0) actions.Add(PlanAction.WarnUserScopeDiffers(skill, folder, differing));
+                        }
                     }
                     else if (!state.Has(skill.Name))
                     {
