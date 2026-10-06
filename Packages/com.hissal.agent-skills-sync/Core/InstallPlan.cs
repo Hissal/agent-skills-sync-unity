@@ -73,10 +73,13 @@ namespace Hissal.AgentSkillsSync
     /// <summary>The planner's output: the ordered actions, and what each folder's managed-state file lists afterwards.</summary>
     public sealed class InstallPlan
     {
-        public InstallPlan(IReadOnlyList<PlanAction> actions, IReadOnlyDictionary<SkillsFolder, IReadOnlyList<string>> managedNames)
+        /// <param name="managedNamesChange">Whether <paramref name="managedNames"/> differs from what the folders record now.</param>
+        public InstallPlan(IReadOnlyList<PlanAction> actions, IReadOnlyDictionary<SkillsFolder, IReadOnlyList<string>> managedNames,
+            bool managedNamesChange = false)
         {
             Actions = actions;
             ManagedNames = managedNames;
+            ManagedNamesChange = managedNamesChange;
         }
 
         /// <summary>
@@ -85,8 +88,14 @@ namespace Hissal.AgentSkillsSync
         /// </summary>
         public IReadOnlyList<PlanAction> Actions { get; }
 
-        /// <summary>Whether applying the plan changes anything (actions other than LeaveForeign).</summary>
-        public bool HasChanges => Actions.Any(a => a.ChangesProject);
+        /// <summary>
+        /// Whether applying the plan changes anything: an action other than LeaveForeign, or a managed-state file to
+        /// rewrite (e.g. dropping a no-longer-locked name whose entry is already gone from disk).
+        /// </summary>
+        public bool HasChanges => ManagedNamesChange || Actions.Any(a => a.ChangesProject);
+
+        /// <summary>Whether some folder's managed names differ from what its managed-state file records now.</summary>
+        public bool ManagedNamesChange { get; }
 
         /// <summary>Per folder in the layout, the sorted names the tool manages there once the plan is applied.</summary>
         public IReadOnlyDictionary<SkillsFolder, IReadOnlyList<string>> ManagedNames { get; }

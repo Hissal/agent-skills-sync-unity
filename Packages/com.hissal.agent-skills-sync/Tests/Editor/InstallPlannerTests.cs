@@ -161,6 +161,23 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[] { "Update .agents/skills/tdd" }));
         }
 
+        [Test]
+        public void Plan_EmptyLockAndStaleManagedNameMissingOnDisk_HasChangesToTheManagedState()
+        {
+            var plan = InstallPlanner.Plan(Lock(), Project(new[] { "tdd-" }, new[] { "tdd-" }), FolderLayout.Default);
+
+            Assert.That(plan.Actions, Is.Empty);
+            Assert.That(plan.HasChanges, Is.True);
+        }
+
+        [Test]
+        public void Plan_EverythingInstalledAndRecorded_HasNoChanges()
+        {
+            var plan = InstallPlanner.Plan(Lock("tdd"), Project(new[] { "tdd" }, new[] { "tdd" }), FolderLayout.Default);
+
+            Assert.That(plan.HasChanges, Is.False);
+        }
+
         [TestCase(LockedHash, true)]
         [TestCase("LOCKED-HASH", true)]
         [TestCase(OldHash, false)]

@@ -65,9 +65,11 @@ namespace Hissal.AgentSkillsSync
                         actions.Add(PlanAction.Remove(name, folder));
                 }
 
+            var managedNamesChange = layout.Folders.Any(f => !managed[f].SetEquals(project.For(f).Managed));
             return new InstallPlan(
                 actions,
-                managed.ToDictionary(m => m.Key, m => (IReadOnlyList<string>)m.Value.ToList()));
+                managed.ToDictionary(m => m.Key, m => (IReadOnlyList<string>)m.Value.ToList()),
+                managedNamesChange);
         }
     }
 }

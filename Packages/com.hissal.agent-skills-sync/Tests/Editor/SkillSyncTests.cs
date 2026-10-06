@@ -268,5 +268,19 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(_fetcher.Fetched, Is.Empty);
         }
+
+        [Test]
+        public void Run_EmptyLockAndStaleManagedNameMissingOnDisk_DropsTheNameFromTheManagedState()
+        {
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), @"{ ""version"": 1, ""skills"": {} }");
+            var canonical = Path.Combine(_project, ".agents/skills");
+            ManagedStateFile.Write(canonical, new[] { "tdd" });
+            var sync = new SkillSync(_project, _fetcher);
+            Assert.That(sync.Plan().HasChanges, Is.True, "the window only offers Sync when the plan has changes");
+
+            sync.Run();
+
+            Assert.That(ManagedStateFile.Read(canonical), Is.Empty);
+        }
     }
 }
