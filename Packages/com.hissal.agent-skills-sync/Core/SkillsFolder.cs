@@ -14,14 +14,22 @@ namespace Hissal.AgentSkillsSync
         Link,
     }
 
-    /// <summary>A project-relative folder one agent family reads skills from, e.g. <c>.claude/skills</c>.</summary>
+    /// <summary>
+    /// One entry of the folder table: a project-relative folder a set of agents reads skills from, e.g.
+    /// <c>.claude/skills</c>, with every user-scope folder those agents read.
+    /// </summary>
     public sealed class SkillsFolder
     {
-        public SkillsFolder(string agent, string relativePath, SkillsFolderRole role)
+        /// <param name="label">The agents that read the folder, for display; defaults to <paramref name="agent"/>.</param>
+        /// <param name="userScopeLocations">Every user-scope folder any of those agents reads (see <see cref="UserScopeLocations"/>).</param>
+        public SkillsFolder(string agent, string relativePath, SkillsFolderRole role, string label = null,
+            IEnumerable<UserScopeLocation> userScopeLocations = null)
         {
             Agent = agent;
             RelativePath = relativePath;
             Role = role;
+            Label = label ?? agent;
+            UserScopeLocations = (userScopeLocations ?? Enumerable.Empty<UserScopeLocation>()).ToList();
         }
 
         /// <summary>Short agent-family id, e.g. <c>agents</c> or <c>claude</c>.</summary>
@@ -32,6 +40,27 @@ namespace Hissal.AgentSkillsSync
 
         public SkillsFolderRole Role { get; }
 
+        /// <summary>The agents that read this folder, for display, e.g. <c>Claude Code</c>.</summary>
+        public string Label { get; }
+
+        /// <summary>
+        /// Every user-scope skills folder an agent reading this project folder reads from its own home (e.g.
+        /// <c>~/.codex/skills</c> for Codex), in table order. Locations that agents read only as a cross-read of
+        /// another table entry's home (Cursor reading <c>~/.claude/skills</c>) are not listed here.
+        /// </summary>
+        public IReadOnlyList<UserScopeLocation> UserScopeLocations { get; }
+
+        /// <summary>The resolved agent homes of <see cref="UserScopeLocations"/>, distinct, in table order.</summary>
+        public IReadOnlyList<string> UserScopeHomes(UserEnvironment environment) =>
+            Distinct(UserScopeLocations.Select(l => l.ResolveHome(environment)));
+
+        /// <summary>The resolved user-scope skills folders of <see cref="UserScopeLocations"/>, distinct, in table order.</summary>
+        public IReadOnlyList<string> UserScopeSkillsFolders(UserEnvironment environment) =>
+            Distinct(UserScopeLocations.Select(l => l.ResolveSkillsFolder(environment)));
+
+        static IReadOnlyList<string> Distinct(IEnumerable<string> paths) =>
+            paths.Distinct(System.IO.Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToList();
+
         public override string ToString() => RelativePath;
     }
 
@@ -39,7 +68,7 @@ namespace Hissal.AgentSkillsSync
     /// The skills folders the tool keeps in sync: exactly one canonical folder plus any number of link folders.
     /// Everything downstream iterates this table rather than naming folders.
     /// </summary>
-    public sealed class FolderLayout
+    public sealed partial class FolderLayout
     {
         public FolderLayout(IEnumerable<SkillsFolder> folders)
         {
@@ -50,16 +79,12 @@ namespace Hissal.AgentSkillsSync
             Canonical = canonical[0];
         }
 
-        /// <summary><c>.agents/skills</c> holds the copies; <c>.claude/skills</c> links to them.</summary>
-        public static FolderLayout Default { get; } = new FolderLayout(new[]
-        {
-            new SkillsFolder("agents", ".agents/skills", SkillsFolderRole.Canonical),
-            new SkillsFolder("claude", ".claude/skills", SkillsFolderRole.Link),
-        });
-
         /// <summary>Every folder, canonical first as declared.</summary>
         public IReadOnlyList<SkillsFolder> Folders { get; }
 
         public SkillsFolder Canonical { get; }
+
+        /// <summary>The folder with this <see cref="SkillsFolder.RelativePath"/>, or null.</summary>
+        public SkillsFolder Find(string relativePath) => Folders.FirstOrDefault(f => f.RelativePath == relativePath);
     }
 }
