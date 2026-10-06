@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -11,6 +12,7 @@ namespace Hissal.AgentSkillsSync.Editor
     /// <summary>
     /// Lists the locked skills with their sources and installs them on Sync, once the contributor has
     /// ticked the consent box. Consent is held only by this window instance and resets on reload.
+    /// A failed sync marks each skill that could not be fetched or verified with its error.
     /// </summary>
     public sealed class SkillsSyncWindow : EditorWindow
     {
@@ -22,6 +24,7 @@ namespace Hissal.AgentSkillsSync.Editor
         Button _syncButton;
         HelpBox _summary;
         bool _canSync;
+        IReadOnlyDictionary<string, SkillFetchException> _failures = new Dictionary<string, SkillFetchException>();
 
         static string ProjectRoot => Path.GetDirectoryName(Application.dataPath);
 
@@ -73,7 +76,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 var pending = plan.Actions.Select(a => a.SkillName).ToHashSet();
 
                 foreach (var skill in lockfile.Skills)
-                    _skillList.Add(SkillRow(skill, pending.Contains(skill.Name)));
+                    _skillList.Add(SkillRow(skill, pending.Contains(skill.Name), _failures.TryGetValue(skill.Name, out var failure) ? failure : null));
 
                 if (lockfile.Skills.Count == 0) ShowStatus("The lockfile lists no skills.", HelpBoxMessageType.Info);
                 _canSync = lockfile.Skills.Count > 0;
@@ -86,13 +89,34 @@ namespace Hissal.AgentSkillsSync.Editor
             UpdateSyncButton();
         }
 
-        static VisualElement SkillRow(LockedSkill skill, bool pending)
+        static VisualElement SkillRow(LockedSkill skill, bool pending, SkillFetchException failure)
         {
-            var row = new VisualElement { style = { flexDirection = FlexDirection.Row, marginBottom = 2 } };
+            var container = new VisualElement { style = { marginBottom = 2 } };
+            var row = new VisualElement { style = { flexDirection = FlexDirection.Row } };
             row.Add(new Label(skill.Name) { style = { width = 200, unityFontStyleAndWeight = FontStyle.Bold } });
             row.Add(new Label(skill.Source) { style = { flexGrow = 1 } });
-            row.Add(new Label(pending ? "to install" : "installed"));
-            return row;
+            if (!GitHubSkillFetcher.CanVerify(skill))
+                row.Add(new Label("hash not verifiable") { tooltip = "Locked with a skills.sh server hash; installed without a hash check.", style = { marginRight = 8 } });
+            row.Add(new Label(failure != null ? FailureLabel(failure.Failure) : pending ? "to install" : "installed")
+            {
+                style = { color = failure != null ? new StyleColor(new Color(0.9f, 0.3f, 0.3f)) : new StyleColor(StyleKeyword.Null) },
+            });
+            container.Add(row);
+
+            if (failure != null)
+                container.Add(new HelpBox(failure.Message, HelpBoxMessageType.Error));
+            return container;
+        }
+
+        static string FailureLabel(SkillFetchFailure failure)
+        {
+            switch (failure)
+            {
+                case SkillFetchFailure.Download: return "download failed";
+                case SkillFetchFailure.HashMismatch: return "changed since locked";
+                case SkillFetchFailure.SourceUnusable: return "not found in source";
+                default: return "fetch failed";
+            }
         }
 
         void UpdateSyncButton() => _syncButton.SetEnabled(_canSync && _consent.value);
@@ -100,6 +124,7 @@ namespace Hissal.AgentSkillsSync.Editor
         void Sync()
         {
             if (!_consent.value) return;
+            _failures = new Dictionary<string, SkillFetchException>();
 
             try
             {
@@ -107,7 +132,13 @@ namespace Hissal.AgentSkillsSync.Editor
                 var summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher()).Run();
                 ShowSummary(Describe(summary), HelpBoxMessageType.Info);
             }
-            catch (Exception e) when (e is LockfileException || e is SkillFetchException || e is IOException || e is UnauthorizedAccessException)
+            catch (SyncAbortedException e)
+            {
+                _failures = e.Failures;
+                ShowSummary($"Sync aborted, nothing was changed: {e.Failures.Count} skill(s) could not be fetched. See the errors in the list.", HelpBoxMessageType.Error);
+                Debug.LogError(e.Message);
+            }
+            catch (Exception e) when (e is LockfileException || e is IOException || e is UnauthorizedAccessException)
             {
                 ShowSummary("Sync failed: " + e.Message, HelpBoxMessageType.Error);
                 Debug.LogException(e);
