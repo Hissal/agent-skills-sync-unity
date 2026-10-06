@@ -11,8 +11,10 @@ namespace Hissal.AgentSkillsSync
     /// <remarks>
     /// Per locked skill and folder: no entry -> Install (canonical) or Link (link folder); a managed canonical copy that
     /// is not current -> Update; a managed link that is broken or resolves anywhere but the canonical entry -> Link
-    /// again, replacing it; an entry the tool does not manage -> LeaveForeign. Names managed but no longer locked
-    /// -> Remove wherever the entry still exists. Entries that are neither locked nor managed are never looked at.
+    /// again, replacing it; an entry the tool does not manage -> LeaveForeign. An unmanaged, unlocked folder in the
+    /// canonical folder is project-authored -> Link (link folders only). Names managed but neither locked nor
+    /// project-authored, wherever the entry still exists: canonical entry gone -> Unlink (the link is dangling);
+    /// otherwise -> Remove. Other unlocked, unmanaged entries are never looked at.
     /// </remarks>
     public static class InstallPlanner
     {

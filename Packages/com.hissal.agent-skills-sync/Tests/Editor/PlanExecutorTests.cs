@@ -176,16 +176,32 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
-        public void Execute_RemovingALink_LeavesWhatItPointsAt()
+        public void Execute_SkillNoLongerLockedAndCanonicalCopyGone_UnlinksTheDanglingLink()
+        {
+            Sync("tdd=v1", "code-review=v2");
+            DirectoryLink.Remove(InProject(".agents/skills/code-review"));
+
+            var summary = Sync("tdd=v1");
+
+            Assert.That(summary.Unlinked, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(summary.Removed, Is.Empty);
+            Assert.That(Directory.GetFileSystemEntries(InProject(".claude/skills")).Select(Path.GetFileName),
+                Is.EquivalentTo(new[] { ".gitignore", "tdd" }));
+            Assert.That(File.ReadAllText(InProject(".agents/skills/tdd/SKILL.md")), Is.EqualTo(Fixture("minimal", "SKILL.md")));
+        }
+
+        [Test]
+        public void Execute_CanonicalCopyTakenOverByTheProject_KeepsTheCopyAndItsLink()
         {
             Sync("tdd=v1");
-            // The contributor took the canonical copy over: no longer managed there, still linked from Claude.
+            // The contributor took the canonical copy over: no longer managed there, so it is project-authored.
             ManagedStateFile.Write(InProject(".agents/skills"), new string[0]);
 
-            Sync();
+            var summary = Sync();
 
-            Assert.That(File.Exists(InProject(".claude/skills/tdd/SKILL.md")), Is.False);
-            Assert.That(File.ReadAllText(InProject(".agents/skills/tdd/SKILL.md")), Is.EqualTo(Fixture("minimal", "SKILL.md")));
+            Assert.That(summary.NothingChanged, Is.True);
+            Assert.That(File.ReadAllText(InProject(".claude/skills/tdd/SKILL.md")), Is.EqualTo(Fixture("minimal", "SKILL.md")));
+            Assert.That(ManagedLines(".claude/skills"), Is.EqualTo(new[] { "/tdd" }));
         }
 
         // LeaveForeign

@@ -104,6 +104,18 @@ namespace Hissal.AgentSkillsSync.Tests
             yield return Case("UnlockedManagedNameMissingOnDisk_PlansNothing",
                 None, new[] { "old-" }, new[] { "old-" });
 
+            // Unlink vs Remove: a managed, unlocked link is unlinked when its canonical entry is gone, removed (with
+            // the managed canonical copy) when that copy still exists, and kept when the canonical entry is the
+            // project's own (project-authored).
+            yield return Case("ManagedLinkWhoseCanonicalEntryIsGone_Unlinks",
+                None, new[] { "old-" }, new[] { "old" },
+                "Unlink .claude/skills/old");
+            yield return Case("ProjectAuthoredSkillDeleted_UnlinksItsLink",
+                None, None, new[] { "house-style" },
+                "Unlink .claude/skills/house-style");
+            yield return Case("CanonicalCopyTakenOverByTheProject_KeepsItsLink",
+                None, new[] { "tdd?" }, new[] { "tdd" });
+
             // LeaveForeign
             yield return Case("ForeignCopyOfLockedSkill_LeftAloneButStillLinked",
                 new[] { "tdd" }, new[] { "tdd?" }, None,
@@ -132,7 +144,7 @@ namespace Hissal.AgentSkillsSync.Tests
                 .SetName("Plan_Update_KeepsManagingTheSkill");
             yield return new TestCaseData(new[] { "tdd" }, new[] { "tdd", "old" }, new[] { "tdd", "old-" }, new[] { "tdd" }, new[] { "tdd" })
                 .SetName("Plan_Remove_DropsTheNameFromEveryManagedList");
-            yield return new TestCaseData(new[] { "tdd" }, new[] { "tdd?", "mine?" }, new[] { "tdd?" }, None, None)
+            yield return new TestCaseData(new[] { "tdd" }, new[] { "tdd?", "mine?" }, new[] { "tdd?", "mine?" }, None, None)
                 .SetName("Plan_ForeignEntries_NeverBecomeManaged");
         }
 
