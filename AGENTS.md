@@ -1,6 +1,6 @@
 # Agent Skills Sync (Unity)
 
-Editor-only UPM package that installs a project's locked agent skills. Spec: `docs/specs/agent-skills-sync.md`.
+Editor-only UPM package that installs a project's locked agent skills. Spec: [#1](https://github.com/Hissal/agent-skills-sync-unity/issues/1).
 
 ## Agent skills
 

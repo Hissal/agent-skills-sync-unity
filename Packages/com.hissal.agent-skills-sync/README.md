@@ -4,7 +4,7 @@ Editor-only Unity package that treats a project's committed `skills-lock.json` a
 truth and installs the locked agent skills into `.agents/skills/` (canonical copy) and
 `.claude/skills/` (link), detecting skills contributors already have at user scope.
 
-Status: in development. See the [spec](https://github.com/Hissal/agent-skills-sync-unity/blob/main/docs/specs/agent-skills-sync.md).
+Status: in development. See the [spec](https://github.com/Hissal/agent-skills-sync-unity/issues/1).
 
 ## Install
 
