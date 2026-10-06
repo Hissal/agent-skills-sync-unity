@@ -282,6 +282,21 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Execute_FolderWithoutSkillMdInCanonicalFolder_IsNotLinked()
+        {
+            CommitProjectAuthoredSkill("house-style");
+            var notes = InProject(".agents/skills/notes");
+            Directory.CreateDirectory(notes);
+            File.WriteAllText(Path.Combine(notes, "README.md"), "not a skill");
+
+            Sync("tdd=v1");
+
+            Assert.That(Directory.GetFileSystemEntries(InProject(".claude/skills")).Select(Path.GetFileName),
+                Is.EquivalentTo(new[] { ".gitignore", "house-style", "tdd" }));
+            Assert.That(ManagedLines(".claude/skills"), Is.EqualTo(new[] { "/house-style", "/tdd" }));
+        }
+
+        [Test]
         public void Execute_StrayFilesInCanonicalFolder_AreNotLinked()
         {
             CommitProjectAuthoredSkill("house-style");

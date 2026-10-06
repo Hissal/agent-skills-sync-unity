@@ -12,7 +12,7 @@ namespace Hissal.AgentSkillsSync
     /// Per locked skill and folder: no entry -> Install (canonical) or Link (link folder); a managed canonical copy that
     /// is not current -> Update; a managed link that no longer shows the canonical entry (a broken symlink or junction,
     /// one resolving elsewhere, or a Copy-fallback copy whose content differs) -> Link again, replacing it; an entry
-    /// the tool does not manage -> LeaveForeign. An unmanaged, unlocked folder in the
+    /// the tool does not manage -> LeaveForeign. An unmanaged, unlocked folder with a SKILL.md in the
     /// canonical folder is project-authored -> Link (link folders only). Names managed but neither locked nor
     /// project-authored, wherever the entry still exists: canonical entry gone -> Unlink (the link is dangling);
     /// otherwise -> Remove. Other unlocked, unmanaged entries are never looked at.
@@ -56,12 +56,13 @@ namespace Hissal.AgentSkillsSync
                 }
             }
 
-            // Project-authored skills: folders committed in the canonical folder, neither locked nor installed by the tool.
+            // Project-authored skills: folders with a SKILL.md committed in the canonical folder, neither locked nor
+            // installed by the tool.
             // They stay tracked there; only the links the tool makes for them are managed.
             var locked = new HashSet<string>(lockfile.Skills.Select(s => s.Name), StringComparer.Ordinal);
             var canonicalState = project.For(layout.Canonical);
             var projectAuthored = canonicalState.Entries
-                .Where(name => !locked.Contains(name) && !canonicalState.Manages(name) && !canonicalState.IsFile(name))
+                .Where(name => !locked.Contains(name) && !canonicalState.Manages(name) && canonicalState.IsSkillFolder(name))
                 .OrderBy(name => name, StringComparer.Ordinal)
                 .ToList();
             foreach (var name in projectAuthored)

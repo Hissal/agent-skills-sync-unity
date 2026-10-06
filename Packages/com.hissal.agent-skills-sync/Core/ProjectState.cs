@@ -9,10 +9,11 @@ namespace Hissal.AgentSkillsSync
     {
         /// <param name="installedHashes">Content hash of each managed skill copy in the folder (see <see cref="InstalledHash"/>).</param>
         /// <param name="files">Names in <paramref name="entries"/> that are plain files rather than folders or folder links.</param>
+        /// <param name="withoutSkillFile">Folders in <paramref name="entries"/> with no <c>SKILL.md</c>, which are not skills.</param>
         /// <param name="staleLinks">Managed link-folder entries that no longer show the canonical entry (see <see cref="IsStaleLink"/>).</param>
         public FolderState(SkillsFolder folder, IEnumerable<string> entries, IEnumerable<string> managed,
             IReadOnlyDictionary<string, string> installedHashes = null, IEnumerable<string> files = null,
-            IEnumerable<string> staleLinks = null)
+            IEnumerable<string> staleLinks = null, IEnumerable<string> withoutSkillFile = null)
         {
             Folder = folder;
             Entries = new HashSet<string>(entries ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
@@ -20,11 +21,13 @@ namespace Hissal.AgentSkillsSync
             _installedHashes = installedHashes ?? new Dictionary<string, string>();
             _files = new HashSet<string>(files ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
             _staleLinks = new HashSet<string>(staleLinks ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
+            _withoutSkillFile = new HashSet<string>(withoutSkillFile ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
         }
 
         readonly IReadOnlyDictionary<string, string> _installedHashes;
         readonly HashSet<string> _files;
         readonly HashSet<string> _staleLinks;
+        readonly HashSet<string> _withoutSkillFile;
 
         public SkillsFolder Folder { get; }
 
@@ -46,6 +49,9 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>True when the entry is a plain file (e.g. a README), which can never be a skill.</summary>
         public bool IsFile(string name) => _files.Contains(name);
+
+        /// <summary>True when the entry is a skill: a folder (or folder link) holding a <c>SKILL.md</c>.</summary>
+        public bool IsSkillFolder(string name) => Has(name) && !_files.Contains(name) && !_withoutSkillFile.Contains(name);
 
         /// <summary>
         /// True when the managed link-folder entry no longer shows the canonical entry, so it must be re-linked: a

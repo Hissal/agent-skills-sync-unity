@@ -7,6 +7,8 @@ namespace Hissal.AgentSkillsSync
     /// <summary>Reads the project's skills folders into a <see cref="ProjectState"/> for the planner.</summary>
     public static class ProjectScanner
     {
+        const string SkillFile = "SKILL.md";
+
         public static ProjectState Scan(string projectRoot, FolderLayout layout) =>
             new ProjectState(layout.Folders.Select(folder => ScanFolder(projectRoot, folder, layout.Canonical)));
 
@@ -20,6 +22,10 @@ namespace Hissal.AgentSkillsSync
                 .ToList();
             var names = entries.Select(Path.GetFileName).ToList();
             var files = entries.Where(entry => !Directory.Exists(entry) && !IsLink(entry)).Select(Path.GetFileName).ToList();
+            var withoutSkillFile = entries
+                .Where(entry => !files.Contains(Path.GetFileName(entry)) && !File.Exists(Path.Combine(entry, SkillFile)))
+                .Select(Path.GetFileName)
+                .ToList();
             var managed = ManagedStateFile.Read(path);
 
             // Only canonical copies are compared with the lock; link folders point at them.
@@ -54,7 +60,8 @@ namespace Hissal.AgentSkillsSync
                 }
             }
 
-            return new FolderState(folder, names, managed, installedHashes: hashes, files: files, staleLinks: staleLinks);
+            return new FolderState(folder, names, managed, installedHashes: hashes, files: files, staleLinks: staleLinks,
+                withoutSkillFile: withoutSkillFile);
         }
 
         // A dangling link fails Directory.Exists but is still a link entry, not a plain file.

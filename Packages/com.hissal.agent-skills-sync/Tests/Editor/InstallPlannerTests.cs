@@ -295,5 +295,32 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[] { "Link .claude/skills/house-style -> .agents/skills/house-style" }));
             Assert.That(ManagedIn(plan, Claude), Is.EqualTo(new[] { "house-style" }));
         }
+
+        [Test]
+        public void Plan_FolderWithoutSkillMdInCanonicalFolder_IsNotAProjectAuthoredSkill()
+        {
+            var project = Project(
+                new FolderState(Agents, entries: new[] { "drafts", "house-style" }, managed: null, withoutSkillFile: new[] { "drafts" }),
+                new FolderState(Claude, entries: null, managed: null));
+
+            var plan = InstallPlanner.Plan(Lock(), project, FolderLayout.Default);
+
+            Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[] { "Link .claude/skills/house-style -> .agents/skills/house-style" }));
+            Assert.That(ManagedIn(plan, Claude), Is.EqualTo(new[] { "house-style" }));
+        }
+
+        [Test]
+        public void Plan_ProjectAuthoredSkillLosesItsSkillMd_RemovesItsManagedLink()
+        {
+            var project = Project(
+                new FolderState(Agents, entries: new[] { "house-style" }, managed: null, withoutSkillFile: new[] { "house-style" }),
+                new FolderState(Claude, entries: new[] { "house-style" }, managed: new[] { "house-style" }));
+
+            var plan = InstallPlanner.Plan(Lock(), project, FolderLayout.Default);
+
+            Assert.That(plan.Actions.Select(a => (a.Kind, a.Folder.RelativePath)),
+                Is.EqualTo(new[] { (PlanActionKind.Remove, ".claude/skills") }));
+            Assert.That(ManagedIn(plan, Claude), Is.Empty);
+        }
     }
 }
