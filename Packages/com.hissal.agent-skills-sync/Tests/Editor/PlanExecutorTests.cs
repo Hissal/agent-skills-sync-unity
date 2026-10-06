@@ -228,5 +228,44 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(summary.Skipped, Is.EqualTo(new[] { "kept" }));
             Assert.That(summary.NothingChanged, Is.False);
         }
+    
+        void CommitProjectAuthoredSkill(string name)
+        {
+            var folder = InProject(".agents/skills/" + name);
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(Path.Combine(folder, "SKILL.md"), "# " + name);
+        }
+
+        static IEnumerable<string> ManagedLines(string gitignore) =>
+            File.Exists(gitignore)
+                ? File.ReadAllLines(gitignore).Where(l => l.Length > 0 && !l.StartsWith("#"))
+                : Enumerable.Empty<string>();
+
+        [Test]
+        public void Execute_ProjectAuthoredSkill_LinksItIntoClaudeAsManagedButKeepsItTracked()
+        {
+            CommitProjectAuthoredSkill("house-style");
+
+            ExecuteFreshPlan();
+
+            var link = InProject(".claude/skills/house-style");
+            Assert.That(File.GetAttributes(link).HasFlag(FileAttributes.ReparsePoint), Is.True, "expected a link, not a copy");
+            Assert.That(File.ReadAllText(Path.Combine(link, "SKILL.md")), Is.EqualTo("# house-style"));
+            Assert.That(ManagedLines(InProject(".claude/skills/.gitignore")), Is.EqualTo(new[] { "/house-style", "/tdd" }));
+            Assert.That(ManagedLines(InProject(".agents/skills/.gitignore")), Is.EqualTo(new[] { "/tdd" }));
+        }
+
+        [Test]
+        public void Execute_ProjectAuthoredSkillDeleted_NextSyncRemovesItsLink()
+        {
+            CommitProjectAuthoredSkill("house-style");
+            ExecuteFreshPlan();
+
+            Directory.Delete(InProject(".agents/skills/house-style"), recursive: true);
+            ExecuteFreshPlan();
+
+            Assert.That(ProjectScanner.Scan(_project, FolderLayout.Default).For(FolderLayout.Default.Folders[1]).Has("house-style"), Is.False);
+            Assert.That(ManagedLines(InProject(".claude/skills/.gitignore")), Is.EqualTo(new[] { "/tdd" }));
+        }
     }
 }

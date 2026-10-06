@@ -194,5 +194,81 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(LockedHashCheck.Instance.IsCurrent(skill, OldHash), Is.True);
         }
+    
+        static SkillsFolder Agents => FolderLayout.Default.Canonical;
+        static SkillsFolder Claude => FolderLayout.Default.Folders.Single(f => f.Role == SkillsFolderRole.Link);
+
+        static ProjectState Project(FolderState agents, FolderState claude) => new ProjectState(new[] { agents, claude });
+
+        static IReadOnlyList<string> ManagedIn(InstallPlan plan, SkillsFolder folder) => plan.ManagedNames[folder];
+
+        [Test]
+        public void Plan_ProjectAuthoredSkill_LinksItIntoClaudeAndManagesOnlyTheLink()
+        {
+            var project = Project(
+                new FolderState(Agents, entries: new[] { "house-style" }, managed: null),
+                new FolderState(Claude, entries: null, managed: null));
+
+            var plan = InstallPlanner.Plan(Lock(), project, FolderLayout.Default);
+
+            Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[] { "Link .claude/skills/house-style -> .agents/skills/house-style" }));
+            Assert.That(ManagedIn(plan, Claude), Is.EqualTo(new[] { "house-style" }));
+            Assert.That(ManagedIn(plan, Agents), Is.Empty);
+        }
+
+        [Test]
+        public void Plan_ProjectAuthoredSkillNextToLockedOne_IsOnlyEverLinked()
+        {
+            var project = Project(
+                new FolderState(Agents, entries: new[] { "house-style" }, managed: null),
+                new FolderState(Claude, entries: null, managed: null));
+
+            var plan = InstallPlanner.Plan(Lock("tdd"), project, FolderLayout.Default);
+
+            var forProjectSkill = plan.Actions.Where(a => a.SkillName == "house-style").ToList();
+            Assert.That(forProjectSkill.Select(a => a.Kind), Is.EqualTo(new[] { PlanActionKind.Link }));
+            Assert.That(ManagedIn(plan, Agents), Is.EqualTo(new[] { "tdd" }));
+            Assert.That(ManagedIn(plan, Claude), Is.EqualTo(new[] { "house-style", "tdd" }));
+        }
+
+        [Test]
+        public void Plan_ProjectAuthoredSkillAlreadyLinked_DoesNothingAndKeepsManagingTheLink()
+        {
+            var project = Project(
+                new FolderState(Agents, entries: new[] { "house-style" }, managed: null),
+                new FolderState(Claude, entries: new[] { "house-style" }, managed: new[] { "house-style" }));
+
+            var plan = InstallPlanner.Plan(Lock(), project, FolderLayout.Default);
+
+            Assert.That(plan.Actions, Is.Empty);
+            Assert.That(ManagedIn(plan, Claude), Is.EqualTo(new[] { "house-style" }));
+            Assert.That(ManagedIn(plan, Agents), Is.Empty);
+        }
+
+        [Test]
+        public void Plan_ProjectAuthoredSkillWithForeignClaudeEntry_LeavesTheEntryAlone()
+        {
+            var project = Project(
+                new FolderState(Agents, entries: new[] { "house-style" }, managed: null),
+                new FolderState(Claude, entries: new[] { "house-style" }, managed: null));
+
+            var plan = InstallPlanner.Plan(Lock(), project, FolderLayout.Default);
+
+            Assert.That(plan.Actions, Is.Empty);
+            Assert.That(ManagedIn(plan, Claude), Is.Empty);
+        }
+
+        [Test]
+        public void Plan_ProjectAuthoredSkillDeleted_UnlinksItsManagedLink()
+        {
+            var project = Project(
+                new FolderState(Agents, entries: null, managed: null),
+                new FolderState(Claude, entries: new[] { "house-style" }, managed: new[] { "house-style" }));
+
+            var plan = InstallPlanner.Plan(Lock(), project, FolderLayout.Default);
+
+            Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[] { "Unlink .claude/skills/house-style" }));
+            Assert.That(ManagedIn(plan, Claude), Is.Empty);
+        }
     }
 }

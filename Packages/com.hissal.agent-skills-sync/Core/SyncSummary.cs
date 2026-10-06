@@ -38,6 +38,9 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Names of skills linked into at least one link folder.</summary>
         public IReadOnlyList<string> Linked => NamesOf(PlanActionKind.Link);
 
+        /// <summary>Names of skills whose link was removed from at least one link folder.</summary>
+        public IReadOnlyList<string> Unlinked => NamesOf(PlanActionKind.Unlink);
+
         public bool NothingChanged => !Applied.Any(a => a.ChangesProject);
 
         IReadOnlyList<string> NamesOf(PlanActionKind kind) =>
