@@ -31,8 +31,9 @@ namespace Hissal.AgentSkillsSync
                     if (Directory.Exists(copy)) hashes[name] = SkillFolderHash.Compute(copy);
                 }
 
-            // A managed symlink or junction must show this project's canonical entry; a broken one, or one pointing
-            // anywhere else (e.g. a folder copied from another checkout), is re-linked.
+            // A managed link must show this project's canonical entry. A symlink or junction that is broken or points
+            // anywhere else (e.g. a folder copied from another checkout) is re-linked, and so is a link made by the
+            // Copy fallback, a real folder that does not follow the canonical copy, once its content differs.
             var staleLinks = new List<string>();
             if (folder.Role == SkillsFolderRole.Link)
             {
@@ -40,8 +41,16 @@ namespace Hissal.AgentSkillsSync
                 foreach (var name in managed.Where(names.Contains))
                 {
                     var link = Path.Combine(path, name);
-                    if (DirectoryLink.IsLink(link) && !DirectoryLink.ResolvesTo(link, Path.Combine(canonicalPath, name)))
+                    var canonical = Path.Combine(canonicalPath, name);
+                    if (DirectoryLink.IsLink(link))
+                    {
+                        if (!DirectoryLink.ResolvesTo(link, canonical)) staleLinks.Add(name);
+                    }
+                    else if (Directory.Exists(link) && Directory.Exists(canonical) &&
+                             SkillFolderHash.Compute(link) != SkillFolderHash.Compute(canonical))
+                    {
                         staleLinks.Add(name);
+                    }
                 }
             }
 

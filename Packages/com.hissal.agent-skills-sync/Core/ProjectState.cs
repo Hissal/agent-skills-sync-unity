@@ -9,7 +9,7 @@ namespace Hissal.AgentSkillsSync
     {
         /// <param name="installedHashes">Content hash of each managed skill copy in the folder (see <see cref="InstalledHash"/>).</param>
         /// <param name="files">Names in <paramref name="entries"/> that are plain files rather than folders or folder links.</param>
-        /// <param name="staleLinks">Managed link-folder entries that are symlinks or junctions not resolving to the canonical entry (see <see cref="IsStaleLink"/>).</param>
+        /// <param name="staleLinks">Managed link-folder entries that no longer show the canonical entry (see <see cref="IsStaleLink"/>).</param>
         public FolderState(SkillsFolder folder, IEnumerable<string> entries, IEnumerable<string> managed,
             IReadOnlyDictionary<string, string> installedHashes = null, IEnumerable<string> files = null,
             IEnumerable<string> staleLinks = null)
@@ -48,8 +48,9 @@ namespace Hissal.AgentSkillsSync
         public bool IsFile(string name) => _files.Contains(name);
 
         /// <summary>
-        /// True when the managed link-folder entry is a symlink or junction that is broken or resolves somewhere other
-        /// than this project's canonical entry, so it must be re-linked.
+        /// True when the managed link-folder entry no longer shows the canonical entry, so it must be re-linked: a
+        /// symlink or junction that is broken or resolves somewhere else, or a copy made by the Copy fallback whose
+        /// content differs from the canonical folder's.
         /// </summary>
         public bool IsStaleLink(string name) => _staleLinks.Contains(name);
     }

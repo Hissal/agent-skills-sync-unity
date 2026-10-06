@@ -301,6 +301,38 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void ProjectAuthoredSkillEdited_OverCopy_NextSyncRecopiesTheLink()
+        {
+            var authored = InProject(".agents/skills/house-style");
+            Paths.CopyDirectory(Fetched, authored);
+            var noLock = new Lockfile(new LockedSkill[0]);
+            SyncSummary SyncAuthored() => new PlanExecutor(ForceCopy()).Execute(_project,
+                InstallPlanner.Plan(noLock, ProjectScanner.Scan(_project, FolderLayout.Default), FolderLayout.Default),
+                new Dictionary<string, string>());
+            SyncAuthored();
+
+            File.WriteAllText(Path.Combine(authored, "SKILL.md"), "edited by a maintainer");
+            var summary = SyncAuthored();
+
+            Assert.That(summary.NothingChanged, Is.False);
+            Assert.That(File.ReadAllText(InProject(".claude/skills/house-style/SKILL.md")), Is.EqualTo("edited by a maintainer"));
+            Assert.That(SyncAuthored().NothingChanged, Is.True);
+        }
+
+        [Test]
+        public void LockedSkill_CopiedLinkDiffersFromCanonical_NextSyncRecopiesTheLink()
+        {
+            Sync(ForceCopy());
+            File.WriteAllText(Path.Combine(Link, "SKILL.md"), "stale");
+
+            var summary = Sync(ForceCopy());
+
+            Assert.That(summary.NothingChanged, Is.False);
+            Assert.That(File.ReadAllText(Path.Combine(Link, "SKILL.md")), Is.EqualTo(FetchedSkillMd));
+            Assert.That(Sync(ForceCopy()).NothingChanged, Is.True);
+        }
+
+        [Test]
         public void Update_OverJunction_KeepsTheJunctionShowingTheNewCopy()
         {
             RequireWindows();
