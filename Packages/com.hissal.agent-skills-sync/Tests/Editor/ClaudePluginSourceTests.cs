@@ -17,6 +17,7 @@ namespace Hissal.AgentSkillsSync.Tests
         string _project;
         Dictionary<string, string> _variables;
         readonly List<string> _records = new List<string>();
+        readonly List<string> _marketplaces = new List<string>();
 
         [SetUp]
         public void SetUp()
@@ -28,6 +29,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Directory.CreateDirectory(_project);
             _variables = new Dictionary<string, string>();
             _records.Clear();
+            _marketplaces.Clear();
         }
 
         [TearDown]
@@ -159,6 +161,78 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(FoundIn(state, "tdd"), Is.EqualTo(new[] { "plugin on@market" }));
             Assert.That(state.Has(Claude, "grill"), Is.False);
+        }
+
+        /// <summary>
+        /// Records the marketplace in <c>known_marketplaces.json</c> with the given source and install location, and
+        /// writes its <c>marketplace.json</c> (plugin entries as JSON objects) at <paramref name="marketplaceFile"/>.
+        /// </summary>
+        void Marketplace(string name, string source, string installLocation, string marketplaceFile, params string[] entries)
+        {
+            _marketplaces.Add($"\"{name}\": {{ \"source\": {source}, \"installLocation\": \"{Json(installLocation)}\" }}");
+            Directory.CreateDirectory(PluginsRoot);
+            File.WriteAllText(Path.Combine(PluginsRoot, "known_marketplaces.json"), "{ " + string.Join(", ", _marketplaces) + " }");
+            Directory.CreateDirectory(Path.GetDirectoryName(marketplaceFile));
+            File.WriteAllText(marketplaceFile,
+                $"{{ \"name\": \"{name}\", \"owner\": {{ \"name\": \"me\" }}, \"plugins\": [ {string.Join(", ", entries)} ] }}");
+        }
+
+        /// <summary>A GitHub marketplace cloned to <c>marketplaces/&lt;name&gt;</c>, its file at the default path.</summary>
+        void GitHubMarketplace(string name, params string[] entries)
+        {
+            var clone = Path.Combine(PluginsRoot, "marketplaces", name);
+            Marketplace(name, "{ \"source\": \"github\", \"repo\": \"owner/" + name + "\" }", clone,
+                Path.Combine(clone, ".claude-plugin", "marketplace.json"), entries);
+        }
+
+        static string Entry(string name, string fields = "") =>
+            "{ \"name\": \"" + name + "\", \"source\": \"./plugins/" + name + "\"" + (fields.Length > 0 ? ", " + fields : "") + " }";
+
+        [Test]
+        public void Scan_MarketplaceEntryDefaultEnabled_OverridesTheManifest()
+        {
+            Install("on@market", "alpha");
+            InstallAt("off@market", "user", null, new[] { "beta" }, "{ \"name\": \"off\", \"defaultEnabled\": false }");
+            Install("plain@market", "gamma");
+            GitHubMarketplace("market",
+                Entry("on", "\"defaultEnabled\": false"),
+                Entry("off", "\"defaultEnabled\": true"),
+                Entry("plain"));
+
+            var state = Scan();
+
+            Assert.That(state.Has(Claude, "alpha"), Is.False);
+            Assert.That(state.Has(Claude, "beta"), Is.True);
+            Assert.That(state.Has(Claude, "gamma"), Is.True);
+        }
+
+        [Test]
+        public void Scan_MarketplaceEntryDefault_StillYieldsToSettings()
+        {
+            Install("on@market", "alpha");
+            GitHubMarketplace("market", Entry("on", "\"defaultEnabled\": false"));
+            UserSettings(Enabled("on@market", true));
+
+            Assert.That(Scan().Has(Claude, "alpha"), Is.True);
+        }
+
+        [Test]
+        public void Scan_MarketplaceFile_IsFoundForEachLocalSourceType()
+        {
+            Install("a@custom-path", "alpha");
+            Install("b@folder", "beta");
+            Install("c@file", "gamma");
+            var clone = Path.Combine(PluginsRoot, "marketplaces", "custom-path");
+            Marketplace("custom-path", "{ \"source\": \"git\", \"url\": \"https://example.com/m.git\", \"path\": \"meta/market.json\" }",
+                clone, Path.Combine(clone, "meta", "market.json"), Entry("a", "\"defaultEnabled\": false"));
+            var folder = Path.Combine(_root, "folder-market");
+            Marketplace("folder", "{ \"source\": \"directory\", \"path\": \"" + Json(folder) + "\" }",
+                folder, Path.Combine(folder, ".claude-plugin", "marketplace.json"), Entry("b", "\"defaultEnabled\": false"));
+            var file = Path.Combine(_root, "file-market", ".claude-plugin", "marketplace.json");
+            Marketplace("file", "{ \"source\": \"file\", \"path\": \"" + Json(file) + "\" }",
+                file, file, Entry("c", "\"defaultEnabled\": false"));
+
+            Assert.That(Scan().Copies, Is.Empty);
         }
 
         [Test]

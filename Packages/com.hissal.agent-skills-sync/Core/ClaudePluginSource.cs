@@ -17,7 +17,8 @@ namespace Hissal.AgentSkillsSync
     /// versions left in the cache are ignored. A plugin counts when one of its install records applies (user or managed
     /// scope, or project/local scope for this project) and it is enabled: the first <c>enabledPlugins</c> entry naming it
     /// in the project's <c>.claude/settings.local.json</c>, <c>.claude/settings.json</c>, then the user's
-    /// <c>settings.json</c>, else the manifest's <c>defaultEnabled</c> (default true). A plugin whose manifest is present but
+    /// <c>settings.json</c>, else the marketplace entry's <c>defaultEnabled</c> when its <c>marketplace.json</c> is on disk, else
+    /// the manifest's (default true). A plugin whose manifest is present but
     /// unreadable or invalid JSON is skipped (Claude Code fails to load it); other unreadable files count as empty.
     /// </remarks>
     public sealed class ClaudePluginSource : IUserScopeSource
@@ -60,13 +61,14 @@ namespace Hissal.AgentSkillsSync
             }
             settings.Add(EnabledPlugins(Path.Combine(configDir, "settings.json")));
 
+            var marketplaces = new Marketplaces(pluginsRoot);
             var copies = new List<UserScopeCopy>();
             foreach (var plugin in installed)
             {
                 var installPath = InstallPath(plugin.Value);
                 if (installPath == null || !Directory.Exists(installPath)) continue;
                 if (!TryReadManifest(installPath, out var manifest)) continue;
-                if (!IsEnabled(plugin.Key, settings, manifest)) continue;
+                if (!IsEnabled(plugin.Key, settings, marketplaces.Entry(plugin.Key), manifest)) continue;
 
                 var name = Member(manifest, "name") as string ?? plugin.Key.Split('@')[0];
                 foreach (var skill in SkillFolders(installPath, manifest))
@@ -95,12 +97,84 @@ namespace Hissal.AgentSkillsSync
             _projectRoot != null && Member(record, "projectPath") is string path && path.Length > 0 &&
             PathComparer.Equals(Normalize(path), _projectRoot);
 
-        static bool IsEnabled(string id, IEnumerable<List<KeyValuePair<string, object>>> settings, List<KeyValuePair<string, object>> manifest)
+        static bool IsEnabled(string id, IEnumerable<List<KeyValuePair<string, object>>> settings,
+            List<KeyValuePair<string, object>> entry, List<KeyValuePair<string, object>> manifest)
         {
             foreach (var enabledPlugins in settings)
                 if (Member(enabledPlugins, id) is bool enabled)
                     return enabled;
+            if (Member(entry, "defaultEnabled") is bool entryDefault) return entryDefault;
             return !(Member(manifest, "defaultEnabled") is bool byDefault) || byDefault;
+        }
+
+        /// <summary>
+        /// The marketplaces' plugin entries, read from each marketplace's <c>marketplace.json</c> on disk. Found through
+        /// <c>known_marketplaces.json</c> for the source types whose file location is documented: <c>github</c> and
+        /// <c>git</c> (the clone at <c>installLocation</c>, file at the source's <c>path</c>, default
+        /// <c>.claude-plugin/marketplace.json</c>), <c>directory</c> (<c>installLocation</c> is the root) and <c>file</c>
+        /// (<c>installLocation</c> is the file). Other sources (<c>url</c>, claude.ai) give no entry.
+        /// </summary>
+        sealed class Marketplaces
+        {
+            const string DefaultFile = ".claude-plugin/marketplace.json";
+
+            readonly List<KeyValuePair<string, object>> _known;
+            readonly Dictionary<string, List<object>> _plugins = new Dictionary<string, List<object>>();
+
+            public Marketplaces(string pluginsRoot) =>
+                _known = ReadObject(Path.Combine(pluginsRoot, "known_marketplaces.json"));
+
+            /// <summary>The entry for plugin id <c>name@marketplace</c>, or null when it can't be found.</summary>
+            public List<KeyValuePair<string, object>> Entry(string id)
+            {
+                var at = id.LastIndexOf('@');
+                if (at <= 0) return null;
+                var name = id.Substring(0, at);
+                return Plugins(id.Substring(at + 1))
+                    .OfType<List<KeyValuePair<string, object>>>()
+                    .FirstOrDefault(entry => Member(entry, "name") as string == name);
+            }
+
+            List<object> Plugins(string marketplace)
+            {
+                if (!_plugins.TryGetValue(marketplace, out var plugins))
+                {
+                    try
+                    {
+                        var file = MarketplaceFile(Member(_known, marketplace) as List<KeyValuePair<string, object>>);
+                        plugins = file == null ? null : Member(ReadObject(file), "plugins") as List<object>;
+                    }
+                    catch (Exception e) when (e is ArgumentException || e is NotSupportedException)
+                    {
+                        plugins = null; // a malformed path in known_marketplaces.json
+                    }
+                    plugins = plugins ?? new List<object>();
+                    _plugins[marketplace] = plugins;
+                }
+                return plugins;
+            }
+
+            static string MarketplaceFile(List<KeyValuePair<string, object>> known)
+            {
+                if (!(Member(known, "installLocation") is string location) || location.Length == 0) return null;
+                var source = Member(known, "source") as List<KeyValuePair<string, object>>;
+                switch (Member(source, "source") as string)
+                {
+                    case "github":
+                    case "git":
+                        var path = Member(source, "path") as string;
+                        return Combine(location, string.IsNullOrEmpty(path) ? DefaultFile : path);
+                    case "directory":
+                        return Combine(location, DefaultFile);
+                    case "file":
+                        return location;
+                    default:
+                        return null;
+                }
+            }
+
+            static string Combine(string root, string relative) =>
+                Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
         }
 
         /// <summary>
