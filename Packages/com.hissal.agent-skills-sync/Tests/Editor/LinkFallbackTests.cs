@@ -189,6 +189,77 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(ManagedLines(".claude/skills"), Is.EqualTo(new[] { "/tdd" }));
         }
 
+        /// <summary>Points the managed .claude/skills/tdd link at a copy of the `nested` fixture outside the project.</summary>
+        string RepointLinkElsewhere(ILinkCreator linker)
+        {
+            var elsewhere = Path.Combine(_root, "elsewhere", "tdd");
+            Paths.CopyDirectory(Path.Combine(FixturesRoot, "nested"), elsewhere);
+            DirectoryLink.Remove(Link);
+            linker.CreateDirectoryLink(Link, elsewhere);
+            return elsewhere;
+        }
+
+        void AssertLinkShowsTheCanonicalCopy()
+        {
+            File.WriteAllText(Path.Combine(Canonical, "SKILL.md"), "# edited");
+            Assert.That(File.ReadAllText(Path.Combine(Link, "SKILL.md")), Is.EqualTo("# edited"));
+        }
+
+        [Test]
+        public void Rerun_JunctionPointsAtAnotherFolder_RelinksItToTheCanonicalCopy()
+        {
+            RequireWindows();
+            Sync(ForceJunction());
+            var elsewhere = RepointLinkElsewhere(new JunctionCreator());
+
+            var plan = PlanNow(FakeGitHub.MinimalHash);
+            Sync(ForceJunction());
+
+            Assert.That(plan.Actions.Select(a => (a.Kind, a.SkillName, a.Folder.RelativePath)),
+                Is.EqualTo(new[] { (PlanActionKind.Link, "tdd", ".claude/skills") }));
+            Assert.That(Sync(ForceJunction()).NothingChanged, Is.True, "a re-linked junction is current");
+            Assert.That(SkillFolderHash.Compute(elsewhere), Is.EqualTo(FakeGitHub.NestedHash), "the other folder is left alone");
+            AssertLinkShowsTheCanonicalCopy();
+        }
+
+        [Test]
+        public void Rerun_SymlinkPointsAtAnotherFolder_RelinksItToTheCanonicalCopy()
+        {
+            try { Sync(new SymlinkCreator()); }
+            catch (IOException e) { Assert.Ignore("This machine cannot create symlinks: " + e.Message); }
+            RepointLinkElsewhere(new SymlinkCreator());
+
+            var plan = PlanNow(FakeGitHub.MinimalHash);
+            Sync(new SymlinkCreator());
+
+            Assert.That(plan.Actions.Select(a => (a.Kind, a.SkillName)), Is.EqualTo(new[] { (PlanActionKind.Link, "tdd") }));
+            AssertLinkShowsTheCanonicalCopy();
+        }
+
+        [Test]
+        public void Rerun_LinkIsBroken_RelinksIt()
+        {
+            RequireWindows();
+            Sync(ForceJunction());
+            var elsewhere = RepointLinkElsewhere(new JunctionCreator());
+            Directory.Delete(elsewhere, recursive: true);
+
+            var plan = PlanNow(FakeGitHub.MinimalHash);
+            Sync(ForceJunction());
+
+            Assert.That(plan.Actions.Select(a => (a.Kind, a.SkillName)), Is.EqualTo(new[] { (PlanActionKind.Link, "tdd") }));
+            AssertLinkShowsTheCanonicalCopy();
+        }
+
+        [Test]
+        public void Rerun_OverSymlink_IsNoOp()
+        {
+            try { Sync(new SymlinkCreator()); }
+            catch (IOException e) { Assert.Ignore("This machine cannot create symlinks: " + e.Message); }
+
+            Assert.That(Sync(new SymlinkCreator()).NothingChanged, Is.True);
+        }
+
         [Test]
         public void Update_OverCopy_RefreshesTheCopiedLink()
         {

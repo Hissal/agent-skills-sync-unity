@@ -10,7 +10,8 @@ namespace Hissal.AgentSkillsSync
     /// </summary>
     /// <remarks>
     /// Per locked skill and folder: no entry -> Install (canonical) or Link (link folder); a managed canonical copy that
-    /// is not current -> Update; an entry the tool does not manage -> LeaveForeign. Names managed but no longer locked
+    /// is not current -> Update; a managed link that is broken or resolves anywhere but the canonical entry -> Link
+    /// again, replacing it; an entry the tool does not manage -> LeaveForeign. Names managed but no longer locked
     /// -> Remove wherever the entry still exists. Entries that are neither locked nor managed are never looked at.
     /// </remarks>
     public static class InstallPlanner
@@ -40,6 +41,8 @@ namespace Hissal.AgentSkillsSync
                     {
                         if (canonical && !check.IsCurrent(skill, state.InstalledHash(skill.Name)))
                             actions.Add(PlanAction.Update(skill, folder));
+                        else if (!canonical && state.IsStaleLink(skill.Name))
+                            actions.Add(PlanAction.Link(skill.Name, folder, layout.Canonical));
                         managed[folder].Add(skill.Name);
                     }
                     else

@@ -47,6 +47,8 @@ namespace Hissal.AgentSkillsSync
                         break;
                     case PlanActionKind.Link:
                         Directory.CreateDirectory(folder);
+                        // The planner links over an existing entry only to replace a stale managed link.
+                        DirectoryLink.Remove(entry);
                         var target = Path.Combine(Paths.InProject(projectRoot, action.LinkTarget.RelativePath), action.SkillName);
                         linkMethods[action] = _linker.CreateDirectoryLink(entry, target);
                         break;
