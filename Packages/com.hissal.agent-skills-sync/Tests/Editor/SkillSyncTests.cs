@@ -232,6 +232,24 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Run_CheckedLockfile_LockChangedOnDiskAfterTheCheck_RunsTheCheckedLock()
+        {
+            var checkedLock = Lockfile.Load(_project);
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), @"{
+  ""version"": 1,
+  ""skills"": {
+    ""unconfirmed"": { ""source"": ""stranger/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/unconfirmed/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" }
+  }
+}");
+
+            var summary = new SkillSync(_project, _fetcher).Run(checkedLock);
+
+            Assert.That(summary.Installed, Is.EquivalentTo(new[] { "tdd", "code-review" }));
+            Assert.That(_fetcher.Fetched, Has.No.Member("unconfirmed"));
+            Assert.That(Directory.Exists(Path.Combine(_project, ".agents/skills/unconfirmed")), Is.False);
+        }
+
+        [Test]
         public void Run_AfterAPull_UpdatesAndRemoves()
         {
             new SkillSync(_project, _fetcher).Run();

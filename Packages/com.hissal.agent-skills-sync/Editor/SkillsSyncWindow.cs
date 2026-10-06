@@ -198,7 +198,8 @@ namespace Hissal.AgentSkillsSync.Editor
                 }
 
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
-                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher()).Run();
+                // Run the very instance that passed the check, never a fresh read of the file.
+                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher()).Run(lockfile);
                 ShowSummary(Describe(summary), HelpBoxMessageType.Info);
             }
             catch (SyncAbortedException e)
