@@ -1,0 +1,84 @@
+# Claude Code plugins: where installed plugins and their skills live
+
+Written for [#12](https://github.com/Hissal/agent-skills-sync-unity/issues/12) on 2026-10-06. Sources: the Claude Code docs ([plugin loading](https://code.claude.com/docs/en/plugins/loading), [manifest reference](https://code.claude.com/docs/en/plugins-reference), [install and scopes](https://code.claude.com/docs/en/plugins/install), [env vars](https://code.claude.com/docs/en/env-vars)), and the `~/.claude/plugins` folder on a Windows machine with seven marketplace plugins installed (observed read-only). The code that follows these rules is `ClaudePluginSource` in `Packages/com.hissal.agent-skills-sync/Core/ClaudePluginSource.cs`.
+
+## 1. The plugins root
+
+Everything below sits under one **plugins root**:
+
+1. `$CLAUDE_CODE_PLUGIN_CACHE_DIR` when it is set. Despite the name, it moves the whole root, not just `cache/`.
+2. Otherwise `$CLAUDE_CONFIG_DIR/plugins`. `CLAUDE_CONFIG_DIR` moves all of `~/.claude`, settings and plugins included.
+3. Otherwise `~/.claude/plugins`.
+
+| Path under the root | What it holds |
+| :- | :- |
+| `installed_plugins.json` | The install records: which plugins are installed, at which scope, and where. |
+| `cache/<marketplace>/<plugin>/<version>/` | One folder per installed version of a marketplace plugin. `<plugin>` is the marketplace entry name. |
+| `known_marketplaces.json`, `marketplaces/<name>/` | The marketplaces added and their clones. Not needed to find skills. |
+| `data/<id>/` | Each plugin's persistent data (`${CLAUDE_PLUGIN_DATA}`). Holds no skills. |
+| `synced/` | Plugins synced from a claude.ai account (`<name>@synced`). Not covered, see §5. |
+| `.trash/` | Synced plugins that were turned off. |
+
+**Read the install records, not the cache.** After an update or uninstall, the old version folder stays in `cache/` with an `.orphaned_at` marker and is deleted 14 days later. On the observed machine, `cache/claude-plugins-official/superpowers/` held `6.3.0` and `6.4.1`, while `installed_plugins.json` recorded only `6.4.1`. Plugins that are in use get an `.in_use` marker.
+
+## 2. `installed_plugins.json`
+
+Observed format (`"version": 2`). It maps each plugin id (`<name>@<marketplace>`) to an **array** of install records:
+
+```json
+{
+  "version": 2,
+  "plugins": {
+    "unity@unity-agent-plugin": [
+      {
+        "scope": "user",
+        "installPath": "C:\\Users\\me\\.claude\\plugins\\cache\\unity-agent-plugin\\unity\\0.1.6-beta",
+        "version": "0.1.6-beta",
+        "installedAt": "2026-09-02T10:50:02.471Z",
+        "lastUpdated": "2026-09-18T18:21:15.704Z",
+        "gitCommitSha": "ba48956ae8bee4ef8a3ef3d75dec03c16aa5cc89"
+      }
+    ]
+  }
+}
+```
+
+- `installPath` is absolute and points at the version folder (`${CLAUDE_PLUGIN_ROOT}`). For a plugin loaded in place from a local marketplace, it points at the source folder instead.
+- `scope` is `user`, `project`, `local` or `managed`. The docs only say that each record carries `scope`, `installPath` and `version`. Project and local installs belong to one repository, so the tool expects a `projectPath` on them. Every observed record was `user` scope, so that field is **unverified**. The tool counts a project or local record only when its `projectPath` is this project.
+- The tool also accepts a single object in place of the array, in case an older format used one. A missing or unreadable file means no plugins.
+
+## 3. Whether an installed plugin is enabled
+
+Installed is not the same as loaded. `enabledPlugins` in the settings files maps an id to `true` or `false`. For each id, the highest-precedence source that mentions it wins:
+
+| Source (low → high) | File |
+| :- | :- |
+| `--add-dir` | `.claude/settings*.json` of an added directory (session only, `true` only) |
+| user | `~/.claude/settings.json` (`$CLAUDE_CONFIG_DIR/settings.json`) |
+| project | `<project>/.claude/settings.json` (committed) |
+| local | `<project>/.claude/settings.local.json` |
+| flag | `--settings` at launch |
+| managed | managed settings (`true` forces, `false` blocks) |
+
+When no source mentions the id, the manifest's `defaultEnabled` applies (default `true`). On the observed machine, four of the seven installed plugins were set to `false` in user settings, so they hold skills on disk that Claude Code does not load.
+
+**The tool's rule:** it reads local, then project, then user settings, and falls back to `defaultEnabled`. The session-only sources (`--add-dir`, `--settings`, `--plugin-dir`) and managed settings are not read. A project skill can never see them, and managed paths are per OS.
+
+## 4. Where a plugin's skills are
+
+The plugin root is the `installPath`. The manifest is `.claude-plugin/plugin.json`, and it is optional.
+
+- **Default:** `skills/<name>/SKILL.md`, one folder per skill. All seven observed plugins use it.
+- **Manifest `skills`:** a path or an array of paths, each starting with `./`, such as `"./extra-skills/"`, or `"."` for the root. Each path is either a folder of `<name>/SKILL.md` folders or one folder holding `SKILL.md` directly. The listed paths **add to** `skills/`; they do not replace it. Observed example: `andrej-karpathy-skills` sets `"skills": ["./skills/karpathy-guidelines"]`. A path that resolves outside the plugin root is rejected.
+- **A root `SKILL.md`, with no `skills/` folder and no `skills` key:** the plugin loads as a single skill. The tool does not handle this case.
+- **Marketplace entry `skills`:** a marketplace entry can add skills to a plugin (non-strict entries), or limit which ones load for a plugin whose source is the marketplace root. The tool does not read marketplace entries. None of the observed marketplaces did this.
+
+**Namespacing.** Plugin skills appear as `/<manifest name>:<skill folder>`, for example `/unity:ui`. Without a manifest, the name comes from the marketplace entry. The namespace uses the manifest `name`, while the id in `enabledPlugins` uses the marketplace entry name, and the two can differ. The namespaced skill loads **beside** a same-named skill in `~/.claude/skills` or the project's `.claude/skills`; it does not shadow them. So `unity:ui` and a project `ui` both load, and Claude sees the same skill twice. That is why the tool counts a plugin skill as a user-scope duplicate of the project skill with the same folder name, for `.claude/skills` only.
+
+## 5. Not covered
+
+- **Synced plugins** (`<name>@synced`, under `synced/<account bucket>/<name>~<suffix>/`). They come from a claude.ai account and have no install record. The folder layout is undocumented.
+- **Skills-directory plugins:** a plugin folder with `.claude-plugin/plugin.json` saved under `~/.claude/skills/` or `.claude/skills/` (`<name>@skills-dir`).
+- **Session-only plugins:** `--plugin-dir`, `--plugin-url` and `CLAUDE_CODE_PLUGIN_DIRS` (`@inline`).
+- **Seed directories** (`CLAUDE_CODE_PLUGIN_SEED_DIR`): read-only, pre-populated plugin roots for containers.
+- **Plugins read by other agents.** Amp also reads `~/.claude/plugins/cache/`. The tool reports plugin skills only for `.claude/skills`, in line with how the folder table leaves cross-reads out.

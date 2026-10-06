@@ -103,7 +103,7 @@ Other agents that also read `.claude/skills` (project and/or user): Cursor, Open
 
 ### What this means for per-machine folder selection
 
-- **Claude side**: one user location to check, `$CLAUDE_CONFIG_DIR/skills` (default `~/.claude/skills`), plus installed plugins.
+- **Claude side**: one user location to check, `$CLAUDE_CONFIG_DIR/skills` (default `~/.claude/skills`), plus installed plugins (see [claude-code-plugins.md](claude-code-plugins.md)).
 - **`.agents` side**: no single answer. `~/.agents/skills` is read by Codex, Copilot, Gemini CLI, OpenCode, Amp, Cline, Kilo, Droid, Deep Agents, Firebender, Kimi, Warp, Zed and Cursor, but not by Antigravity. Agent-specific homes also count for their own agent: `~/.codex/skills` (Codex, Cursor, Warp, Firebender), `~/.config/agents/skills` (Amp, CLI `-g`), `~/.copilot/skills`, `~/.gemini/skills`, and others. The env overrides to honour are `CODEX_HOME` (only for `~/.codex/skills`), `GEMINI_CLI_HOME` (which also moves `~/.agents`), `COPILOT_HOME`, `XDG_CONFIG_HOME` and `CLAUDE_CONFIG_DIR`.
 - Several `.agents` agents also read `~/.claude/skills` (Cursor, OpenCode, Copilot in VS Code, Amp, Kilo, Warp, Firebender, Deep Agents). A Claude user-scope copy can therefore also cover them.
 
