@@ -9,10 +9,14 @@ namespace Hissal.AgentSkillsSync
     {
         const string SkillFile = "SKILL.md";
 
-        public static ProjectState Scan(string projectRoot, FolderLayout layout) =>
-            new ProjectState(layout.Folders.Select(folder => ScanFolder(projectRoot, folder, layout.Canonical)));
+        /// <param name="readContents">
+        /// False for a quick scan that reads names and links only: no installed hashes and no check of copied links'
+        /// content, so the planner can't see outdated copies (see <see cref="SyncStatus.Read"/>).
+        /// </param>
+        public static ProjectState Scan(string projectRoot, FolderLayout layout, bool readContents = true) =>
+            new ProjectState(layout.Folders.Select(folder => ScanFolder(projectRoot, folder, layout.Canonical, readContents)));
 
-        static FolderState ScanFolder(string projectRoot, SkillsFolder folder, SkillsFolder canonicalFolder)
+        static FolderState ScanFolder(string projectRoot, SkillsFolder folder, SkillsFolder canonicalFolder, bool readContents)
         {
             var path = Paths.InProject(projectRoot, folder.RelativePath);
             if (!Directory.Exists(path)) return new FolderState(folder, null, null);
@@ -30,7 +34,7 @@ namespace Hissal.AgentSkillsSync
 
             // Only canonical copies are compared with the lock; link folders point at them.
             var hashes = new Dictionary<string, string>();
-            if (folder.Role == SkillsFolderRole.Canonical)
+            if (readContents && folder.Role == SkillsFolderRole.Canonical)
                 foreach (var name in managed.Where(names.Contains))
                 {
                     var copy = Path.Combine(path, name);
@@ -52,7 +56,7 @@ namespace Hissal.AgentSkillsSync
                     {
                         if (!DirectoryLink.ResolvesTo(link, canonical)) staleLinks.Add(name);
                     }
-                    else if (Directory.Exists(link) && Directory.Exists(canonical) &&
+                    else if (readContents && Directory.Exists(link) && Directory.Exists(canonical) &&
                              SkillFolderHash.Compute(link) != SkillFolderHash.Compute(canonical))
                     {
                         staleLinks.Add(name);

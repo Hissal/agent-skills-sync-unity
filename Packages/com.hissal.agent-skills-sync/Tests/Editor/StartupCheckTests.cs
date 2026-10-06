@@ -124,6 +124,33 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Read_DoesNotReadInstalledSkillContents()
+        {
+            if (Path.DirectorySeparatorChar != '\\') Assert.Ignore("Exclusive file locks are enforced only on Windows.");
+            InstallAll();
+            RecordSynced();
+            Unlink(".claude/skills/tdd");
+
+            // Hashing would have to read this file; the startup check must only look at names and the lock.
+            using (new FileStream(Path.Combine(_project, ".agents/skills/code-review/SKILL.md"), FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                Assert.That(SyncStatus.Read(_project).MissingSkills, Is.EqualTo(new[] { "tdd" }));
+            }
+        }
+
+        [Test]
+        public void Read_InstalledCopyEditedLocally_IsNotCountedAsMissing()
+        {
+            InstallAll();
+            RecordSynced();
+
+            File.WriteAllText(Path.Combine(_project, ".agents/skills/tdd/SKILL.md"), "# edited");
+
+            Assert.That(SyncStatus.Read(_project).MissingSkills, Is.Empty);
+            Assert.That(ShouldNotify(), Is.False);
+        }
+
+        [Test]
         public void ShouldNotify_DeclinedAndNothingChanged_IsQuiet()
         {
             InstallAll();

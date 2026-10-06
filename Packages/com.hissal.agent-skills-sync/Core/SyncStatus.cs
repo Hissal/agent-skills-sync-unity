@@ -6,7 +6,8 @@ namespace Hissal.AgentSkillsSync
 {
     /// <summary>
     /// What the startup check needs to know about a project: the lockfile's hash and which skills a
-    /// sync would still change (install, update, link, remove or unlink). Read without fetching anything.
+    /// sync would still change (install, link, remove or unlink). Read without fetching anything, and cheap enough
+    /// for every editor start: it looks at names, links and the lockfile only, never at skill contents.
     /// </summary>
     public sealed class SyncStatus
     {
@@ -20,8 +21,10 @@ namespace Hissal.AgentSkillsSync
         public string LockHash { get; }
 
         /// <summary>
-        /// Sorted names of skills a sync would change: locked skills missing or out of date in at least one skills
-        /// folder, and managed skills it would remove or unlink. Entries left alone as foreign do not count.
+        /// Sorted names of skills a sync would change: locked skills missing in at least one skills folder (or behind
+        /// a broken link), and managed skills it would remove or unlink. Entries left alone as foreign do not count.
+        /// An installed copy is not hashed, so an outdated one is not listed: a lock change surfaces through
+        /// <see cref="LockHash"/> instead.
         /// </summary>
         public IReadOnlyList<string> MissingSkills { get; }
 
@@ -41,7 +44,8 @@ namespace Hissal.AgentSkillsSync
             IEnumerable<string> missing;
             try
             {
-                var plan = InstallPlanner.Plan(Lockfile.Load(projectRoot), ProjectScanner.Scan(projectRoot, layout), layout);
+                var project = ProjectScanner.Scan(projectRoot, layout, readContents: false);
+                var plan = InstallPlanner.Plan(Lockfile.Load(projectRoot), project, layout, PresentCopyIsCurrent.Instance);
                 // A left-alone (foreign) entry is never synced, so it does not count as out of sync.
                 missing = plan.Actions.Where(a => a.ChangesProject).Select(a => a.SkillName);
             }
@@ -50,6 +54,14 @@ namespace Hissal.AgentSkillsSync
                 missing = null;
             }
             return new SyncStatus(lockHash, missing);
+        }
+
+        /// <summary>The quick scan has no hashes: any installed copy counts as current.</summary>
+        sealed class PresentCopyIsCurrent : IInstalledCopyCheck
+        {
+            public static readonly PresentCopyIsCurrent Instance = new PresentCopyIsCurrent();
+
+            public bool IsCurrent(LockedSkill skill, string installedHash) => true;
         }
     }
 }
