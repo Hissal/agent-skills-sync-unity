@@ -130,7 +130,7 @@ namespace Hissal.AgentSkillsSync.Editor
                     mode: _installMode);
                 var plan = sync.Plan(lockfile);
                 var differs = _installMode == InstallMode.Latest
-                    ? new HashSet<string>(sync.InstalledDiffersFromLock())
+                    ? new HashSet<string>(sync.InstalledDiffersFromLock(lockfile))
                     : new HashSet<string>();
                 var newSources = SourceConsent.NewSources(lockfile, LocalPrefs.Load(ProjectRoot));
                 var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
@@ -441,12 +441,20 @@ namespace Hissal.AgentSkillsSync.Editor
                     return;
                 }
 
+                // The consent note described the mode the window listed; a mode changed since (a pull) needs a fresh look.
+                var mode = ProjectSyncSettings.Load(ProjectRoot).InstallMode;
+                if (mode != _installMode)
+                {
+                    ShowSummary($"The install mode changed to {mode} since the window listed the skills. Review it and sync again.", HelpBoxMessageType.Warning);
+                    Refresh();
+                    return;
+                }
+
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
                 selected = SelectedFolders();
                 userScope = ScanUserScope(selected);
                 skips = Skips();
                 // Run the very instance that passed the check, never a fresh read of the file.
-                var mode = ProjectSyncSettings.Load(ProjectRoot).InstallMode;
                 summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher(mode: mode), selected: selected, userScope: userScope,
                     skips: skips, mode: mode).Run(lockfile);
                 ShowSummary(Describe(summary), summary.UserScopeDiffers.Count > 0 ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info);
