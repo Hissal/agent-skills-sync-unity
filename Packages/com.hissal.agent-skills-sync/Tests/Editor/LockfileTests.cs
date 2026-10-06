@@ -80,5 +80,40 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(error.Message, Does.Contain("not valid JSON"));
         }
+
+        static string LockWithSkillNamed(string jsonEscapedName) =>
+            @"{ ""version"": 1, ""skills"": { """ + jsonEscapedName + @""": { ""source"": ""owner/repo"", ""sourceType"": ""github"", ""computedHash"": ""abc"" } } }";
+
+        [TestCase("../../Assets", TestName = "Parse_NameWithParentTraversal_Rejects")]
+        [TestCase("..", TestName = "Parse_NameDotDot_Rejects")]
+        [TestCase(".", TestName = "Parse_NameDot_Rejects")]
+        [TestCase("", TestName = "Parse_EmptyName_Rejects")]
+        [TestCase("nested/skill", TestName = "Parse_NameWithForwardSlash_Rejects")]
+        [TestCase(@"nested\\skill", TestName = "Parse_NameWithBackslash_Rejects")]
+        [TestCase("/etc", TestName = "Parse_RootedUnixName_Rejects")]
+        [TestCase(@"C:\\Users", TestName = "Parse_RootedWindowsName_Rejects")]
+        [TestCase("C:skill", TestName = "Parse_DriveRelativeName_Rejects")]
+        [TestCase("a*b", TestName = "Parse_NameWithWildcard_Rejects")]
+        [TestCase("a|b", TestName = "Parse_NameWithPipe_Rejects")]
+        [TestCase(@"a\u0000b", TestName = "Parse_NameWithNulChar_Rejects")]
+        [TestCase("skill.", TestName = "Parse_NameWithTrailingDot_Rejects")]
+        [TestCase("skill ", TestName = "Parse_NameWithTrailingSpace_Rejects")]
+        public void Parse_NameThatIsNotASinglePathComponent_RejectsAsUnsafeName(string jsonEscapedName)
+        {
+            var error = Assert.Throws<LockfileException>(() => Lockfile.Parse(LockWithSkillNamed(jsonEscapedName)));
+
+            Assert.That(error.Message, Does.Contain("not a safe skill folder name"));
+        }
+
+        [TestCase("code-review")]
+        [TestCase(".hidden-skill")]
+        [TestCase("skill.v2")]
+        [TestCase("a b")]
+        public void Parse_PlainFolderName_Accepts(string name)
+        {
+            var lockfile = Lockfile.Parse(LockWithSkillNamed(name));
+
+            Assert.That(lockfile.Skills[0].Name, Is.EqualTo(name));
+        }
     }
 }

@@ -62,6 +62,12 @@ namespace Hissal.AgentSkillsSync
 
         static LockedSkill ParseSkill(string name, object value)
         {
+            if (!IsSafeFolderName(name))
+                throw new LockfileException(
+                    $"Skill name {Describe(name)} in {FileName} is not a safe skill folder name. " +
+                    "A skill name must be a single folder name: no path separators, no \".\" or \"..\", no drive or root, " +
+                    "no characters that are invalid in file names, and no trailing dot or space.");
+
             if (!(value is List<KeyValuePair<string, object>> skill))
                 throw new LockfileException($"Skill \"{name}\" in {FileName} must be a JSON object.");
 
@@ -80,6 +86,21 @@ namespace Hissal.AgentSkillsSync
                 sourceType,
                 Get(skill, "skillPath") as string,
                 Get(skill, "computedHash") as string);
+        }
+
+        // The name becomes the last component of paths under the skills folders and the fetch cache, so it must
+        // not be able to point anywhere else. Checked against Windows' rules on every OS so a lock that works
+        // on one machine works on all of them.
+        static readonly char[] UnsafeNameChars = { '/', '\\', ':', '*', '?', '"', '<', '>', '|' };
+
+        static bool IsSafeFolderName(string name)
+        {
+            if (string.IsNullOrEmpty(name) || name == "." || name == "..") return false;
+            if (name.IndexOfAny(UnsafeNameChars) >= 0) return false;
+            foreach (var c in name)
+                if (c < 0x20) return false;
+            var last = name[name.Length - 1];
+            return last != '.' && last != ' ';
         }
 
         static object Get(List<KeyValuePair<string, object>> obj, string key)
