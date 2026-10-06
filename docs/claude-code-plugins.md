@@ -49,7 +49,7 @@ Observed format (`"version": 2`). It maps each plugin id (`<name>@<marketplace>`
 
 ## 3. Whether an installed plugin is enabled
 
-Installed is not the same as loaded. `enabledPlugins` in the settings files maps an id to `true` or `false`. For each id, the highest-precedence source that mentions it wins:
+Installed is not the same as loaded. `enabledPlugins` in the settings files maps an id to `true` or `false`. The sources merge id by id, not as one whole value: for each id, the highest-precedence source that mentions it wins, and a source that doesn't mention the id leaves the lower source's value in effect ([find where a plugin is enabled](https://code.claude.com/docs/en/plugins/loading#find-where-a-plugin-is-enabled)). This differs from the general settings rule, where a higher file's key replaces the lower one whole.
 
 | Source (low → high) | File |
 | :- | :- |

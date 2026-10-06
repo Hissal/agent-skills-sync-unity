@@ -177,6 +177,23 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Scan_SettingsFileThatOmitsAPlugin_LeavesTheLowerSettingInEffect()
+        {
+            // Claude Code merges enabledPlugins id by id, not as one whole value (plugins/loading, "Find where a
+            // plugin is enabled"): a higher file that doesn't mention an id keeps the lower file's value for it.
+            Install("a@market", "alpha");
+            Install("b@market", "beta");
+            UserSettings(Enabled("a@market", false));
+            ProjectSettings("settings.json", Enabled("b@market", true));
+            ProjectSettings("settings.local.json", "{ \"enabledPlugins\": {} }");
+
+            var state = Scan();
+
+            Assert.That(state.Has(Claude, "alpha"), Is.False);
+            Assert.That(state.Has(Claude, "beta"), Is.True);
+        }
+
+        [Test]
         public void Scan_WithoutAProject_ReadsUserSettingsOnly()
         {
             Install("a@market", "alpha");
