@@ -287,6 +287,18 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Scan_ManifestPresentButInvalid_SkipsThePlugin()
+        {
+            InstallAt("broken@market", "user", null, new[] { "alpha" }, "{ not json");
+            InstallAt("array@market", "user", null, new[] { "beta" }, "[]");
+            InstallAt("bare@market", "user", null, new[] { "gamma" }, manifest: null);
+
+            var state = Scan();
+
+            Assert.That(state.Copies.Select(c => c.SkillName), Is.EqualTo(new[] { "gamma" }));
+        }
+
+        [Test]
         public void Scan_InstallPathGone_IsSkipped()
         {
             Record("gone@market", "user", Path.Combine(_root, "nowhere"));

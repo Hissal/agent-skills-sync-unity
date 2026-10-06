@@ -66,7 +66,7 @@ When no source mentions the id, the manifest's `defaultEnabled` applies (default
 
 ## 4. Where a plugin's skills are
 
-The plugin root is the `installPath`. The manifest is `.claude-plugin/plugin.json`, and it is optional.
+The plugin root is the `installPath`. The manifest is `.claude-plugin/plugin.json`, and it is optional. A manifest that is present but fails validation (invalid JSON, a type mismatch) stops the plugin from loading ([validate the manifest](https://code.claude.com/docs/en/plugins-reference#validate-the-manifest)), so the tool skips a plugin whose manifest it can't read or parse as a JSON object. It doesn't run the rest of the validation.
 
 - **Default:** `skills/<name>/SKILL.md`, one folder per skill. All seven observed plugins use it.
 - **Manifest `skills`:** a path or an array of paths, each starting with `./`, such as `"./extra-skills/"`, or `"."` for the root. Each path is either a folder of `<name>/SKILL.md` folders or one folder holding `SKILL.md` directly. The listed paths **add to** `skills/`; they do not replace it. Observed example: `andrej-karpathy-skills` sets `"skills": ["./skills/karpathy-guidelines"]`. A path that resolves outside the plugin root is rejected.

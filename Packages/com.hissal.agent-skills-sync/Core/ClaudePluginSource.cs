@@ -17,7 +17,8 @@ namespace Hissal.AgentSkillsSync
     /// versions left in the cache are ignored. A plugin counts when one of its install records applies (user or managed
     /// scope, or project/local scope for this project) and it is enabled: the first <c>enabledPlugins</c> entry naming it
     /// in the project's <c>.claude/settings.local.json</c>, <c>.claude/settings.json</c>, then the user's
-    /// <c>settings.json</c>, else the manifest's <c>defaultEnabled</c> (default true). Unreadable files count as empty.
+    /// <c>settings.json</c>, else the manifest's <c>defaultEnabled</c> (default true). A plugin whose manifest is present but
+    /// unreadable or invalid JSON is skipped (Claude Code fails to load it); other unreadable files count as empty.
     /// </remarks>
     public sealed class ClaudePluginSource : IUserScopeSource
     {
@@ -64,7 +65,7 @@ namespace Hissal.AgentSkillsSync
             {
                 var installPath = InstallPath(plugin.Value);
                 if (installPath == null || !Directory.Exists(installPath)) continue;
-                var manifest = ReadObject(Path.Combine(installPath, ".claude-plugin", "plugin.json"));
+                if (!TryReadManifest(installPath, out var manifest)) continue;
                 if (!IsEnabled(plugin.Key, settings, manifest)) continue;
 
                 var name = Member(manifest, "name") as string ?? plugin.Key.Split('@')[0];
@@ -143,6 +144,19 @@ namespace Hissal.AgentSkillsSync
             {
                 return Enumerable.Empty<string>();
             }
+        }
+
+        /// <summary>
+        /// The plugin's <c>.claude-plugin/plugin.json</c>: null when there is none (it is optional), false when it is
+        /// present but unreadable or not a JSON object, as Claude Code then fails to load the plugin.
+        /// </summary>
+        static bool TryReadManifest(string installPath, out List<KeyValuePair<string, object>> manifest)
+        {
+            var path = Path.Combine(installPath, ".claude-plugin", "plugin.json");
+            manifest = null;
+            if (!File.Exists(path)) return true;
+            manifest = ReadObject(path);
+            return manifest != null;
         }
 
         static List<KeyValuePair<string, object>> EnabledPlugins(string settingsPath) =>
