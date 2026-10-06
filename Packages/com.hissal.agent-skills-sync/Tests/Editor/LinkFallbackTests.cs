@@ -8,19 +8,21 @@ namespace Hissal.AgentSkillsSync.Tests
 {
     public class LinkFallbackTests
     {
+        // The fetched skill is the `minimal` hash fixture, locked at its real hash so re-runs plan no Update.
+        static readonly string Fetched =
+            Path.GetFullPath("Packages/com.hissal.agent-skills-sync/Tests/Editor/Fixtures~/SkillFolderHash/minimal");
+
+        static readonly string FetchedSkillMd = File.ReadAllText(Path.Combine(Fetched, "SKILL.md"));
+
         string _root;
         string _project;
-        string _fetched;
 
         [SetUp]
         public void SetUp()
         {
             _root = Path.Combine(Path.GetTempPath(), "AgentSkillsSyncTests", Guid.NewGuid().ToString("N"));
             _project = Path.Combine(_root, "project");
-            _fetched = Path.Combine(_root, "fetched", "tdd");
             Directory.CreateDirectory(_project);
-            Directory.CreateDirectory(_fetched);
-            File.WriteAllText(Path.Combine(_fetched, "SKILL.md"), "# tdd");
         }
 
         [TearDown]
@@ -66,14 +68,14 @@ namespace Hissal.AgentSkillsSync.Tests
 
         static Lockfile LockTdd() => new Lockfile(new[]
         {
-            new LockedSkill("tdd", "owner/repo", "github", "skills/tdd/SKILL.md", "hash"),
+            new LockedSkill("tdd", "owner/repo", "github", "skills/tdd/SKILL.md", FakeGitHub.MinimalHash),
         });
 
         InstallPlan PlanNow() =>
             InstallPlanner.Plan(LockTdd(), ProjectScanner.Scan(_project, FolderLayout.Default), FolderLayout.Default);
 
         SyncSummary Sync(ILinkCreator linker) =>
-            new PlanExecutor(linker).Execute(_project, PlanNow(), new Dictionary<string, string> { ["tdd"] = _fetched });
+            new PlanExecutor(linker).Execute(_project, PlanNow(), new Dictionary<string, string> { ["tdd"] = Fetched });
 
         string InProject(string relativePath) => Path.Combine(_project, relativePath);
 
@@ -120,7 +122,7 @@ namespace Hissal.AgentSkillsSync.Tests
             var summary = Sync(null);
 
             Assert.That(IsReparsePoint(Link), Is.True);
-            Assert.That(File.ReadAllText(Path.Combine(Link, "SKILL.md")), Is.EqualTo("# tdd"));
+            Assert.That(File.ReadAllText(Path.Combine(Link, "SKILL.md")), Is.EqualTo(FetchedSkillMd));
             Assert.That(summary.LinkMethods.Values, Has.All.EqualTo(LinkMethod.Symlink).Or.All.EqualTo(LinkMethod.Junction));
         }
 
@@ -144,7 +146,7 @@ namespace Hissal.AgentSkillsSync.Tests
             var summary = Sync(ForceCopy());
 
             Assert.That(IsReparsePoint(Link), Is.False, "expected a plain copy");
-            Assert.That(File.ReadAllText(Path.Combine(Link, "SKILL.md")), Is.EqualTo("# tdd"));
+            Assert.That(File.ReadAllText(Path.Combine(Link, "SKILL.md")), Is.EqualTo(FetchedSkillMd));
             Assert.That(summary.LinkMethods.Values, Is.EqualTo(new[] { LinkMethod.Copy }));
             Assert.That(ManagedLines(".claude/skills"), Is.EqualTo(new[] { "/tdd" }));
         }
@@ -191,7 +193,7 @@ namespace Hissal.AgentSkillsSync.Tests
             DirectoryLink.Remove(Link);
 
             Assert.That(Directory.Exists(Link), Is.False);
-            Assert.That(File.ReadAllText(Path.Combine(Canonical, "SKILL.md")), Is.EqualTo("# tdd"));
+            Assert.That(File.ReadAllText(Path.Combine(Canonical, "SKILL.md")), Is.EqualTo(FetchedSkillMd));
         }
 
         [Test]
@@ -202,7 +204,7 @@ namespace Hissal.AgentSkillsSync.Tests
             DirectoryLink.Remove(Link);
 
             Assert.That(Directory.Exists(Link), Is.False);
-            Assert.That(File.ReadAllText(Path.Combine(Canonical, "SKILL.md")), Is.EqualTo("# tdd"));
+            Assert.That(File.ReadAllText(Path.Combine(Canonical, "SKILL.md")), Is.EqualTo(FetchedSkillMd));
         }
 
         [Test]
@@ -214,7 +216,7 @@ namespace Hissal.AgentSkillsSync.Tests
             DirectoryLink.Remove(Link);
 
             Assert.That(Directory.Exists(Link), Is.False);
-            Assert.That(File.ReadAllText(Path.Combine(Canonical, "SKILL.md")), Is.EqualTo("# tdd"));
+            Assert.That(File.ReadAllText(Path.Combine(Canonical, "SKILL.md")), Is.EqualTo(FetchedSkillMd));
         }
     }
 }
