@@ -144,7 +144,10 @@ namespace Hissal.AgentSkillsSync.Editor
             if (kinds.Contains(PlanActionKind.Update)) return "to update";
             if (kinds.Contains(PlanActionKind.Link)) return "to link";
             if (kinds.Contains(PlanActionKind.LeaveForeign)) return "left alone (not managed)";
-            if (kinds.Contains(PlanActionKind.SkipUserScope)) return "skipped where you have your own copy";
+            if (kinds.Contains(PlanActionKind.SkipUserScope))
+                return kinds.Contains(PlanActionKind.WarnUserScopeDiffers)
+                    ? "skipped where you have your own copy (differs from the lock)"
+                    : "skipped where you have your own copy";
             return "installed";
         }
 
@@ -191,6 +194,12 @@ namespace Hissal.AgentSkillsSync.Editor
                 container.Add(new Label("Skipped, but no user-scope copy was found any more, so the project copy is installed.")
                     { style = { whiteSpace = WhiteSpace.Normal } });
 
+            var differs = plan.Actions.FirstOrDefault(a => a.Kind == PlanActionKind.WarnUserScopeDiffers &&
+                                                          a.SkillName == skill.Name && a.Folder.RelativePath == folder.RelativePath);
+            if (differs != null)
+                container.Add(new HelpBox(DiffersMessage(differs), HelpBoxMessageType.Warning)
+                    { tooltip = string.Join("\n", differs.UserScopeCopies.Select(c => c.Path)) });
+
             if (copies.Count > 0 || skipStored)
             {
                 var toggle = new Toggle($"Skip the project copy in {folder.RelativePath} (use mine)")
@@ -208,6 +217,10 @@ namespace Hissal.AgentSkillsSync.Editor
         /// <summary>Where a user-scope copy comes from, as the end of "you already have it ...".</summary>
         static string Where(UserScopeCopy copy) =>
             copy.Plugin != null ? $"provided by plugin {copy.Plugin}" : $"at {copy.FoundIn}";
+
+        static string DiffersMessage(PlanAction warning) =>
+            $"Your {warning.SkillName} at {string.Join(", ", warning.UserScopeCopies.Select(c => c.FoundIn))} differs from the version " +
+            $"locked in {Lockfile.FileName}, so agents reading {warning.Folder.RelativePath} don't run what your teammates run.";
 
         void SaveSkip(SkillsFolder folder, string skillName, bool skip)
         {
@@ -358,7 +371,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 // Run the very instance that passed the check, never a fresh read of the file.
                 summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher(), selected: selected, userScope: userScope, skips: skips)
                     .Run(lockfile);
-                ShowSummary(Describe(summary), HelpBoxMessageType.Info);
+                ShowSummary(Describe(summary), summary.UserScopeDiffers.Count > 0 ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info);
             }
             catch (SyncAbortedException e)
             {
@@ -410,8 +423,16 @@ namespace Hissal.AgentSkillsSync.Editor
 
         static string Describe(SyncSummary summary)
         {
-            if (summary.NothingChanged) return "Everything is already in sync.";
             var text = new StringBuilder();
+            if (summary.NothingChanged) text.AppendLine("Everything is already in sync.");
+            else DescribeChanges(summary, text);
+            foreach (var warning in summary.UserScopeDiffers)
+                text.AppendLine("Warning: " + DiffersMessage(warning));
+            return text.ToString().TrimEnd();
+        }
+
+        static void DescribeChanges(SyncSummary summary, StringBuilder text)
+        {
             Line(text, "Installed", summary.Installed);
             Line(text, "Updated", summary.Updated);
             Line(text, "Removed", summary.Removed);
@@ -424,7 +445,6 @@ namespace Hissal.AgentSkillsSync.Editor
             if (junctions.Count > 0) text.AppendLine($"Linked as junctions (symlinks unavailable): {string.Join(", ", junctions)}");
             var copies = summary.LinkedBy(LinkMethod.Copy);
             if (copies.Count > 0) text.AppendLine($"Linked as plain copies (symlinks and junctions unavailable; re-sync after edits): {string.Join(", ", copies)}");
-            return text.ToString().TrimEnd();
         }
 
         static void Line(StringBuilder text, string label, IReadOnlyList<string> names)
