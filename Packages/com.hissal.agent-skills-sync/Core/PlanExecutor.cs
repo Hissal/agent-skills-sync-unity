@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace Hissal.AgentSkillsSync
 {
@@ -33,6 +34,7 @@ namespace Hissal.AgentSkillsSync
                         var source = Fetched(fetchedFolders, action);
                         DirectoryLink.Remove(entry);
                         Paths.CopyDirectory(source, entry);
+                        RefreshCopiedLinks(projectRoot, plan, action.SkillName, entry);
                         break;
                     case PlanActionKind.Link:
                         Directory.CreateDirectory(folder);
@@ -56,6 +58,22 @@ namespace Hissal.AgentSkillsSync
             }
 
             return new SyncSummary(applied, linkMethods);
+        }
+
+        /// <summary>
+        /// A symlink or junction follows an updated canonical copy by itself; a link made by the Copy fallback does
+        /// not, so re-copy it from the new canonical copy.
+        /// </summary>
+        static void RefreshCopiedLinks(string projectRoot, InstallPlan plan, string skillName, string canonicalEntry)
+        {
+            foreach (var managed in plan.ManagedNames)
+            {
+                if (managed.Key.Role != SkillsFolderRole.Link || !managed.Value.Contains(skillName)) continue;
+                var link = Path.Combine(Paths.InProject(projectRoot, managed.Key.RelativePath), skillName);
+                if (!Directory.Exists(link) || File.GetAttributes(link).HasFlag(FileAttributes.ReparsePoint)) continue;
+                DirectoryLink.Remove(link);
+                Paths.CopyDirectory(canonicalEntry, link);
+            }
         }
 
         static string Fetched(IReadOnlyDictionary<string, string> fetchedFolders, PlanAction action) =>

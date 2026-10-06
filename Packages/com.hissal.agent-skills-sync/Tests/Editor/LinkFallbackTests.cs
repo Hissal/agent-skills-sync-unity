@@ -8,9 +8,11 @@ namespace Hissal.AgentSkillsSync.Tests
 {
     public class LinkFallbackTests
     {
+        static readonly string FixturesRoot =
+            Path.GetFullPath("Packages/com.hissal.agent-skills-sync/Tests/Editor/Fixtures~/SkillFolderHash");
+
         // The fetched skill is the `minimal` hash fixture, locked at its real hash so re-runs plan no Update.
-        static readonly string Fetched =
-            Path.GetFullPath("Packages/com.hissal.agent-skills-sync/Tests/Editor/Fixtures~/SkillFolderHash/minimal");
+        static readonly string Fetched = Path.Combine(FixturesRoot, "minimal");
 
         static readonly string FetchedSkillMd = File.ReadAllText(Path.Combine(Fetched, "SKILL.md"));
 
@@ -64,16 +66,21 @@ namespace Hissal.AgentSkillsSync.Tests
         static ILinkCreator ForceCopy() =>
             new FallbackLinkCreator(new FailingLinker(), new FailingLinker(), new CopyLinkCreator());
 
-        static Lockfile LockTdd() => new Lockfile(new[]
+        static Lockfile LockTdd(string hash) => new Lockfile(new[]
         {
-            new LockedSkill("tdd", "owner/repo", "github", "skills/tdd/SKILL.md", FakeGitHub.MinimalHash),
+            new LockedSkill("tdd", "owner/repo", "github", "skills/tdd/SKILL.md", hash),
         });
 
-        InstallPlan PlanNow() =>
-            InstallPlanner.Plan(LockTdd(), ProjectScanner.Scan(_project, FolderLayout.Default), FolderLayout.Default);
+        InstallPlan PlanNow(string hash) =>
+            InstallPlanner.Plan(LockTdd(hash), ProjectScanner.Scan(_project, FolderLayout.Default), FolderLayout.Default);
 
         SyncSummary Sync(ILinkCreator linker) =>
-            new PlanExecutor(linker).Execute(_project, PlanNow(), new Dictionary<string, string> { ["tdd"] = Fetched });
+            new PlanExecutor(linker).Execute(_project, PlanNow(FakeGitHub.MinimalHash), new Dictionary<string, string> { ["tdd"] = Fetched });
+
+        /// <summary>Re-locks tdd at the `nested` fixture and syncs, so the canonical copy is updated.</summary>
+        SyncSummary SyncUpdatedToNested(ILinkCreator linker) =>
+            new PlanExecutor(linker).Execute(_project, PlanNow(FakeGitHub.NestedHash),
+                new Dictionary<string, string> { ["tdd"] = Path.Combine(FixturesRoot, "nested") });
 
         string InProject(string relativePath) => Path.Combine(_project, relativePath);
 
@@ -180,6 +187,31 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(summary.NothingChanged, Is.True);
             Assert.That(ManagedLines(".claude/skills"), Is.EqualTo(new[] { "/tdd" }));
+        }
+
+        [Test]
+        public void Update_OverCopy_RefreshesTheCopiedLink()
+        {
+            Sync(ForceCopy());
+
+            var summary = SyncUpdatedToNested(ForceCopy());
+
+            Assert.That(summary.Updated, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(IsReparsePoint(Link), Is.False, "expected the link to stay a plain copy");
+            Assert.That(SkillFolderHash.Compute(Link), Is.EqualTo(FakeGitHub.NestedHash));
+            Assert.That(SyncUpdatedToNested(ForceCopy()).NothingChanged, Is.True);
+        }
+
+        [Test]
+        public void Update_OverJunction_KeepsTheJunctionShowingTheNewCopy()
+        {
+            RequireWindows();
+            Sync(ForceJunction());
+
+            SyncUpdatedToNested(ForceJunction());
+
+            Assert.That(IsReparsePoint(Link), Is.True, "expected the junction to be kept");
+            Assert.That(SkillFolderHash.Compute(Link), Is.EqualTo(FakeGitHub.NestedHash));
         }
 
         [Test]
