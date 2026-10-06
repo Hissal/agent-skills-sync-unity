@@ -86,7 +86,14 @@ namespace Hissal.AgentSkillsSync.Tests
 
         bool Exists(string relative) => Directory.Exists(InProject(relative));
 
-        string[] ManagedIn(string folder) => ManagedStateFile.Read(InProject(folder)).ToArray();
+        /// <summary>What this machine manages in the folder, from its local prefs.</summary>
+        string[] ManagedIn(string folder) =>
+            LocalPrefs.Load(_project).ManagedSkills is var managed && managed != null && managed.TryGetValue(folder, out var names)
+                ? names.ToArray()
+                : new string[0];
+
+        /// <summary>The names the folder's committed .gitignore block lists; skips never change it.</summary>
+        string[] IgnoredIn(string folder) => ManagedStateFile.Read(InProject(folder)).ToArray();
 
         [Test]
         public void Run_ClaudeSkipToggledOnThenOff_UnlinksThenLinksAgain()
@@ -103,6 +110,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(Exists(Claude + "/tdd"), Is.False);
             Assert.That(Exists(Claude + "/mine"), Is.True);
             Assert.That(ManagedIn(Claude), Is.Empty);
+            Assert.That(IgnoredIn(Claude), Is.EqualTo(new[] { "tdd" }));
             Assert.That(Exists(Agents + "/tdd"), Is.True);
             Assert.That(Exists(Path.Combine(_home, ".claude", "skills", "tdd")), Is.True);
             Assert.That(Status().MissingSkills, Is.Empty);
@@ -131,6 +139,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(Exists(Agents + "/tdd"), Is.False);
             Assert.That(Exists(Claude + "/tdd"), Is.False);
             Assert.That(ManagedIn(Agents), Is.Empty);
+            Assert.That(IgnoredIn(Agents), Is.EqualTo(new[] { "tdd" }));
             Assert.That(Exists(Path.Combine(_home, ".codex", "skills", "tdd")), Is.True);
 
             SetSkip(Agents, false);
