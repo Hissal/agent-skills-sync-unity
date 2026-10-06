@@ -462,8 +462,52 @@ namespace Hissal.AgentSkillsSync.Tests
             var skip = plan.Actions.Single(a => a.Kind == PlanActionKind.SkipUserScope);
             Assert.That(skip.Folder, Is.SameAs(Claude));
             Assert.That(skip.UserScopeCopies.Select(c => c.Plugin), Is.EqualTo(new[] { "superpowers@market" }));
-            Assert.That(plan.Actions.Where(a => a.Folder == Claude).Select(a => a.Kind), Is.EqualTo(new[] { PlanActionKind.SkipUserScope }));
+            // The plugin's SKILL.md is not the locked content, so a WarnUserScopeDiffers follows (see the differs tests below).
+            Assert.That(plan.Actions.Where(a => a.Folder == Claude && a.Kind != PlanActionKind.WarnUserScopeDiffers).Select(a => a.Kind),
+                Is.EqualTo(new[] { PlanActionKind.SkipUserScope }));
             Assert.That(plan.Actions.Any(a => a.Kind == PlanActionKind.Install && a.Folder == Agents), Is.True);
+        }
+
+        static readonly string MinimalFixture =
+            Path.GetFullPath("Packages/com.hissal.agent-skills-sync/Tests/Editor/Fixtures~/SkillFolderHash/minimal");
+
+        /// <summary>Locks <c>tdd</c> at the <c>minimal</c> fixture's hash and plans with a stored skip for <c>.claude/skills</c>.</summary>
+        InstallPlan PlanWithClaudeSkip()
+        {
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), @"{
+  ""version"": 1,
+  ""skills"": {
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" }
+  }
+}");
+            var prefs = LocalPrefs.Load(_project);
+            SkipChoices.Set(prefs, Claude, "tdd", true);
+            return new SkillSync(_project, fetcher: null, selected: new[] { Agents, Claude }, userScope: Scan(), skips: SkipChoices.From(prefs)).Plan();
+        }
+
+        [Test]
+        public void Plan_SkippedPluginCopyDiffersFromTheLock_WarnsNamingThePlugin()
+        {
+            Install("superpowers@market", "tdd"); // its SKILL.md is not the locked content
+
+            var plan = PlanWithClaudeSkip();
+
+            var warning = plan.Actions.Single(a => a.Kind == PlanActionKind.WarnUserScopeDiffers);
+            Assert.That(warning.Folder, Is.SameAs(Claude));
+            Assert.That(warning.UserScopeCopies.Select(c => c.Plugin), Is.EqualTo(new[] { "superpowers@market" }));
+        }
+
+        [Test]
+        public void Plan_SkippedPluginCopyMatchesTheLock_NoWarning()
+        {
+            var skill = Path.Combine(Install("superpowers@market", "tdd"), "skills", "tdd");
+            Directory.Delete(skill, true);
+            Paths.CopyDirectory(MinimalFixture, skill);
+
+            var plan = PlanWithClaudeSkip();
+
+            Assert.That(plan.Actions.Any(a => a.Kind == PlanActionKind.SkipUserScope && a.Folder == Claude), Is.True);
+            Assert.That(plan.Actions.Where(a => a.Kind == PlanActionKind.WarnUserScopeDiffers), Is.Empty);
         }
 
         [Test]

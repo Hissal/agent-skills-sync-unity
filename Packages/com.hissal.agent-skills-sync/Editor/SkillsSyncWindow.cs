@@ -219,7 +219,7 @@ namespace Hissal.AgentSkillsSync.Editor
             copy.Plugin != null ? $"provided by plugin {copy.Plugin}" : $"at {copy.FoundIn}";
 
         static string DiffersMessage(PlanAction warning) =>
-            $"Your {warning.SkillName} at {string.Join(", ", warning.UserScopeCopies.Select(c => c.FoundIn))} differs from the version " +
+            $"Your {warning.SkillName} {string.Join(", ", warning.UserScopeCopies.Select(Where))} differs from the version " +
             $"locked in {Lockfile.FileName}, so agents reading {warning.Folder.RelativePath} don't run what your teammates run.";
 
         void SaveSkip(SkillsFolder folder, string skillName, bool skip)
