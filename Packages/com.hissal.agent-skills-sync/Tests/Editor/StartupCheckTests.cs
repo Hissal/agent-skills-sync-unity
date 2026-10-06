@@ -161,6 +161,16 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void SyncStatus_LockedSkillsPresentAsForeignFolders_AreNotMissing()
+        {
+            foreach (var folder in new[] { ".agents/skills", ".claude/skills" })
+            foreach (var name in new[] { "tdd", "code-review" })
+                Directory.CreateDirectory(Path.Combine(_project, folder, name));
+
+            Assert.That(SyncStatus.Read(_project).MissingSkills, Is.Empty);
+        }
+
+        [Test]
         public void ShouldNotify_NoLockfile_IsQuiet()
         {
             File.Delete(Path.Combine(_project, Lockfile.FileName));

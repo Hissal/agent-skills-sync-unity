@@ -5,8 +5,8 @@ using System.Linq;
 namespace Hissal.AgentSkillsSync
 {
     /// <summary>
-    /// What the startup check needs to know about a project: the lockfile's hash and which locked
-    /// skills a sync would still install or link. Read without fetching anything.
+    /// What the startup check needs to know about a project: the lockfile's hash and which skills a
+    /// sync would still change (install, update, link, remove or unlink). Read without fetching anything.
     /// </summary>
     public sealed class SyncStatus
     {
@@ -19,7 +19,10 @@ namespace Hissal.AgentSkillsSync
         /// <summary>See <see cref="LockfileHash.Compute"/>.</summary>
         public string LockHash { get; }
 
-        /// <summary>Sorted names of locked skills missing from at least one skills folder.</summary>
+        /// <summary>
+        /// Sorted names of skills a sync would change: locked skills missing or out of date in at least one skills
+        /// folder, and managed skills it would remove or unlink. Entries left alone as foreign do not count.
+        /// </summary>
         public IReadOnlyList<string> MissingSkills { get; }
 
         /// <summary>Identifies this status; a decline holds while the status keeps the same fingerprint.</summary>
@@ -39,7 +42,8 @@ namespace Hissal.AgentSkillsSync
             try
             {
                 var plan = InstallPlanner.Plan(Lockfile.Load(projectRoot), ProjectScanner.Scan(projectRoot, layout), layout);
-                missing = plan.Actions.Select(a => a.SkillName);
+                // A left-alone (foreign) entry is never synced, so it does not count as out of sync.
+                missing = plan.Actions.Where(a => a.ChangesProject).Select(a => a.SkillName);
             }
             catch (LockfileException)
             {
