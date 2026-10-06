@@ -270,5 +270,18 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[] { "Unlink .claude/skills/house-style" }));
             Assert.That(ManagedIn(plan, Claude), Is.Empty);
         }
+    
+        [Test]
+        public void Plan_PlainFileInCanonicalFolder_IsNotAProjectAuthoredSkill()
+        {
+            var project = Project(
+                new FolderState(Agents, entries: new[] { "README.md", "house-style" }, managed: null, files: new[] { "README.md" }),
+                new FolderState(Claude, entries: null, managed: null));
+
+            var plan = InstallPlanner.Plan(Lock(), project, FolderLayout.Default);
+
+            Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[] { "Link .claude/skills/house-style -> .agents/skills/house-style" }));
+            Assert.That(ManagedIn(plan, Claude), Is.EqualTo(new[] { "house-style" }));
+        }
     }
 }

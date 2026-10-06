@@ -8,18 +8,22 @@ namespace Hissal.AgentSkillsSync
     public sealed class FolderState
     {
         /// <param name="installedHashes">Content hash of each managed skill copy in the folder (see <see cref="InstalledHash"/>).</param>
+        /// <param name="files">Names in <paramref name="entries"/> that are plain files rather than folders or folder links.</param>
         /// <param name="staleLinks">Managed link-folder entries that are symlinks or junctions not resolving to the canonical entry (see <see cref="IsStaleLink"/>).</param>
         public FolderState(SkillsFolder folder, IEnumerable<string> entries, IEnumerable<string> managed,
-            IReadOnlyDictionary<string, string> installedHashes = null, IEnumerable<string> staleLinks = null)
+            IReadOnlyDictionary<string, string> installedHashes = null, IEnumerable<string> files = null,
+            IEnumerable<string> staleLinks = null)
         {
             Folder = folder;
             Entries = new HashSet<string>(entries ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
             Managed = new HashSet<string>(managed ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
             _installedHashes = installedHashes ?? new Dictionary<string, string>();
+            _files = new HashSet<string>(files ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
             _staleLinks = new HashSet<string>(staleLinks ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
         }
 
         readonly IReadOnlyDictionary<string, string> _installedHashes;
+        readonly HashSet<string> _files;
         readonly HashSet<string> _staleLinks;
 
         public SkillsFolder Folder { get; }
@@ -39,6 +43,9 @@ namespace Hissal.AgentSkillsSync
         /// hashed (not managed, not a folder, or a folder the scanner does not hash, such as a link folder).
         /// </summary>
         public string InstalledHash(string name) => _installedHashes.TryGetValue(name, out var hash) ? hash : null;
+
+        /// <summary>True when the entry is a plain file (e.g. a README), which can never be a skill.</summary>
+        public bool IsFile(string name) => _files.Contains(name);
 
         /// <summary>
         /// True when the managed link-folder entry is a symlink or junction that is broken or resolves somewhere other

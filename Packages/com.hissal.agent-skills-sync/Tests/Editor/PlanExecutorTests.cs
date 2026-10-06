@@ -267,5 +267,20 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(ProjectScanner.Scan(_project, FolderLayout.Default).For(FolderLayout.Default.Folders[1]).Has("house-style"), Is.False);
             Assert.That(ManagedLines(InProject(".claude/skills/.gitignore")), Is.EqualTo(new[] { "/tdd" }));
         }
+    
+        [Test]
+        public void Execute_StrayFilesInCanonicalFolder_AreNotLinked()
+        {
+            CommitProjectAuthoredSkill("house-style");
+            File.WriteAllText(InProject(".agents/skills/README.md"), "about our skills");
+
+            ExecuteFreshPlan();
+            var rescan = InstallPlanner.Plan(LockTdd(), ProjectScanner.Scan(_project, FolderLayout.Default), FolderLayout.Default);
+
+            Assert.That(Directory.GetFileSystemEntries(InProject(".claude/skills")).Select(Path.GetFileName),
+                Is.EquivalentTo(new[] { ".gitignore", "house-style", "tdd" }));
+            Assert.That(ManagedLines(InProject(".claude/skills/.gitignore")), Is.EqualTo(new[] { "/house-style", "/tdd" }));
+            Assert.That(rescan.Actions, Is.Empty, "the managed .gitignore must not be planned as a skill");
+        }
     }
 }

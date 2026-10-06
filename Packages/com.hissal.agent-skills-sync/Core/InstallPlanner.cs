@@ -53,12 +53,12 @@ namespace Hissal.AgentSkillsSync
                 }
             }
 
-            // Project-authored skills: committed in the canonical folder, neither locked nor installed by the tool.
+            // Project-authored skills: folders committed in the canonical folder, neither locked nor installed by the tool.
             // They stay tracked there; only the links the tool makes for them are managed.
             var locked = new HashSet<string>(lockfile.Skills.Select(s => s.Name), StringComparer.Ordinal);
             var canonicalState = project.For(layout.Canonical);
             var projectAuthored = canonicalState.Entries
-                .Where(name => !locked.Contains(name) && !canonicalState.Manages(name))
+                .Where(name => !locked.Contains(name) && !canonicalState.Manages(name) && !canonicalState.IsFile(name))
                 .OrderBy(name => name, StringComparer.Ordinal)
                 .ToList();
             foreach (var name in projectAuthored)
