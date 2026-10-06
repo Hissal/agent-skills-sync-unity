@@ -13,7 +13,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `.agents/skills/` and links them into `.claude/skills/` (symlink, then junction, then copy), after consent.
 - Hash verification compatible with the `skills` CLI's `computedHash`; a failed fetch aborts the sync with no changes.
 - Re-sync updates, removes and leaves foreign skills alone; project-authored skills are linked into `.claude/skills/`.
-- Managed `.gitignore` block in each skills folder, listing exactly the skills the tool installed there.
+- Managed `.gitignore` block in each skills folder, listing every locked skill (the same on every machine); what
+  this machine installed is recorded in `UserSettings/AgentSkillsSync.json`.
+- Lock entries' `ref` is honoured: the skill is fetched at that branch, tag or commit.
 - Once-per-session startup check that offers to sync when the lockfile changed or skills are missing.
 - Confirmation for source repos new since the last sync.
 - Per-machine choice of skills folders, with autofill from the agent homes found on the machine.

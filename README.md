@@ -13,6 +13,8 @@ Status: in development (0.1.0). See the [spec](https://github.com/Hissal/agent-s
   (lockfile `version` 1). Every skill must come from a public GitHub repo (`sourceType` `github`).
 - Network access to github.com when you sync. Node is **not** needed to sync; only maintainers who edit the lockfile
   need it.
+- [Git](https://git-scm.com/) 2.14 or later on your `PATH`, to install the package from its git URL. Unity's Package
+  Manager needs it for any [git dependency](https://docs.unity3d.com/6000.3/Documentation/Manual/upm-git.html#req).
 
 ## Install
 
@@ -36,14 +38,17 @@ Append `#<tag or commit>` to the URL to pin a version.
 - Each locked skill is installed once per project: the copy goes in `.agents/skills/<name>`, and
   `.claude/skills/<name>` is a link to that copy. A link is a symlink, then a directory junction (Windows), then a
   plain copy, whichever works first. A plain copy does not follow edits, so sync again after changing a skill.
-- Skills are downloaded from the default branch of their GitHub repo (`archive/HEAD.zip`), into a per-user cache
-  (`AgentSkillsSync/Cache` in your local application data folder).
+- Skills are downloaded from their GitHub repo at the lock entry's `ref` (a branch, tag or commit) when it has one,
+  else from the default branch (`archive/HEAD.zip`), into a per-user cache (`AgentSkillsSync/Cache` in your local
+  application data folder).
 - A sync downloads everything it needs first. If any skill fails (offline, a missing skill, or a refusal in Pinned
   mode), the sync aborts and **nothing** in the project changes. The window marks each failed skill with its error.
-- A re-sync adds newly locked skills, updates changed ones, and removes skills that left the lockfile. It never
+- A re-sync adds newly locked skills, updates changed ones, and removes skills that left the lockfile. It also
+  re-links a link of its own that is broken or points anywhere but this project's `.agents/skills` copy. It never
   touches entries it did not install.
-- **Project-authored skills**, folders committed in `.agents/skills/` that are not in the lockfile, stay tracked
-  in git and are linked into `.claude/skills/`, so Claude Code sees them as well.
+- **Project-authored skills**, folders with a `SKILL.md` committed in `.agents/skills/` that are not in the lockfile,
+  stay tracked in git and are linked into `.claude/skills/`, so Claude Code sees them as well. A folder without a
+  `SKILL.md` is not a skill and is never linked.
 
 ### The sync window
 
@@ -67,7 +72,13 @@ Open it from **Window → Agent Skills Sync**. From top to bottom:
 
 Once per editor session the tool checks the project. If `skills-lock.json` changed since the last sync on this
 machine, or locked skills are missing, it offers to open the sync window. **Not Now** keeps it quiet until something
-changes. It never prompts while no skills folder is selected. Nothing is installed without the window's consent.
+changes. Nothing is installed without the window's consent.
+
+- The check is cheap: it looks at folder names, links and the lockfile's hash, never at skill contents. An installed
+  copy that differs from the lock is caught through the lockfile change that caused it; the window, which hashes
+  every copy, shows the details.
+- While no skills folder is selected, it does not offer a sync. It can still ask once whether to add a folder whose
+  agent home appeared (see [Choosing skills folders](#choosing-skills-folders-per-machine)).
 
 ## Set up a project
 
@@ -79,8 +90,9 @@ changes. It never prompts while no skills folder is selected. Nothing is install
    ```
 
    The CLI also installs its own copy of each skill it adds. A skill folder that this tool did not install is left
-   alone, and git tracks it. Delete the copies the CLI made in `.agents/skills/` and `.claude/skills/`, then sync, so
-   the tool installs and manages them.
+   alone (and once the generated `.gitignore` lists its name, git ignores it unless it is already committed). Delete
+   the copies the CLI made in `.agents/skills/` and `.claude/skills/`, then sync, so the tool installs and manages
+   them.
 2. Install the package, open **Window → Agent Skills Sync**, tick the consent box and **Sync**.
 3. Commit:
    - `skills-lock.json`;
@@ -91,22 +103,24 @@ Teammates install the package with the project, and the startup check offers the
 
 ### The generated `.gitignore` files
 
-The tool writes a `.gitignore` in each skills folder it installs into. Its marked block lists exactly the skills the
-tool manages there:
+The tool writes a `.gitignore` in each skills folder it installs into, and keeps it current in any skills folder that
+already has one. Its marked block lists every locked skill, and in `.claude/skills` also the project-authored skills
+it links there:
 
 ```gitignore
 # >>> Agent Skills Sync: managed from skills-lock.json; do not edit this block.
-# Lists exactly the skills the tool installed here. Anything else in this folder stays tracked.
+# Lists every skill the tool may install or link here, on any machine. Anything else stays tracked.
 /some-skill
 # <<< Agent Skills Sync
 ```
 
 - Installed skills stay out of git, and project-authored skills beside them stay tracked.
-- The block is also the tool's record of what it owns. A folder not listed there is never modified.
-- Lines outside the block are yours. The tool keeps them, and never reads them as managed.
-
-The block lists what the tool manages **on the machine that synced**. Deselecting a folder or skipping a skill on your
-machine removes names from it. Don't commit that change: a teammate's tool would stop recognising the links it made.
+- The block depends only on `skills-lock.json` and the committed project-authored skills, never on one machine's
+  folder selection or skips. Every teammate's sync writes the same block, so it never shows up as a local change.
+- What the tool installed **on this machine**, and therefore owns, is recorded in `UserSettings/AgentSkillsSync.json`.
+  An entry it did not install is never modified, even when the block lists its name. On the first sync after
+  upgrading from a version without that record, the names in the existing block count as the tool's.
+- Lines outside the block are yours. The tool keeps them, and never reads them.
 
 ## Choosing skills folders per machine
 
@@ -127,7 +141,8 @@ from the Unity editor process. For the sources behind this table, see
   It is saved when you change a toggle, or when you sync, which confirms the autofilled selection.
 - **Selecting only `.claude/skills`** still puts the copies in `.agents/skills`, because the links point there.
 - **Deselecting a folder** removes the tool's skills from it on the next sync. Other entries are not touched.
-- **No folder selected**: Sync installs nothing and the startup check stays quiet.
+- **No folder selected**: Sync installs nothing, and the startup check does not offer a sync (it can still offer
+  to add a folder whose agent home appeared, see below).
 - **A new agent home appears** after your selection is stored (for example, you install Codex later): at the next
   editor start the tool asks once whether to add that folder. **Not Now** is remembered; you can still select the folder in the window.
 
@@ -178,8 +193,9 @@ which writes the file.
   shows "to update" in this mode.
 - **Pinned**: installs or updates a skill only if its upstream still matches the locked hash. Otherwise the sync
   aborts, and the skill's row says it changed since it was locked: run `npx skills update` and commit
-  `skills-lock.json`, or switch to Latest. As soon as an upstream repo moves on, Pinned refuses its skills until the
-  lockfile is updated.
+  `skills-lock.json`, or switch to Latest. Pinned checks upstream only for skills the sync has to download (to
+  install, or to update a copy that no longer matches the lock). A copy already installed and matching the lock is
+  kept without contacting upstream, so a sync is not an audit of whether upstream moved on.
 
 **In both modes, `skills-lock.json` is never rewritten.** To lock what upstream has now, run `npx skills update` and
 commit the lockfile.
