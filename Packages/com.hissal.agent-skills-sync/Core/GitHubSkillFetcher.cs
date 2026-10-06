@@ -143,7 +143,8 @@ namespace Hissal.AgentSkillsSync
         static SkillFetchException Unverifiable(LockedSkill skill, string reason) =>
             new SkillFetchException(skill.Name, SkillFetchFailure.Unverifiable,
                 $"Skill \"{skill.Name}\": can't verify this source's lock hash ({reason}). " +
-                "It was not installed, because an unverified copy could differ from what was locked.");
+                "It was not installed, because an unverified copy could differ from what was locked. " +
+                "Switch the install mode to Latest to install the current upstream copy without this check.");
 
         static string Short(string hash) => hash.Length > 12 ? hash.Substring(0, 12) : hash;
 

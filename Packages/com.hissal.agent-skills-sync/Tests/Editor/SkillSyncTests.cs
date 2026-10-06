@@ -421,5 +421,129 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(plan.HasChanges, Is.False);
             Assert.That(_fetcher.Fetched, Is.Empty);
         }
+    
+
+        // Latest installs current upstream, so Pinned's lock-verification refusals and CRLF rewrite do not apply.
+
+        /// <summary>The lock with one skill, served by the real fetcher over a faked GitHub repo.</summary>
+        (SkillSync Sync, FakeGitHub GitHub) OneSkill(InstallMode mode, string name, string source, string hash)
+        {
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), @"{
+  ""version"": 1,
+  ""skills"": {
+    """ + name + @""": { ""source"": """ + source + @""", ""sourceType"": ""github"", ""skillPath"": ""skills/" + name + @"/SKILL.md"", ""computedHash"": """ + hash + @""" }
+  }
+}");
+            var github = new FakeGitHub();
+            return (new SkillSync(_project, new GitHubSkillFetcher(Path.Combine(_root, "cache"), github, mode), mode: mode), github);
+        }
+
+        const string ByteExactCrlfCheckoutHash = "1ef11b466bb0ad8cb6eec71a1a735f1851045762121f50f124f21d66c7ceee8f";
+
+        [Test]
+        public void Run_Latest_SkillsShHashedSource_InstallsWithoutReportingItAsDiffering()
+        {
+            var (sync, github) = OneSkill(InstallMode.Latest, "tdd", "vercel-labs/agent-skills", "server-hash-of-another-algorithm");
+            github.Fixture("vercel-labs/agent-skills", "skills/tdd", "minimal");
+
+            var summary = sync.Run();
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(summary.DiffersFromLock, Is.Empty, "a skills.sh hash can't show whether upstream differs");
+            Assert.That(SkillFolderHash.Compute(Path.Combine(_project, ".agents/skills/tdd")), Is.EqualTo(FakeGitHub.MinimalHash));
+        }
+
+        [Test]
+        public void Run_Pinned_SkillsShHashedSource_RefusesAsUnverifiable()
+        {
+            var (sync, github) = OneSkill(InstallMode.Pinned, "tdd", "vercel-labs/agent-skills", "server-hash-of-another-algorithm");
+            github.Fixture("vercel-labs/agent-skills", "skills/tdd", "minimal");
+
+            var error = Assert.Throws<SyncAbortedException>(() => sync.Run());
+
+            Assert.That(error.Failures["tdd"].Failure, Is.EqualTo(SkillFetchFailure.Unverifiable));
+            Assert.That(Directory.Exists(Path.Combine(_project, ".agents")), Is.False);
+        }
+
+        [Test]
+        public void Run_Latest_NonAsciiSkillWhoseHashDiffers_InstallsWithoutReportingItAsDiffering()
+        {
+            var (sync, github) = OneSkill(InstallMode.Latest, "intl", "owner/skills", FakeGitHub.MinimalHash);
+            github.File("owner/skills", "skills/intl/SKILL.md", "# intl").File("owner/skills", "skills/intl/résumé.md", "cv");
+
+            var summary = sync.Run();
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "intl" }));
+            Assert.That(summary.DiffersFromLock, Is.Empty, "with non-ASCII names a mismatch can't show whether upstream differs");
+            Assert.That(File.ReadAllText(Path.Combine(_project, ".agents/skills/intl/résumé.md")), Is.EqualTo("cv"));
+        }
+
+        [Test]
+        public void Run_Pinned_NonAsciiSkillWhoseHashDiffers_RefusesAsUnverifiable()
+        {
+            var (sync, github) = OneSkill(InstallMode.Pinned, "intl", "owner/skills", FakeGitHub.MinimalHash);
+            github.File("owner/skills", "skills/intl/SKILL.md", "# intl").File("owner/skills", "skills/intl/résumé.md", "cv");
+
+            var error = Assert.Throws<SyncAbortedException>(() => sync.Run());
+
+            Assert.That(error.Failures["intl"].Failure, Is.EqualTo(SkillFetchFailure.Unverifiable));
+        }
+
+        [Test]
+        public void Run_Pinned_CrlfLockedSkill_InstallsTheLockedCheckoutAndReRunsAsNoOp()
+        {
+            var (sync, github) = OneSkill(InstallMode.Pinned, "byte-exact", "owner/skills", ByteExactCrlfCheckoutHash);
+            github.Fixture("owner/skills", "skills/byte-exact", "byte-exact");
+
+            sync.Run();
+            var second = sync.Run();
+
+            Assert.That(SkillFolderHash.Compute(Path.Combine(_project, ".agents/skills/byte-exact")), Is.EqualTo(ByteExactCrlfCheckoutHash));
+            Assert.That(second.NothingChanged, Is.True);
+        }
+
+        [Test]
+        public void Run_Latest_CrlfLockedSkill_InstallsUpstreamBytesWithoutReportingItAsDiffering()
+        {
+            var (sync, github) = OneSkill(InstallMode.Latest, "byte-exact", "owner/skills", ByteExactCrlfCheckoutHash);
+            github.Fixture("owner/skills", "skills/byte-exact", "byte-exact");
+
+            var summary = sync.Run();
+            var second = sync.Run();
+
+            var installed = Path.Combine(_project, ".agents/skills/byte-exact");
+            Assert.That(File.ReadAllBytes(Path.Combine(installed, "SKILL.md")), Has.No.Member((byte)'\r'));
+            Assert.That(summary.DiffersFromLock, Is.Empty, "the lock is this upstream's CRLF checkout");
+            Assert.That(second.NothingChanged, Is.True);
+            Assert.That(sync.InstalledDiffersFromLock(), Is.Empty);
+        }
+
+        [Test]
+        public void Run_Latest_CheckedLockfile_LockChangedOnDiskAfterTheCheck_RunsTheCheckedLock()
+        {
+            var checkedLock = Lockfile.Load(_project);
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), @"{
+  ""version"": 1,
+  ""skills"": {
+    ""unconfirmed"": { ""source"": ""stranger/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/unconfirmed/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" }
+  }
+}");
+
+            var summary = Sync(InstallMode.Latest).Run(checkedLock);
+
+            Assert.That(summary.Installed, Is.EquivalentTo(new[] { "tdd", "code-review" }));
+            Assert.That(_fetcher.Fetched, Has.No.Member("unconfirmed"));
+        }
+
+        [Test]
+        public void InstalledDiffersFromLock_CheckedLockfile_ComparesWithTheGivenLock()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+            var checkedLock = Lockfile.Load(_project);
+            Sync(InstallMode.Latest).Run(checkedLock);
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), PulledLock); // locks tdd at the nested hash
+
+            Assert.That(Sync(InstallMode.Latest).InstalledDiffersFromLock(checkedLock), Is.EqualTo(new[] { "tdd" }));
+        }
     }
 }

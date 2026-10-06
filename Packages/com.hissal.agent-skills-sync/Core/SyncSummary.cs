@@ -16,7 +16,8 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// In <see cref="InstallMode.Latest"/>, names of locked skills whose fetched upstream copy does not match the lock
-        /// (installed or already current); empty in Pinned mode, which refuses such skills.
+        /// (installed or already current); empty in Pinned mode, which refuses such skills. Skills where a mismatch can't
+        /// tell (skills.sh-hashed sources, non-ASCII paths) are not listed.
         /// </summary>
         public IReadOnlyList<string> DiffersFromLock { get; }
 

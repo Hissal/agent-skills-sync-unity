@@ -223,6 +223,45 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(Directory.Exists(Path.Combine(_cache, "skills", "owner", "skills", "intl")), Is.False);
         }
 
+        // Latest installs current upstream without checking the lock, so Pinned's verification refusals do not apply.
+
+        GitHubSkillFetcher LatestFetcher() => new GitHubSkillFetcher(_cache, _github, InstallMode.Latest);
+
+        [TestCase("vercel-labs/agent-skills")]
+        [TestCase("zapier/connectors")]
+        public void Fetch_LatestMode_SourceLockedWithASkillsShServerHash_ReturnsTheUpstreamCopy(string source)
+        {
+            _github.Fixture(source, "skills/tdd", "minimal");
+
+            var folder = LatestFetcher().Fetch(Skill("tdd", "server-hash-of-another-algorithm", source));
+
+            Assert.That(SkillFolderHash.Compute(folder), Is.EqualTo(FakeGitHub.MinimalHash));
+        }
+
+        [Test]
+        public void Fetch_LatestMode_NonAsciiPathAndHashDiffers_ReturnsTheUpstreamCopy()
+        {
+            _github
+                .File("owner/skills", "skills/intl/SKILL.md", "# intl")
+                .File("owner/skills", "skills/intl/résumé.md", "cv");
+
+            var folder = LatestFetcher().Fetch(Skill("intl", FakeGitHub.MinimalHash));
+
+            Assert.That(FilesUnder(folder), Is.EqualTo(new[] { "SKILL.md", "résumé.md" }));
+        }
+
+        // The CRLF rewrite makes a Pinned copy hash to the lock. Latest compares with upstream, so it keeps upstream's bytes.
+        [Test]
+        public void Fetch_LatestMode_LockHashedFromACrlfCheckout_ReturnsTheArchiveBytesUnchanged()
+        {
+            _github.Fixture("owner/skills", "skills/byte-exact", "byte-exact");
+
+            var folder = LatestFetcher().Fetch(Skill("byte-exact", ByteExactCrlfCheckoutHash));
+
+            Assert.That(File.ReadAllBytes(Path.Combine(folder, "SKILL.md")), Has.No.Member((byte)'\r'));
+            Assert.That(SkillFolderHash.Compute(folder), Is.Not.EqualTo(ByteExactCrlfCheckoutHash));
+        }
+
         [TestCase("owner/skills")]
         [TestCase("zapier/other-repo")]
         [TestCase("vercel-labs-fork/skills")]

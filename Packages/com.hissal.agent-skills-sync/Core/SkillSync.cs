@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace Hissal.AgentSkillsSync
@@ -55,18 +56,21 @@ namespace Hissal.AgentSkillsSync
         public InstallPlan Plan() => Plan(Lockfile.Load(_projectRoot));
 
         /// <summary>
-        /// Locked skills whose managed canonical copy does not hash to the locked <c>computedHash</c>, in lock order.
-        /// Skills whose locked hash cannot be checked (<see cref="GitHubSkillFetcher.CanVerify"/>) are never listed.
+        /// Locked skills whose managed canonical copy does not hash to the locked <c>computedHash</c> (as is or as a CRLF
+        /// checkout), in lock order. Skills where a mismatch can't tell are never listed: a skills.sh-hashed source
+        /// (<see cref="GitHubSkillFetcher.CanVerify"/>) or a copy with non-ASCII paths.
         /// </summary>
         /// <exception cref="LockfileException">The lockfile is missing or unusable.</exception>
-        public IReadOnlyList<string> InstalledDiffersFromLock()
+        public IReadOnlyList<string> InstalledDiffersFromLock() => InstalledDiffersFromLock(Lockfile.Load(_projectRoot));
+
+        /// <summary>Like <see cref="InstalledDiffersFromLock()"/>, against exactly <paramref name="lockfile"/>.</summary>
+        public IReadOnlyList<string> InstalledDiffersFromLock(Lockfile lockfile)
         {
-            var lockfile = Lockfile.Load(_projectRoot);
             var canonical = ProjectScanner.Scan(_projectRoot, _layout).For(_layout.Canonical);
+            var canonicalPath = Paths.InProject(_projectRoot, _layout.Canonical.RelativePath);
             return lockfile.Skills
-                .Where(s => GitHubSkillFetcher.CanVerify(s)
-                            && canonical.InstalledHash(s.Name) is string hash
-                            && !GitHubSkillFetcher.MatchesLock(s, hash))
+                .Where(s => canonical.InstalledHash(s.Name) != null // a managed copy
+                            && GitHubSkillFetcher.DiffersFromLock(s, Path.Combine(canonicalPath, s.Name)))
                 .Select(s => s.Name)
                 .ToList();
         }
@@ -122,16 +126,16 @@ namespace Hissal.AgentSkillsSync
 
             if (failures.Count > 0) throw new SyncAbortedException(failures);
 
+            // Judged on the fetched copies, as fetched.
+            var differs = latest
+                ? lockfile.Skills.Where(s => fetched.TryGetValue(s.Name, out var folder) && GitHubSkillFetcher.DiffersFromLock(s, folder))
+                    .Select(s => s.Name).ToList()
+                : null;
+
             var plan = latest ? PlanWith(lockfile, project, new UpstreamHashCheck(upstreamHashes)) : toFetch;
             var summary = _executor.Execute(_projectRoot, plan, fetched);
             if (!latest) return summary;
 
-            var differs = lockfile.Skills
-                .Where(s => GitHubSkillFetcher.CanVerify(s)
-                            && upstreamHashes.TryGetValue(s.Name, out var hash)
-                            && !GitHubSkillFetcher.MatchesLock(s, hash))
-                .Select(s => s.Name)
-                .ToList();
             return new SyncSummary(summary.Applied, summary.LinkMethods, differs);
         }
     }
