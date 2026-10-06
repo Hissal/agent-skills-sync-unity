@@ -115,5 +115,54 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(lockfile.Skills[0].Name, Is.EqualTo(name));
         }
+
+        static string LockWithRef(string jsonRefMember) =>
+            @"{ ""version"": 1, ""skills"": { ""a"": { ""source"": ""owner/repo"", ""sourceType"": ""github"", ""computedHash"": ""abc""" +
+            jsonRefMember + @" } } }";
+
+        [TestCase("v1.2.0")]
+        [TestCase("main")]
+        [TestCase("feature/new-skill")]
+        [TestCase("0123abcd")]
+        public void Parse_Ref_KeepsIt(string reference)
+        {
+            var lockfile = Lockfile.Parse(LockWithRef(@", ""ref"": """ + reference + @""""));
+
+            Assert.That(lockfile.Skills[0].Ref, Is.EqualTo(reference));
+        }
+
+        [TestCase("", TestName = "Parse_NoRef_RefIsNull")]
+        [TestCase(@", ""ref"": """"", TestName = "Parse_EmptyRef_RefIsNull")]
+        [TestCase(@", ""ref"": null", TestName = "Parse_NullRef_RefIsNull")]
+        public void Parse_NoUsableRef_RefIsNull(string jsonRefMember)
+        {
+            var lockfile = Lockfile.Parse(LockWithRef(jsonRefMember));
+
+            Assert.That(lockfile.Skills[0].Ref, Is.Null);
+        }
+
+        [TestCase("../main", TestName = "Parse_RefWithParentTraversal_Rejects")]
+        [TestCase("a..b", TestName = "Parse_RefWithDoubleDot_Rejects")]
+        [TestCase("/main", TestName = "Parse_RefWithLeadingSlash_Rejects")]
+        [TestCase("main/", TestName = "Parse_RefWithTrailingSlash_Rejects")]
+        [TestCase("a//b", TestName = "Parse_RefWithEmptyComponent_Rejects")]
+        [TestCase("a b", TestName = "Parse_RefWithSpace_Rejects")]
+        [TestCase(@"a\\b",TestName = "Parse_RefWithBackslash_Rejects")]
+        [TestCase("a?b", TestName = "Parse_RefWithQuestionMark_Rejects")]
+        [TestCase("a#b", TestName = "Parse_RefWithHash_Rejects")]
+        [TestCase("a:b", TestName = "Parse_RefWithColon_Rejects")]
+        [TestCase("main.lock", TestName = "Parse_RefEndingInLock_Rejects")]
+        public void Parse_UnsafeRef_RejectsNamingTheSkill(string reference)
+        {
+            var error = Assert.Throws<LockfileException>(() => Lockfile.Parse(LockWithRef(@", ""ref"": """ + reference + @"""")));
+
+            Assert.That(error.Message, Does.Contain("\"a\"").And.Contain("ref"));
+        }
+
+        [Test]
+        public void Parse_NonStringRef_Rejects()
+        {
+            Assert.Throws<LockfileException>(() => Lockfile.Parse(LockWithRef(@", ""ref"": 3")));
+        }
     }
 }

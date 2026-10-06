@@ -85,7 +85,34 @@ namespace Hissal.AgentSkillsSync
                 source,
                 sourceType,
                 Get(skill, "skillPath") as string,
-                Get(skill, "computedHash") as string);
+                Get(skill, "computedHash") as string,
+                ParseRef(name, Get(skill, "ref")));
+        }
+
+        // The ref goes into the archive URL and the fetch cache path, so only plain git ref names are accepted
+        // (git check-ref-format's rules, plus no characters that would change the URL's meaning).
+        static readonly char[] UnsafeRefChars = { ' ', '~', '^', ':', '?', '*', '[', '\\', '#', '%', '"', '<', '>', '|' };
+
+        static string ParseRef(string name, object value)
+        {
+            if (value == null) return null;
+            if (!(value is string reference))
+                throw new LockfileException($"Skill \"{name}\" in {FileName} has a ref that is not a string.");
+            if (reference.Length == 0) return null;
+            if (!IsSafeRef(reference))
+                throw new LockfileException(
+                    $"Skill \"{name}\" in {FileName} has ref {Describe(reference)}, which is not a valid git branch, tag or commit name.");
+            return reference;
+        }
+
+        static bool IsSafeRef(string reference)
+        {
+            if (reference.IndexOfAny(UnsafeRefChars) >= 0 || reference.Contains("..") || reference.Contains("@{")) return false;
+            foreach (var c in reference)
+                if (c < 0x20 || c == 0x7f) return false;
+            foreach (var part in reference.Split('/'))
+                if (part.Length == 0 || part[0] == '.' || part.EndsWith(".lock", StringComparison.Ordinal)) return false;
+            return !reference.EndsWith(".", StringComparison.Ordinal);
         }
 
         // The name becomes the last component of paths under the skills folders and the fetch cache, so it must
