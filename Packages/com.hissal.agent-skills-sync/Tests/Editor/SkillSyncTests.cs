@@ -322,6 +322,21 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void StartupCheck_AfterLatestSyncOfUpstreamThatDiffersFromLock_StaysQuiet()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+            Sync(InstallMode.Latest).Run();
+            var prefs = LocalPrefs.Load(_project);
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(_project));
+            prefs.Save();
+
+            var status = SyncStatus.Read(_project);
+
+            Assert.That(status.MissingSkills, Is.Empty, "a Latest copy that differs from the lock is not out of sync");
+            Assert.That(StartupCheck.ShouldNotify(status, LocalPrefs.Load(_project)), Is.False);
+        }
+
+        [Test]
         public void Run_Pinned_UpstreamDiffersFromLock_RefusesAndChangesNothing()
         {
             _fetcher.Upstream["tdd"] = "nested";
