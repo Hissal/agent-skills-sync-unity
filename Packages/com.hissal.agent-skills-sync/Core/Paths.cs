@@ -30,33 +30,6 @@ namespace Hissal.AgentSkillsSync
             return string.Join(Path.DirectorySeparatorChar.ToString(), up.Concat(to.Skip(common)));
         }
 
-        /// <summary>
-        /// Deletes a directory link without touching what it points at; works on dangling links.
-        /// A plain folder (a copy standing in for a link) is deleted recursively. A missing entry is fine.
-        /// </summary>
-        public static void DeleteLink(string path)
-        {
-            FileAttributes attributes;
-            try { attributes = File.GetAttributes(path); }
-            catch (FileNotFoundException) { return; }
-            catch (DirectoryNotFoundException) { return; }
-
-            if (attributes.HasFlag(FileAttributes.ReparsePoint))
-            {
-                // Windows removes a directory symlink or junction with RemoveDirectory; Unix unlinks a symlink as a file.
-                if (CaseInsensitive && attributes.HasFlag(FileAttributes.Directory)) Directory.Delete(path, recursive: false);
-                else File.Delete(path);
-            }
-            else if (attributes.HasFlag(FileAttributes.Directory))
-            {
-                Directory.Delete(path, recursive: true);
-            }
-            else
-            {
-                File.Delete(path);
-            }
-        }
-
         public static void CopyDirectory(string source, string destination)
         {
             Directory.CreateDirectory(destination);

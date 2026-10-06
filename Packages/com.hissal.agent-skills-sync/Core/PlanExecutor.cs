@@ -58,7 +58,7 @@ namespace Hissal.AgentSkillsSync
                     case PlanActionKind.LeaveForeign:
                         break;
                     case PlanActionKind.Unlink:
-                        Paths.DeleteLink(entry);
+                        DirectoryLink.Remove(entry);
                         break;
                 }
                 applied.Add(action);
