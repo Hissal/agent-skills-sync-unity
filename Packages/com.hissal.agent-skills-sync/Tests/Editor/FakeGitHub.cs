@@ -7,7 +7,8 @@ namespace Hissal.AgentSkillsSync.Tests
 {
     /// <summary>
     /// Stands in for GitHub: serves zips shaped like repo archives (one top-level "repo-ref/" folder) instead of
-    /// downloading. Repos are keyed "owner/repo"; a repo that is not served, or every repo when offline, fails.
+    /// downloading. Repos are keyed "owner/repo" (its default branch, <c>archive/HEAD.zip</c>) or "owner/repo@ref"
+    /// (<c>archive/&lt;ref&gt;.zip</c>); a repo or ref that is not served, or every repo when offline, fails.
     /// </summary>
     sealed class FakeGitHub : IArchiveDownloader
     {
@@ -57,9 +58,12 @@ namespace Hissal.AgentSkillsSync.Tests
             if (Offline) throw new IOException("No such host is known.");
 
             const string prefix = "https://github.com/";
-            const string suffix = "/archive/HEAD.zip";
-            var repo = url.Substring(prefix.Length, url.Length - prefix.Length - suffix.Length);
-            if (!_repos.TryGetValue(repo, out var files)) throw new IOException($"{url} returned HTTP 404 Not Found.");
+            const string archive = "/archive/";
+            var path = url.Substring(prefix.Length, url.Length - prefix.Length - ".zip".Length);
+            var repo = path.Substring(0, path.IndexOf(archive, StringComparison.Ordinal));
+            var reference = Uri.UnescapeDataString(path.Substring(repo.Length + archive.Length));
+            var key = reference == "HEAD" ? repo : repo + "@" + reference;
+            if (!_repos.TryGetValue(key, out var files)) throw new IOException($"{url} returned HTTP 404 Not Found.");
 
             var top = repo.Substring(repo.IndexOf('/') + 1) + "-main/";
             using (var zip = ZipFile.Open(destinationPath, ZipArchiveMode.Create))

@@ -120,13 +120,17 @@ namespace Hissal.AgentSkillsSync
 
         string DownloadOnce((string Owner, string Name) repo, LockedSkill skill)
         {
-            var key = repo.Owner + "/" + repo.Name;
+            // The lock's ref (branch, tag or commit; Lockfile accepts only plain git ref names), else the default branch.
+            var reference = string.IsNullOrEmpty(skill.Ref) ? null : skill.Ref;
+            var key = repo.Owner + "/" + repo.Name + (reference == null ? "" : "@" + reference);
             if (_archives.TryGetValue(key, out var cached)) return cached;
             if (_failedDownloads.TryGetValue(key, out var failure)) throw DownloadFailed(key, skill, failure);
 
-            var archive = Path.Combine(_cacheRoot, "archives", repo.Owner, repo.Name + ".zip");
+            var archiveName = repo.Name + (reference == null ? "" : "@" + Uri.EscapeDataString(reference)) + ".zip";
+            var archive = Path.Combine(_cacheRoot, "archives", repo.Owner, archiveName);
             var partial = archive + ".part";
-            var url = $"https://github.com/{repo.Owner}/{repo.Name}/archive/HEAD.zip";
+            var urlRef = reference == null ? "HEAD" : string.Join("/", Array.ConvertAll(reference.Split('/'), Uri.EscapeDataString));
+            var url = $"https://github.com/{repo.Owner}/{repo.Name}/archive/{urlRef}.zip";
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(archive));

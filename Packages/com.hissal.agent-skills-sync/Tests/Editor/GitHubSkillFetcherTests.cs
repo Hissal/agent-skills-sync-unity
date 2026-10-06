@@ -27,8 +27,8 @@ namespace Hissal.AgentSkillsSync.Tests
             if (Directory.Exists(_cache)) Directory.Delete(_cache, recursive: true);
         }
 
-        static LockedSkill Skill(string name, string hash, string source = "owner/skills") =>
-            new LockedSkill(name, source, "github", $"skills/{name}/SKILL.md", hash);
+        static LockedSkill Skill(string name, string hash, string source = "owner/skills", string reference = null) =>
+            new LockedSkill(name, source, "github", $"skills/{name}/SKILL.md", hash, reference);
 
         static LockedSkill Tdd => Skill("tdd", FakeGitHub.MinimalHash);
         static LockedSkill CodeReview => Skill("code-review", FakeGitHub.NestedHash);
@@ -57,6 +57,35 @@ namespace Hissal.AgentSkillsSync.Tests
             fetcher.Fetch(CodeReview);
 
             Assert.That(_github.Requested, Is.EqualTo(new[] { "https://github.com/owner/skills/archive/HEAD.zip" }));
+        }
+
+        [Test]
+        public void Fetch_SkillLockedToARef_FetchesThatRefsArchive()
+        {
+            _github.Fixture("owner/skills@release/v1", "skills/tdd", "nested");
+
+            var folder = Fetcher().Fetch(Skill("tdd", FakeGitHub.NestedHash, reference: "release/v1"));
+
+            Assert.That(_github.Requested, Is.EqualTo(new[] { "https://github.com/owner/skills/archive/release/v1.zip" }));
+            Assert.That(SkillFolderHash.Compute(folder), Is.EqualTo(FakeGitHub.NestedHash));
+        }
+
+        [Test]
+        public void Fetch_SkillsAtDifferentRefsOfOneRepo_DownloadsEachRefsArchive()
+        {
+            _github.Fixture("owner/skills@v1", "skills/code-review", "minimal");
+            var fetcher = Fetcher();
+
+            var atHead = fetcher.Fetch(Tdd);
+            var atRef = fetcher.Fetch(Skill("code-review", FakeGitHub.MinimalHash, reference: "v1"));
+
+            Assert.That(_github.Requested, Is.EqualTo(new[]
+            {
+                "https://github.com/owner/skills/archive/HEAD.zip",
+                "https://github.com/owner/skills/archive/v1.zip",
+            }));
+            Assert.That(SkillFolderHash.Compute(atHead), Is.EqualTo(FakeGitHub.MinimalHash));
+            Assert.That(SkillFolderHash.Compute(atRef), Is.EqualTo(FakeGitHub.MinimalHash));
         }
 
         [Test]
