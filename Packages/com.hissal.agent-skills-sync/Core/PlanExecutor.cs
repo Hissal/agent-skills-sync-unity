@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,8 +9,16 @@ namespace Hissal.AgentSkillsSync
     public sealed class PlanExecutor
     {
         readonly ILinkCreator _linker;
+        readonly Action<string, string> _copyDirectory;
 
-        public PlanExecutor(ILinkCreator linker = null) => _linker = linker ?? FallbackLinkCreator.Default;
+        public PlanExecutor(ILinkCreator linker = null) : this(linker, null) { }
+
+        /// <param name="copyDirectory">Copies a folder (source, destination); a test seam for copy failures.</param>
+        internal PlanExecutor(ILinkCreator linker, Action<string, string> copyDirectory)
+        {
+            _linker = linker ?? FallbackLinkCreator.Default;
+            _copyDirectory = copyDirectory ?? Paths.CopyDirectory;
+        }
 
         /// <param name="projectRoot">The folder holding <c>skills-lock.json</c>.</param>
         /// <param name="plan">The plan to apply.</param>
@@ -28,12 +37,12 @@ namespace Hissal.AgentSkillsSync
                 {
                     case PlanActionKind.Install:
                         Directory.CreateDirectory(folder);
-                        Paths.CopyDirectory(Fetched(fetchedFolders, action), entry);
+                        _copyDirectory(Fetched(fetchedFolders, action), entry);
                         break;
                     case PlanActionKind.Update:
                         var source = Fetched(fetchedFolders, action);
                         DirectoryLink.Remove(entry);
-                        Paths.CopyDirectory(source, entry);
+                        _copyDirectory(source, entry);
                         RefreshCopiedLinks(projectRoot, plan, action.SkillName, entry);
                         break;
                     case PlanActionKind.Link:
@@ -62,9 +71,10 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// A symlink or junction follows an updated canonical copy by itself; a link made by the Copy fallback does
-        /// not, so re-copy it from the new canonical copy.
+        /// not, so re-copy it from the new canonical copy. A copy that fails partway is deleted, so the next scan finds
+        /// the link missing and plans a new Link instead of taking the partial copy for a current link.
         /// </summary>
-        static void RefreshCopiedLinks(string projectRoot, InstallPlan plan, string skillName, string canonicalEntry)
+        void RefreshCopiedLinks(string projectRoot, InstallPlan plan, string skillName, string canonicalEntry)
         {
             foreach (var managed in plan.ManagedNames)
             {
@@ -72,7 +82,30 @@ namespace Hissal.AgentSkillsSync
                 var link = Path.Combine(Paths.InProject(projectRoot, managed.Key.RelativePath), skillName);
                 if (!Directory.Exists(link) || File.GetAttributes(link).HasFlag(FileAttributes.ReparsePoint)) continue;
                 DirectoryLink.Remove(link);
-                Paths.CopyDirectory(canonicalEntry, link);
+                try
+                {
+                    _copyDirectory(canonicalEntry, link);
+                }
+                catch
+                {
+                    TryRemove(link);
+                    throw;
+                }
+            }
+        }
+
+        // Best effort: the copy's own failure is the one worth reporting.
+        static void TryRemove(string path)
+        {
+            try
+            {
+                DirectoryLink.Remove(path);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
             }
         }
 

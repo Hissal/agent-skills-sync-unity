@@ -203,6 +203,33 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Update_OverCopy_RefreshFailsPartway_NextSyncRelinksTheSkill()
+        {
+            Sync(ForceCopy());
+            // Copies into the link folder write one file and then fail, like a full disk; other copies work.
+            var failingRefresh = new PlanExecutor(ForceCopy(), (source, destination) =>
+            {
+                var inLinkFolder = Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(destination))) == ".claude";
+                if (!inLinkFolder)
+                {
+                    Paths.CopyDirectory(source, destination);
+                    return;
+                }
+                Directory.CreateDirectory(destination);
+                File.WriteAllText(Path.Combine(destination, "SKILL.md"), "partial");
+                throw new IOException("disk full");
+            });
+
+            Assert.Throws<IOException>(() => failingRefresh.Execute(_project, PlanNow(FakeGitHub.NestedHash),
+                new Dictionary<string, string> { ["tdd"] = Path.Combine(FixturesRoot, "nested") }));
+
+            var retry = PlanNow(FakeGitHub.NestedHash);
+            Assert.That(retry.Actions.Where(a => a.Kind == PlanActionKind.Link).Select(a => a.SkillName), Is.EqualTo(new[] { "tdd" }));
+            SyncUpdatedToNested(ForceCopy());
+            Assert.That(SkillFolderHash.Compute(Link), Is.EqualTo(FakeGitHub.NestedHash));
+        }
+
+        [Test]
         public void Update_OverJunction_KeepsTheJunctionShowingTheNewCopy()
         {
             RequireWindows();
