@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Hissal.AgentSkillsSync
 {
@@ -28,5 +29,40 @@ namespace Hissal.AgentSkillsSync
             if (!GitHubSkillFetcher.CanVerify(skill)) return true;
             return installedHash != null && string.Equals(installedHash, skill.ComputedHash, StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    /// <summary>
+    /// The <see cref="InstallMode.Latest"/> rule: the installed copy is current when its hash equals the freshly fetched
+    /// upstream copy's, so a re-sync with unchanged upstream is a no-op even when upstream differs from the lock.
+    /// </summary>
+    internal sealed class UpstreamHashCheck : IInstalledCopyCheck
+    {
+        readonly IReadOnlyDictionary<string, string> _upstreamHashes;
+
+        /// <param name="upstreamHashes">Skill name to the <see cref="SkillFolderHash"/> of its fetched upstream copy.</param>
+        public UpstreamHashCheck(IReadOnlyDictionary<string, string> upstreamHashes) => _upstreamHashes = upstreamHashes;
+
+        public bool IsCurrent(LockedSkill skill, string installedHash)
+        {
+            // Not fetched: nothing to update it with, so leave it.
+            if (!_upstreamHashes.TryGetValue(skill.Name, out var upstream)) return true;
+            return installedHash != null && string.Equals(installedHash, upstream, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>A fixed answer: every installed copy is current, or none is.</summary>
+    internal sealed class FixedCheck : IInstalledCopyCheck
+    {
+        /// <summary>Plans no Update; Latest mode's offline preview, which cannot know upstream.</summary>
+        public static FixedCheck AlwaysCurrent { get; } = new FixedCheck(true);
+
+        /// <summary>Plans an Update for every managed copy; finds what Latest mode must fetch to compare.</summary>
+        public static FixedCheck NeverCurrent { get; } = new FixedCheck(false);
+
+        readonly bool _current;
+
+        FixedCheck(bool current) => _current = current;
+
+        public bool IsCurrent(LockedSkill skill, string installedHash) => _current;
     }
 }

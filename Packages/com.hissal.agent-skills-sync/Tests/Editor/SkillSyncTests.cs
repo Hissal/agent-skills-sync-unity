@@ -18,13 +18,17 @@ namespace Hissal.AgentSkillsSync.Tests
             public readonly HashSet<string> Failing = new HashSet<string>();
             public readonly List<string> Fetched = new List<string>();
 
+            /// <summary>Skill name to the fixture upstream serves now, overriding the one its locked hash names.</summary>
+            public readonly Dictionary<string, string> Upstream = new Dictionary<string, string>();
+
             public FakeFetcher(string root) => _root = root;
 
             public string Fetch(LockedSkill skill)
             {
                 Fetched.Add(skill.Name);
                 if (Failing.Contains(skill.Name)) throw new SkillFetchException($"Could not download {skill.Source}.");
-                var fixture = skill.ComputedHash == FakeGitHub.NestedHash ? "nested" : "minimal";
+                if (!Upstream.TryGetValue(skill.Name, out var fixture))
+                    fixture = skill.ComputedHash == FakeGitHub.NestedHash ? "nested" : "minimal";
                 var folder = Path.Combine(_root, "fetched", skill.Name, Guid.NewGuid().ToString("N"));
                 Paths.CopyDirectory(Path.Combine(FixturesRoot, fixture), folder);
                 return folder;
@@ -299,6 +303,123 @@ namespace Hissal.AgentSkillsSync.Tests
             sync.Run();
 
             Assert.That(ManagedStateFile.Read(canonical), Is.Empty);
+        }
+
+        // Install modes.
+
+        SkillSync Sync(InstallMode mode) => new SkillSync(_project, _fetcher, mode: mode);
+
+        [Test]
+        public void Run_Latest_UpstreamDiffersFromLock_InstallsUpstreamAndReportsIt()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+
+            var summary = Sync(InstallMode.Latest).Run();
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd", "code-review" }));
+            Assert.That(summary.DiffersFromLock, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(SkillFolderHash.Compute(Path.Combine(_project, ".agents/skills/tdd")), Is.EqualTo(FakeGitHub.NestedHash));
+        }
+
+        [Test]
+        public void Run_Pinned_UpstreamDiffersFromLock_RefusesAndChangesNothing()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+
+            var error = Assert.Throws<SyncAbortedException>(() => Sync(InstallMode.Pinned).Run());
+
+            Assert.That(error.Failures.Keys, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(error.Failures["tdd"].Failure, Is.EqualTo(SkillFetchFailure.HashMismatch));
+            Assert.That(error.Message, Does.Contain("npx skills update"));
+            Assert.That(Directory.Exists(Path.Combine(_project, ".agents")), Is.False);
+            Assert.That(Directory.Exists(Path.Combine(_project, ".claude")), Is.False);
+        }
+
+        [Test]
+        public void Run_Latest_NeverModifiesTheLockfile()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+            var lockPath = Path.Combine(_project, Lockfile.FileName);
+            var before = File.ReadAllBytes(lockPath);
+            var written = File.GetLastWriteTimeUtc(lockPath);
+
+            Sync(InstallMode.Latest).Run();
+            Sync(InstallMode.Latest).Run();
+
+            Assert.That(File.ReadAllBytes(lockPath), Is.EqualTo(before));
+            Assert.That(File.GetLastWriteTimeUtc(lockPath), Is.EqualTo(written));
+        }
+
+        [Test]
+        public void Run_Latest_TwiceWithUnchangedUpstream_SecondRunChangesNothing()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+            Sync(InstallMode.Latest).Run();
+
+            var summary = Sync(InstallMode.Latest).Run();
+
+            Assert.That(summary.NothingChanged, Is.True);
+            Assert.That(summary.DiffersFromLock, Is.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
+        public void Run_Latest_UpstreamMovedSinceTheLastSync_UpdatesToTheNewUpstream()
+        {
+            Sync(InstallMode.Latest).Run();
+            _fetcher.Upstream["code-review"] = "nested";
+
+            var summary = Sync(InstallMode.Latest).Run();
+
+            Assert.That(summary.Updated, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(SkillFolderHash.Compute(Path.Combine(_project, ".agents/skills/code-review")), Is.EqualTo(FakeGitHub.NestedHash));
+        }
+
+        [Test]
+        public void Run_Latest_FetchFails_ChangesNothingInTheProject()
+        {
+            Sync(InstallMode.Latest).Run();
+            _fetcher.Upstream["tdd"] = "nested";
+            _fetcher.Failing.Add("code-review");
+            var before = Tree(_project).ToList();
+
+            var error = Assert.Throws<SyncAbortedException>(() => Sync(InstallMode.Latest).Run());
+
+            Assert.That(error.Failures.Keys, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(Tree(_project), Is.EqualTo(before));
+        }
+
+        [Test]
+        public void Run_Latest_RealFetcherOverChangedSource_InstallsUpstream()
+        {
+            var github = VerifiedProject().File("other/skills", "skills/code-review/SKILL.md", "# changed upstream");
+            var fetcher = new GitHubSkillFetcher(Path.Combine(_root, "cache"), github, InstallMode.Latest);
+
+            var summary = new SkillSync(_project, fetcher, mode: InstallMode.Latest).Run();
+
+            Assert.That(summary.Installed, Is.EquivalentTo(new[] { "tdd", "code-review" }));
+            Assert.That(summary.DiffersFromLock, Does.Contain("code-review"));
+        }
+
+        [Test]
+        public void InstalledDiffersFromLock_ListsManagedCopiesWhoseHashIsNotTheLocked()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+            Sync(InstallMode.Latest).Run();
+
+            Assert.That(Sync(InstallMode.Latest).InstalledDiffersFromLock(), Is.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
+        public void Plan_Latest_InstalledCopyDiffersFromLock_PlansNoUpdateWithoutFetching()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+            Sync(InstallMode.Latest).Run();
+            _fetcher.Fetched.Clear();
+
+            var plan = Sync(InstallMode.Latest).Plan();
+
+            Assert.That(plan.HasChanges, Is.False);
+            Assert.That(_fetcher.Fetched, Is.Empty);
         }
     }
 }

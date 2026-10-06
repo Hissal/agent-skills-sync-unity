@@ -6,11 +6,19 @@ namespace Hissal.AgentSkillsSync
     /// <summary>What a sync did, for the window's summary.</summary>
     public sealed class SyncSummary
     {
-        public SyncSummary(IReadOnlyList<PlanAction> applied, IReadOnlyDictionary<PlanAction, LinkMethod> linkMethods = null)
+        public SyncSummary(IReadOnlyList<PlanAction> applied, IReadOnlyDictionary<PlanAction, LinkMethod> linkMethods = null,
+            IReadOnlyList<string> differsFromLock = null)
         {
             Applied = applied;
             LinkMethods = linkMethods ?? new Dictionary<PlanAction, LinkMethod>();
+            DiffersFromLock = differsFromLock ?? new List<string>();
         }
+
+        /// <summary>
+        /// In <see cref="InstallMode.Latest"/>, names of locked skills whose fetched upstream copy does not match the lock
+        /// (installed or already current); empty in Pinned mode, which refuses such skills.
+        /// </summary>
+        public IReadOnlyList<string> DiffersFromLock { get; }
 
         /// <summary>Every action applied, in order, including LeaveForeign (which changes nothing).</summary>
         public IReadOnlyList<PlanAction> Applied { get; }
@@ -26,7 +34,7 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Names of skills given a canonical copy.</summary>
         public IReadOnlyList<string> Installed => NamesOf(PlanActionKind.Install);
 
-        /// <summary>Names of skills whose canonical copy was replaced with the locked version.</summary>
+        /// <summary>Names of skills whose canonical copy was replaced with the fetched one.</summary>
         public IReadOnlyList<string> Updated => NamesOf(PlanActionKind.Update);
 
         /// <summary>Names of skills whose managed copy or links were deleted (no longer locked, or no folder selected).</summary>

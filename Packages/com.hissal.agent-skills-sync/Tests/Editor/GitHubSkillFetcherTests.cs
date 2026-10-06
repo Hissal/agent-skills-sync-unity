@@ -139,6 +139,16 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Fetch_LatestMode_ContentDiffersFromLockedHash_ReturnsTheUpstreamCopy()
+        {
+            _github.File("owner/skills", "skills/tdd/SKILL.md", "# tdd, edited upstream after locking");
+
+            var folder = new GitHubSkillFetcher(_cache, _github, InstallMode.Latest).Fetch(Tdd);
+
+            Assert.That(File.ReadAllText(Path.Combine(folder, "SKILL.md")), Does.Contain("edited upstream"));
+        }
+
+        [Test]
         public void Fetch_LockHasNoHash_ThrowsHashMismatch()
         {
             var error = Assert.Throws<SkillFetchException>(() => Fetcher().Fetch(Skill("tdd", null)));
