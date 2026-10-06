@@ -6,8 +6,10 @@ using UnityEngine;
 namespace Hissal.AgentSkillsSync.Editor
 {
     /// <summary>
-    /// Once per editor session (not per domain reload), checks whether the project's skills are out of
-    /// sync and, if so, offers to open the sync window. Declining keeps it quiet until something changes.
+    /// Once per editor session (not per domain reload), first offers to add each skills folder whose
+    /// user-scope home appeared since the selection was made (declining is remembered per folder), then
+    /// checks whether the project's skills are out of sync and, if so, offers to open the sync window.
+    /// Declining keeps it quiet until something changes. With no folder selected it never notifies.
     /// </summary>
     [InitializeOnLoad]
     static class StartupNotifier
@@ -27,8 +29,12 @@ namespace Hissal.AgentSkillsSync.Editor
             var projectRoot = Path.GetDirectoryName(Application.dataPath);
             try
             {
-                var status = SyncStatus.Read(projectRoot);
+                var table = FolderLayout.Default;
+                var environment = UserEnvironment.Current;
                 var prefs = LocalPrefs.Load(projectRoot);
+                OfferNewFolders(prefs, table, environment);
+
+                var status = SyncStatus.Read(projectRoot, table, FolderSelection.Effective(prefs, table, environment));
                 if (!StartupCheck.ShouldNotify(status, prefs)) return;
 
                 if (EditorUtility.DisplayDialog(
@@ -47,6 +53,24 @@ namespace Hissal.AgentSkillsSync.Editor
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
             {
                 Debug.LogWarning("Agent Skills Sync: startup check failed: " + e.Message);
+            }
+        }
+
+        /// <summary>One dialog per folder whose home appeared and was neither selected nor declined; saves each answer.</summary>
+        static void OfferNewFolders(LocalPrefs prefs, FolderLayout table, UserEnvironment environment)
+        {
+            foreach (var folder in FolderSelection.Offers(prefs, table, environment))
+            {
+                var add = EditorUtility.DisplayDialog(
+                    "Agent Skills Sync",
+                    $"An agent that reads {folder.RelativePath} ({folder.Label}) now seems to be set up on this machine.\n\n" +
+                    $"Add {folder.RelativePath} to the skills folders this project installs into? Nothing is installed until you sync. " +
+                    "If you choose Not Now, you won't be asked about this folder again (you can still select it in the sync window).",
+                    "Add Folder",
+                    "Not Now");
+                if (add) FolderSelection.Accept(prefs, table, folder, environment);
+                else FolderSelection.Decline(prefs, folder);
+                prefs.Save();
             }
         }
 

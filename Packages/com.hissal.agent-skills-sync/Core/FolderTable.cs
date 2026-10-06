@@ -15,8 +15,7 @@ namespace Hissal.AgentSkillsSync
         public static FolderLayout Default { get; } = new FolderLayout(new[]
         {
             new SkillsFolder("agents", ".agents/skills", SkillsFolderRole.Canonical,
-                "Codex, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Amp, Cline, Kilo Code, Droid, Antigravity, Deep Agents, " +
-                "Firebender, Kimi Code, Warp, Zed and other agents reading .agents/skills",
+                "Codex, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Amp, Cline, Zed and more",
                 new[]
                 {
                     new UserScopeLocation("Codex, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Amp, Cline, Kilo Code, Droid, " +

@@ -14,12 +14,15 @@ namespace Hissal.AgentSkillsSync.Editor
     /// ticked the consent box and confirmed every source repo new since the last sync. Consent and
     /// confirmations are held only by this window instance and reset on refresh or reload.
     /// A failed sync marks each skill that could not be fetched or verified with its error.
+    /// The skills folders to install into are chosen at the top and stored in local prefs as soon as they change;
+    /// until then they are pre-selected by autofill, and nothing is installed before Sync.
     /// </summary>
     public sealed class SkillsSyncWindow : EditorWindow
     {
         const string Title = "Agent Skills Sync";
 
         HelpBox _status;
+        VisualElement _folders;
         VisualElement _newSources;
         VisualElement _skillList;
         Toggle _consent;
@@ -32,6 +35,11 @@ namespace Hissal.AgentSkillsSync.Editor
 
         static string ProjectRoot => Path.GetDirectoryName(Application.dataPath);
 
+        static FolderLayout Table => FolderLayout.Default;
+
+        static IReadOnlyList<SkillsFolder> SelectedFolders() =>
+            FolderSelection.Effective(LocalPrefs.Load(ProjectRoot), Table, UserEnvironment.Current);
+
         [MenuItem("Window/Agent Skills Sync")]
         public static void Open() => GetWindow<SkillsSyncWindow>(Title).Show();
 
@@ -43,6 +51,9 @@ namespace Hissal.AgentSkillsSync.Editor
 
             // Everything above the Sync controls scrolls, so many new-source confirmations or skills never push them off-screen.
             var scroll = new ScrollView { style = { flexGrow = 1, marginBottom = 4 } };
+            scroll.Add(new Label("Skills folders to install into on this machine") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
+            _folders = new VisualElement { style = { marginTop = 2, marginBottom = 8 } };
+            scroll.Add(_folders);
             scroll.Add(new Label($"Skills locked in {Lockfile.FileName}") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
             _status = new HelpBox("", HelpBoxMessageType.None) { style = { display = DisplayStyle.None } };
             scroll.Add(_status);
@@ -71,6 +82,7 @@ namespace Hissal.AgentSkillsSync.Editor
         void Refresh()
         {
             _skillList.Clear();
+            _folders.Clear();
             _newSources.Clear();
             _confirmedSources.Clear();
             _consent.SetValueWithoutNotify(false);
@@ -78,14 +90,17 @@ namespace Hissal.AgentSkillsSync.Editor
             _lockfile = null;
             ShowStatus(null, HelpBoxMessageType.None);
 
+            var selected = SelectedFolders();
+            ShowFolders(selected);
+
             try
             {
                 var lockfile = Lockfile.Load(ProjectRoot);
-                var plan = new SkillSync(ProjectRoot, fetcher: null).Plan();
+                var plan = new SkillSync(ProjectRoot, fetcher: null, selected: selected).Plan(lockfile);
                 var newSources = SourceConsent.NewSources(lockfile, LocalPrefs.Load(ProjectRoot));
                 var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
                 foreach (var skill in lockfile.Skills)
-                    _skillList.Add(SkillRow(skill, PendingLabel(plan, skill.Name), isNew.Contains(skill.Source),
+                    _skillList.Add(SkillRow(skill, selected.Count == 0 ? "not installed (no folder selected)" : PendingLabel(plan, skill.Name), isNew.Contains(skill.Source),
                         _failures.TryGetValue(skill.Name, out var failure) ? failure : null));
                 ShowNewSources(newSources);
 
@@ -93,10 +108,12 @@ namespace Hissal.AgentSkillsSync.Editor
 
                 var removals = plan.Actions.Where(a => a.Kind == PlanActionKind.Remove).Select(a => a.SkillName).Distinct().ToList();
                 if (removals.Count > 0)
-                    ShowStatus($"No longer locked, removed on Sync: {string.Join(", ", removals)}", HelpBoxMessageType.Info);
+                    ShowStatus($"Removed on Sync: {string.Join(", ", removals)}", HelpBoxMessageType.Info);
+                else if (selected.Count == 0)
+                    ShowStatus("No skills folder is selected, so Sync installs nothing. Select a folder above to opt in.", HelpBoxMessageType.Info);
                 else if (lockfile.Skills.Count == 0)
                     ShowStatus("The lockfile lists no skills.", HelpBoxMessageType.Info);
-                _canSync = lockfile.Skills.Count > 0 || plan.HasChanges;
+                _canSync = (selected.Count > 0 && lockfile.Skills.Count > 0) || plan.HasChanges;
             }
             catch (LockfileException e)
             {
@@ -153,6 +170,49 @@ namespace Hissal.AgentSkillsSync.Editor
             }
         }
 
+        /// <summary>One toggle per folder-table entry; a change is stored at once and re-plans.</summary>
+        void ShowFolders(IReadOnlyList<SkillsFolder> selected)
+        {
+            var environment = UserEnvironment.Current;
+            var chosen = new HashSet<string>(selected.Select(f => f.RelativePath), StringComparer.Ordinal);
+            var toggles = new List<KeyValuePair<SkillsFolder, Toggle>>();
+            foreach (var folder in Table.Folders)
+            {
+                var toggle = new Toggle($"{folder.RelativePath}  ({folder.Label})")
+                {
+                    tooltip = "User-scope folders these agents read:\n" + string.Join("\n",
+                        folder.UserScopeLocations.Select(l => $"{l} - {l.Agents}")),
+                };
+                toggle.SetValueWithoutNotify(chosen.Contains(folder.RelativePath));
+                toggles.Add(new KeyValuePair<SkillsFolder, Toggle>(folder, toggle));
+                _folders.Add(toggle);
+            }
+            foreach (var pair in toggles)
+                pair.Value.RegisterValueChangedCallback(_ =>
+                    SaveFolders(toggles.Where(t => t.Value.value).Select(t => t.Key), environment));
+
+            if (!FolderSelection.IsChosen(LocalPrefs.Load(ProjectRoot)))
+                _folders.Add(new HelpBox(selected.Count > 0
+                    ? "Pre-selected because these agents' user folders exist on this machine. Nothing is installed until you Sync."
+                    : "No agent user folders found on this machine, so nothing is pre-selected.", HelpBoxMessageType.Info));
+        }
+
+        void SaveFolders(IEnumerable<SkillsFolder> selected, UserEnvironment environment)
+        {
+            try
+            {
+                var prefs = LocalPrefs.Load(ProjectRoot);
+                FolderSelection.Save(prefs, Table, selected, environment);
+                prefs.Save();
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                ShowSummary("Saving the folder selection failed: " + e.Message, HelpBoxMessageType.Error);
+                Debug.LogException(e);
+            }
+            Refresh();
+        }
+
         /// <summary>A warning plus one confirmation toggle per source repo not synced before.</summary>
         void ShowNewSources(IReadOnlyList<string> newSources)
         {
@@ -186,6 +246,7 @@ namespace Hissal.AgentSkillsSync.Editor
 
             SyncSummary summary = null;
             Lockfile lockfile = null;
+            IReadOnlyList<SkillsFolder> selected = null;
             try
             {
                 // Re-check against the lockfile as it is now: it may have gained a source since the window listed it.
@@ -198,8 +259,9 @@ namespace Hissal.AgentSkillsSync.Editor
                 }
 
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
+                selected = SelectedFolders();
                 // Run the very instance that passed the check, never a fresh read of the file.
-                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher()).Run(lockfile);
+                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher(), selected: selected).Run(lockfile);
                 ShowSummary(Describe(summary), HelpBoxMessageType.Info);
             }
             catch (SyncAbortedException e)
@@ -223,7 +285,7 @@ namespace Hissal.AgentSkillsSync.Editor
             {
                 try
                 {
-                    RecordSynced(lockfile);
+                    RecordSynced(lockfile, selected);
                 }
                 catch (Exception e) when (e is LockfileException || e is IOException || e is UnauthorizedAccessException)
                 {
@@ -238,12 +300,14 @@ namespace Hissal.AgentSkillsSync.Editor
 
         /// <summary>
         /// Remembers the synced lockfile so the startup check stays quiet until something changes,
-        /// and its sources so they are not flagged as new again. Only after a successful sync.
+        /// its sources so they are not flagged as new again, and the folder selection synced into (which
+        /// confirms an autofilled one). Only after a successful sync.
         /// </summary>
-        static void RecordSynced(Lockfile lockfile)
+        static void RecordSynced(Lockfile lockfile, IReadOnlyList<SkillsFolder> selected)
         {
             var prefs = LocalPrefs.Load(ProjectRoot);
-            StartupCheck.RecordSynced(prefs, SyncStatus.Read(ProjectRoot));
+            FolderSelection.Save(prefs, Table, selected, UserEnvironment.Current);
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(ProjectRoot, Table, selected));
             SourceConsent.RecordSynced(prefs, lockfile);
             prefs.Save();
         }
