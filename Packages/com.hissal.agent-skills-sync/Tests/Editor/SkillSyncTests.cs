@@ -545,5 +545,34 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(Sync(InstallMode.Latest).InstalledDiffersFromLock(checkedLock), Is.EqualTo(new[] { "tdd" }));
         }
+
+        [Test]
+        public void Run_Latest_OnlyTheCanonicalFolderSelected_LinksNothing()
+        {
+            var agents = FolderLayout.Default.Find(".agents/skills");
+
+            var summary = new SkillSync(_project, _fetcher, selected: new[] { agents }, mode: InstallMode.Latest).Run();
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd", "code-review" }));
+            Assert.That(summary.Linked, Is.Empty);
+            Assert.That(Directory.Exists(Path.Combine(_project, ".claude")), Is.False);
+        }
+
+        [Test]
+        public void Run_Latest_SkipStoredWithAUserScopeCopy_LeavesThatFolderOut()
+        {
+            var agents = FolderLayout.Default.Find(".agents/skills");
+            var claude = FolderLayout.Default.Find(".claude/skills");
+            var userScope = new UserScopeState(new[] { new UserScopeCopy(claude, "tdd", Path.Combine(_root, "home", "tdd"), "~/.claude/skills") });
+            var skips = new SkipChoices(new Dictionary<string, IReadOnlyList<string>> { [claude.RelativePath] = new[] { "tdd" } });
+
+            var summary = new SkillSync(_project, _fetcher, selected: new[] { agents, claude }, userScope: userScope, skips: skips,
+                mode: InstallMode.Latest).Run();
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd", "code-review" }));
+            Assert.That(summary.Linked, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(summary.SkippedForUserScope, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(Directory.Exists(Path.Combine(_project, ".claude/skills/tdd")), Is.False);
+        }
     }
 }
