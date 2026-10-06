@@ -41,14 +41,14 @@ namespace Hissal.AgentSkillsSync.Editor
             var root = rootVisualElement;
             root.style.paddingLeft = root.style.paddingRight = root.style.paddingTop = root.style.paddingBottom = 8;
 
-            root.Add(new Label($"Skills locked in {Lockfile.FileName}") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
+            // Everything above the Sync controls scrolls, so many new-source confirmations or skills never push them off-screen.
+            var scroll = new ScrollView { style = { flexGrow = 1, marginBottom = 4 } };
+            scroll.Add(new Label($"Skills locked in {Lockfile.FileName}") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
             _status = new HelpBox("", HelpBoxMessageType.None) { style = { display = DisplayStyle.None } };
-            root.Add(_status);
+            scroll.Add(_status);
             _newSources = new VisualElement { style = { marginTop = 4 } };
-            root.Add(_newSources);
-
-            var scroll = new ScrollView { style = { flexGrow = 1, marginTop = 4, marginBottom = 4 } };
-            _skillList = new VisualElement();
+            scroll.Add(_newSources);
+            _skillList = new VisualElement { style = { marginTop = 4 } };
             scroll.Add(_skillList);
             root.Add(scroll);
 
