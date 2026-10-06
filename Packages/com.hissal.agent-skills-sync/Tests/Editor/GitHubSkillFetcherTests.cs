@@ -144,6 +144,35 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(Directory.Exists(Path.Combine(_cache, "skills")), Is.False, "nothing unverified may be extracted");
         }
 
+        // The skills CLI hashes a git checkout. Locked on a machine with core.autocrlf=true, text files had CRLF
+        // endings; the archive has the repo's LF. Hash computed independently from the fixture (LF -> CRLF in
+        // every file without a NUL or CR byte, i.e. not in assets/binary.bin or crlf.txt).
+        const string ByteExactCrlfCheckoutHash = "1ef11b466bb0ad8cb6eec71a1a735f1851045762121f50f124f21d66c7ceee8f";
+
+        [Test]
+        public void Fetch_LockHashedFromACrlfCheckout_Accepts()
+        {
+            _github.Fixture("owner/skills", "skills/byte-exact", "byte-exact");
+
+            var folder = Fetcher().Fetch(Skill("byte-exact", ByteExactCrlfCheckoutHash));
+
+            Assert.That(FilesUnder(folder), Does.Contain("SKILL.md").And.Contain("assets/binary.bin"));
+        }
+
+        [Test]
+        public void Fetch_NonAsciiPathAndHashDiffers_RefusesAsUnverifiableNotChanged()
+        {
+            _github
+                .File("owner/skills", "skills/intl/SKILL.md", "# intl")
+                .File("owner/skills", "skills/intl/résumé.md", "cv");
+
+            var error = Assert.Throws<SkillFetchException>(() => Fetcher().Fetch(Skill("intl", FakeGitHub.MinimalHash)));
+
+            Assert.That(error.Failure, Is.EqualTo(SkillFetchFailure.Unverifiable));
+            Assert.That(error.Message, Does.Contain("can't verify"));
+            Assert.That(Directory.Exists(Path.Combine(_cache, "skills", "owner", "skills", "intl")), Is.False);
+        }
+
         [TestCase("owner/skills")]
         [TestCase("zapier/other-repo")]
         [TestCase("vercel-labs-fork/skills")]

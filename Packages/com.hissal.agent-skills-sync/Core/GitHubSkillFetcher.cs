@@ -84,6 +84,9 @@ namespace Hissal.AgentSkillsSync
             var actual = SkillFolderHash.Compute(folder);
             var locked = skill.ComputedHash?.Trim() ?? "";
             if (string.Equals(actual, locked, StringComparison.OrdinalIgnoreCase)) return;
+            // Locked from a checkout with core.autocrlf=true: the CLI hashed CRLF text files, the archive has LF.
+            if (string.Equals(SkillFolderHash.ComputeAsCrlfCheckout(folder), locked, StringComparison.OrdinalIgnoreCase)) return;
+            var nonAsciiPaths = SkillFolderHash.HasNonAsciiPath(folder);
 
             try
             {
@@ -91,6 +94,11 @@ namespace Hissal.AgentSkillsSync
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
+
+            if (nonAsciiPaths)
+                throw Unverifiable(skill,
+                    "it has non-ASCII file names, and the CLI's hash orders those in a way this tool does not reproduce, " +
+                    "so a mismatch does not show whether the source changed");
 
             var lockedText = locked.Length == 0 ? "no hash" : Short(locked);
             throw new SkillFetchException(skill.Name, SkillFetchFailure.HashMismatch,
