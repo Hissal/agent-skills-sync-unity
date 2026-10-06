@@ -4,7 +4,7 @@ using System.Linq;
 namespace Hissal.AgentSkillsSync
 {
     /// <summary>
-    /// One sync of a project: read the lock, scan the folders, plan, fetch everything the plan needs, then apply it.
+    /// One sync of a project: read the lock, scan the folders, plan, fetch everything the plan needs (Install and Update), then apply it.
     /// Fetching (and hash verification) finishes before the first filesystem change, so a failed fetch (offline, or a
     /// source changed since it was locked) leaves the project untouched. Every skill is attempted so all failures are reported.
     /// </summary>
@@ -36,7 +36,7 @@ namespace Hissal.AgentSkillsSync
             var plan = Plan();
             var fetched = new Dictionary<string, string>();
             var failures = new Dictionary<string, SkillFetchException>();
-            foreach (var action in plan.Actions.Where(a => a.Kind == PlanActionKind.Install))
+            foreach (var action in plan.Actions.Where(a => a.NeedsFetch))
             {
                 try
                 {

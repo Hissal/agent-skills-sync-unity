@@ -6,8 +6,11 @@ namespace Hissal.AgentSkillsSync.Tests
 {
     public class InstallPlannerTests
     {
+        const string LockedHash = "locked-hash";
+        const string OldHash = "old-hash";
+
         static LockedSkill Skill(string name) =>
-            new LockedSkill(name, "owner/repo", "github", $"skills/{name}/SKILL.md", "hash");
+            new LockedSkill(name, "owner/repo", "github", $"skills/{name}/SKILL.md", LockedHash);
 
         static Lockfile Lock(params string[] names) => new Lockfile(names.Select(Skill).ToList());
 
@@ -17,60 +20,162 @@ namespace Hissal.AgentSkillsSync.Tests
                 ? $"Link {action.Folder.RelativePath}/{action.SkillName} -> {action.LinkTarget.RelativePath}/{action.SkillName}"
                 : $"{action.Kind} {action.Folder.RelativePath}/{action.SkillName}";
 
-        static IEnumerable<TestCaseData> EmptyProjectCases()
+        /// <summary>
+        /// A folder's contents, one entry per string: <c>name</c> = managed copy at the locked hash,
+        /// <c>name@old</c> = managed copy at another hash, <c>name?</c> = foreign (not in the managed list),
+        /// <c>name-</c> = listed as managed but missing on disk.
+        /// </summary>
+        static FolderState Folder(SkillsFolder folder, string[] entries)
         {
-            yield return new TestCaseData((object)new string[0], new string[0])
-                .SetName("Plan_EmptyProject_EmptyLock_DoesNothing");
-            yield return new TestCaseData(
-                    new[] { "tdd" },
-                    new[]
-                    {
-                        "Install .agents/skills/tdd",
-                        "Link .claude/skills/tdd -> .agents/skills/tdd",
-                    })
-                .SetName("Plan_EmptyProject_OneSkill_InstallsCanonicalCopyAndLinksClaude");
-            yield return new TestCaseData(
-                    new[] { "tdd", "code-review" },
-                    new[]
-                    {
-                        "Install .agents/skills/tdd",
-                        "Link .claude/skills/tdd -> .agents/skills/tdd",
-                        "Install .agents/skills/code-review",
-                        "Link .claude/skills/code-review -> .agents/skills/code-review",
-                    })
-                .SetName("Plan_EmptyProject_TwoSkills_InstallsAndLinksEach");
+            var present = new List<string>();
+            var managed = new List<string>();
+            var hashes = new Dictionary<string, string>();
+            foreach (var entry in entries)
+            {
+                if (entry.EndsWith("?")) present.Add(entry.TrimEnd('?'));
+                else if (entry.EndsWith("-")) managed.Add(entry.TrimEnd('-'));
+                else
+                {
+                    var stale = entry.EndsWith("@old");
+                    var name = stale ? entry.Substring(0, entry.Length - "@old".Length) : entry;
+                    present.Add(name);
+                    managed.Add(name);
+                    hashes[name] = stale ? OldHash : LockedHash;
+                }
+            }
+            return new FolderState(folder, present, managed, hashes);
         }
 
-        [TestCaseSource(nameof(EmptyProjectCases))]
-        public void Plan_EmptyProject(string[] locked, string[] expectedActions)
+        static ProjectState Project(string[] canonical, string[] claude)
         {
-            var plan = InstallPlanner.Plan(Lock(locked), ProjectState.Empty, FolderLayout.Default);
+            var layout = FolderLayout.Default;
+            return new ProjectState(new[]
+            {
+                Folder(layout.Canonical, canonical),
+                Folder(layout.Folders.Single(f => f.Role == SkillsFolderRole.Link), claude),
+            });
+        }
+
+        static TestCaseData Case(string name, string[] locked, string[] canonical, string[] claude, params string[] expected) =>
+            new TestCaseData(locked, canonical, claude, expected).SetName("Plan_" + name);
+
+        static readonly string[] None = new string[0];
+
+        static IEnumerable<TestCaseData> Cases()
+        {
+            // Install
+            yield return Case("EmptyProject_EmptyLock_DoesNothing", None, None, None);
+            yield return Case("EmptyProject_OneSkill_InstallsCanonicalCopyAndLinksClaude",
+                new[] { "tdd" }, None, None,
+                "Install .agents/skills/tdd",
+                "Link .claude/skills/tdd -> .agents/skills/tdd");
+            yield return Case("EmptyProject_TwoSkills_InstallsAndLinksEach",
+                new[] { "tdd", "code-review" }, None, None,
+                "Install .agents/skills/tdd",
+                "Link .claude/skills/tdd -> .agents/skills/tdd",
+                "Install .agents/skills/code-review",
+                "Link .claude/skills/code-review -> .agents/skills/code-review");
+            yield return Case("NewlyLockedSkill_InstallsOnlyThatSkill",
+                new[] { "tdd", "code-review" }, new[] { "tdd" }, new[] { "tdd" },
+                "Install .agents/skills/code-review",
+                "Link .claude/skills/code-review -> .agents/skills/code-review");
+            yield return Case("ManagedEntriesMissingOnDisk_ReinstallsAndRelinks",
+                new[] { "tdd" }, new[] { "tdd-" }, new[] { "tdd-" },
+                "Install .agents/skills/tdd",
+                "Link .claude/skills/tdd -> .agents/skills/tdd");
+
+            // Nothing to do
+            yield return Case("SkillInstalledAtLockedHash_DoesNothing",
+                new[] { "tdd" }, new[] { "tdd" }, new[] { "tdd" });
+
+            // Update
+            yield return Case("InstalledCopyDiffersFromLock_UpdatesCanonicalCopyOnly",
+                new[] { "tdd" }, new[] { "tdd@old" }, new[] { "tdd" },
+                "Update .agents/skills/tdd");
+
+            // Remove
+            yield return Case("ManagedSkillNoLongerLocked_RemovesLinkThenCopy",
+                None, new[] { "old" }, new[] { "old" },
+                "Remove .claude/skills/old",
+                "Remove .agents/skills/old");
+            yield return Case("UnlockedSkillManagedOnlyInCanonical_RemovesCopyOnly",
+                new[] { "tdd" }, new[] { "tdd", "old" }, new[] { "tdd" },
+                "Remove .agents/skills/old");
+            yield return Case("UnlockedManagedNameMissingOnDisk_PlansNothing",
+                None, new[] { "old-" }, new[] { "old-" });
+
+            // LeaveForeign
+            yield return Case("ForeignCopyOfLockedSkill_LeftAloneButStillLinked",
+                new[] { "tdd" }, new[] { "tdd?" }, None,
+                "LeaveForeign .agents/skills/tdd",
+                "Link .claude/skills/tdd -> .agents/skills/tdd");
+            yield return Case("ForeignClaudeEntryOfLockedSkill_LeftAlone",
+                new[] { "tdd" }, new[] { "tdd" }, new[] { "tdd?" },
+                "LeaveForeign .claude/skills/tdd");
+            yield return Case("ForeignUnlockedEntries_PlanNothing",
+                None, new[] { "mine?" }, new[] { "mine?" });
+        }
+
+        [TestCaseSource(nameof(Cases))]
+        public void Plan(string[] locked, string[] canonical, string[] claude, string[] expectedActions)
+        {
+            var plan = InstallPlanner.Plan(Lock(locked), Project(canonical, claude), FolderLayout.Default);
 
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(expectedActions));
         }
 
-        [Test]
-        public void Plan_EmptyProject_ManagesEveryLockedSkillInBothFolders()
+        static IEnumerable<TestCaseData> ManagedCases()
         {
-            var plan = InstallPlanner.Plan(Lock("tdd", "code-review"), ProjectState.Empty, FolderLayout.Default);
+            yield return new TestCaseData(new[] { "tdd", "code-review" }, None, None, new[] { "code-review", "tdd" }, new[] { "code-review", "tdd" })
+                .SetName("Plan_EmptyProject_ManagesEveryLockedSkillInBothFolders");
+            yield return new TestCaseData(new[] { "tdd" }, new[] { "tdd@old" }, new[] { "tdd" }, new[] { "tdd" }, new[] { "tdd" })
+                .SetName("Plan_Update_KeepsManagingTheSkill");
+            yield return new TestCaseData(new[] { "tdd" }, new[] { "tdd", "old" }, new[] { "tdd", "old-" }, new[] { "tdd" }, new[] { "tdd" })
+                .SetName("Plan_Remove_DropsTheNameFromEveryManagedList");
+            yield return new TestCaseData(new[] { "tdd" }, new[] { "tdd?", "mine?" }, new[] { "tdd?" }, None, None)
+                .SetName("Plan_ForeignEntries_NeverBecomeManaged");
+        }
+
+        [TestCaseSource(nameof(ManagedCases))]
+        public void Plan_ManagedNames(string[] locked, string[] canonical, string[] claude, string[] expectedCanonical, string[] expectedClaude)
+        {
+            var plan = InstallPlanner.Plan(Lock(locked), Project(canonical, claude), FolderLayout.Default);
 
             var managed = plan.ManagedNames.ToDictionary(m => m.Key.RelativePath, m => m.Value);
             Assert.That(managed.Keys, Is.EquivalentTo(new[] { ".agents/skills", ".claude/skills" }));
-            Assert.That(managed[".agents/skills"], Is.EqualTo(new[] { "code-review", "tdd" }));
-            Assert.That(managed[".claude/skills"], Is.EqualTo(new[] { "code-review", "tdd" }));
+            Assert.That(managed[".agents/skills"], Is.EqualTo(expectedCanonical));
+            Assert.That(managed[".claude/skills"], Is.EqualTo(expectedClaude));
+        }
+
+        /// <summary>The "is the installed copy current?" decision is swappable (e.g. compare against upstream instead).</summary>
+        sealed class AlwaysStale : IInstalledCopyCheck
+        {
+            public bool IsCurrent(LockedSkill skill, string installedHash) => false;
         }
 
         [Test]
-        public void Plan_SkillAlreadyInstalledAndLinked_DoesNothingAndKeepsManagingIt()
+        public void Plan_WithAnotherInstalledCopyCheck_UsesItToDecideUpdates()
         {
-            var layout = FolderLayout.Default;
-            var project = new ProjectState(layout.Folders.Select(folder =>
-                new FolderState(folder, entries: new[] { "tdd" }, managed: new[] { "tdd" })));
+            var plan = InstallPlanner.Plan(Lock("tdd"), Project(new[] { "tdd" }, new[] { "tdd" }), FolderLayout.Default, new AlwaysStale());
 
-            var plan = InstallPlanner.Plan(Lock("tdd"), project, layout);
+            Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[] { "Update .agents/skills/tdd" }));
+        }
 
-            Assert.That(plan.Actions, Is.Empty);
-            Assert.That(plan.ManagedNames.Select(m => m.Value), Has.All.EqualTo(new[] { "tdd" }));
+        [TestCase(LockedHash, true)]
+        [TestCase("LOCKED-HASH", true)]
+        [TestCase(OldHash, false)]
+        [TestCase(null, false)]
+        public void LockedHashCheck_ComparesInstalledHashWithTheLock(string installedHash, bool current)
+        {
+            Assert.That(LockedHashCheck.Instance.IsCurrent(Skill("tdd"), installedHash), Is.EqualTo(current));
+        }
+
+        [Test]
+        public void LockedHashCheck_SkillsShHashedSource_CountsAnInstalledCopyAsCurrent()
+        {
+            var skill = new LockedSkill("next", "vercel-labs/skills", "github", "skills/next/SKILL.md", "server-hash");
+
+            Assert.That(LockedHashCheck.Instance.IsCurrent(skill, OldHash), Is.True);
         }
     }
 }
