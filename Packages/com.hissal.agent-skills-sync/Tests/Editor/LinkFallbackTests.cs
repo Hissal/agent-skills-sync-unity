@@ -28,9 +28,7 @@ namespace Hissal.AgentSkillsSync.Tests
         [TearDown]
         public void TearDown()
         {
-            // Mono's recursive delete fails with access denied on a junction inside the tree, so unlink it first.
-            if (Directory.Exists(Link)) DirectoryLink.Remove(Link);
-            if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
+            TempDirectory.Delete(_root);
         }
 
         sealed class FailingLinker : ILinkCreator
