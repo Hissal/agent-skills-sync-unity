@@ -130,15 +130,18 @@ namespace Hissal.AgentSkillsSync.Tests
         [TestCase("heygen-com/skills")]
         [TestCase("remotion-dev/skills")]
         [TestCase("zapier/connectors")]
-        public void Fetch_SourceLockedWithASkillsShServerHash_IsNotVerified(string source)
+        public void Fetch_SourceLockedWithASkillsShServerHash_RefusesAsUnverifiable(string source)
         {
             _github.Fixture(source, "skills/tdd", "minimal");
             var skill = Skill("tdd", "server-hash-of-another-algorithm", source);
 
-            var folder = Fetcher().Fetch(skill);
+            var error = Assert.Throws<SkillFetchException>(() => Fetcher().Fetch(skill));
 
-            Assert.That(FilesUnder(folder), Is.EqualTo(new[] { "SKILL.md" }));
+            Assert.That(error.Failure, Is.EqualTo(SkillFetchFailure.Unverifiable));
+            Assert.That(error.SkillName, Is.EqualTo("tdd"));
+            Assert.That(error.Message, Does.Contain(source).And.Contain("can't verify"));
             Assert.That(GitHubSkillFetcher.CanVerify(skill), Is.False);
+            Assert.That(Directory.Exists(Path.Combine(_cache, "skills")), Is.False, "nothing unverified may be extracted");
         }
 
         [TestCase("owner/skills")]

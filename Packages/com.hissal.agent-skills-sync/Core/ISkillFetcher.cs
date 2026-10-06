@@ -25,6 +25,13 @@ namespace Hissal.AgentSkillsSync
         /// <summary>The downloaded skill does not hash to the locked <c>computedHash</c>: the source changed since it was locked.</summary>
         HashMismatch,
 
+        /// <summary>
+        /// The locked <c>computedHash</c> cannot be checked against this source, so the skill is refused rather than
+        /// installed unverified: the source was locked with a skills.sh server hash, or the skill has non-ASCII
+        /// paths, whose order the CLI's hash depends on in a way this tool does not reproduce.
+        /// </summary>
+        Unverifiable,
+
         /// <summary>The source was downloaded but is unusable: not an owner/repo source, the skill is missing, or it cannot be extracted.</summary>
         SourceUnusable,
     }

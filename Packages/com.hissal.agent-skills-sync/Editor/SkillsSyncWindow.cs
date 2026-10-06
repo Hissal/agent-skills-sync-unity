@@ -95,8 +95,12 @@ namespace Hissal.AgentSkillsSync.Editor
             var row = new VisualElement { style = { flexDirection = FlexDirection.Row } };
             row.Add(new Label(skill.Name) { style = { width = 200, unityFontStyleAndWeight = FontStyle.Bold } });
             row.Add(new Label(skill.Source) { style = { flexGrow = 1 } });
-            if (!GitHubSkillFetcher.CanVerify(skill))
-                row.Add(new Label("hash not verifiable") { tooltip = "Locked with a skills.sh server hash; installed without a hash check.", style = { marginRight = 8 } });
+            if (failure == null && pending && !GitHubSkillFetcher.CanVerify(skill))
+                row.Add(new Label("can't verify lock hash")
+                {
+                    tooltip = "Locked with a skills.sh server hash, which this tool cannot check. Sync will refuse to install it.",
+                    style = { marginRight = 8 },
+                });
             row.Add(new Label(failure != null ? FailureLabel(failure.Failure) : pending ? "to install" : "installed")
             {
                 style = { color = failure != null ? new StyleColor(new Color(0.9f, 0.3f, 0.3f)) : new StyleColor(StyleKeyword.Null) },
@@ -114,6 +118,7 @@ namespace Hissal.AgentSkillsSync.Editor
             {
                 case SkillFetchFailure.Download: return "download failed";
                 case SkillFetchFailure.HashMismatch: return "changed since locked";
+                case SkillFetchFailure.Unverifiable: return "can't verify lock hash";
                 case SkillFetchFailure.SourceUnusable: return "not found in source";
                 default: return "fetch failed";
             }

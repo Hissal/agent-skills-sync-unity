@@ -45,7 +45,7 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Whether the skill's <c>computedHash</c> can be checked. False for sources the CLI locks with a skills.sh
-        /// server hash, which <see cref="SkillFolderHash"/> does not reproduce; those are fetched unverified.
+        /// server hash, which <see cref="SkillFolderHash"/> does not reproduce; <see cref="Fetch"/> refuses those.
         /// </summary>
         public static bool CanVerify(LockedSkill skill)
         {
@@ -69,10 +69,13 @@ namespace Hissal.AgentSkillsSync
         public string Fetch(LockedSkill skill)
         {
             var repo = ParseRepo(skill);
+            if (!CanVerify(skill))
+                throw Unverifiable(skill,
+                    $"the lock holds a skills.sh server hash for {skill.Source}, which this tool cannot reproduce");
             var archive = DownloadOnce(repo, skill);
             var destination = Path.Combine(_cacheRoot, "skills", repo.Owner, repo.Name, skill.Name);
             Extract(archive, SkillFolderInRepo(skill), destination, skill);
-            if (CanVerify(skill)) Verify(destination, skill);
+            Verify(destination, skill);
             return destination;
         }
 
@@ -94,6 +97,11 @@ namespace Hissal.AgentSkillsSync
                 $"Skill \"{skill.Name}\": source {skill.Source} changed since it was locked (locked {lockedText}, now {Short(actual)}). " +
                 $"Run `npx skills update` and commit {Lockfile.FileName}.");
         }
+
+        static SkillFetchException Unverifiable(LockedSkill skill, string reason) =>
+            new SkillFetchException(skill.Name, SkillFetchFailure.Unverifiable,
+                $"Skill \"{skill.Name}\": can't verify this source's lock hash ({reason}). " +
+                "It was not installed, because an unverified copy could differ from what was locked.");
 
         static string Short(string hash) => hash.Length > 12 ? hash.Substring(0, 12) : hash;
 
