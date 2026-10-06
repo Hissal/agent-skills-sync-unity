@@ -14,13 +14,13 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Replace a managed canonical copy that is no longer current with the fetched skill.</summary>
         Update,
 
-        /// <summary>Delete a managed entry (canonical copy or link) whose skill is no longer locked.</summary>
+        /// <summary>Delete a managed entry (canonical copy or link) whose skill is no longer locked, or a managed canonical copy no selected folder needs.</summary>
         Remove,
 
         /// <summary>Leave an entry the tool does not manage untouched, though a locked skill has its name. Changes nothing.</summary>
         LeaveForeign,
 
-        /// <summary>Delete a managed link whose canonical entry is gone.</summary>
+        /// <summary>Delete a managed link whose canonical entry is gone, or that sits in a folder no longer selected.</summary>
         Unlink,
     }
 
