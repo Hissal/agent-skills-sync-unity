@@ -24,6 +24,8 @@ namespace Hissal.AgentSkillsSync
         const string LastSyncedLockHashKey = "lastSyncedLockHash";
         const string DeclinedStateKey = "declinedState";
         const string SyncedSourcesKey = "syncedSources";
+        const string SelectedFoldersKey = "selectedFolders";
+        const string DeclinedFoldersKey = "declinedFolders";
 
         readonly string _path;
         readonly List<KeyValuePair<string, object>> _members;
@@ -80,6 +82,27 @@ namespace Hissal.AgentSkillsSync
         {
             get => GetStringList(SyncedSourcesKey);
             set => SetStringList(SyncedSourcesKey, value);
+        }
+
+        /// <summary>
+        /// <see cref="SkillsFolder.RelativePath"/>s of the skills folders the contributor chose to install into; null
+        /// while they have never chosen (the window then pre-selects by autofill), empty when they chose none.
+        /// Use <see cref="FolderSelection"/> rather than this directly.
+        /// </summary>
+        public IReadOnlyList<string> SelectedFolders
+        {
+            get => Get(SelectedFoldersKey) is List<object> ? GetStringList(SelectedFoldersKey) : null;
+            set => SetStringList(SelectedFoldersKey, value);
+        }
+
+        /// <summary>
+        /// <see cref="SkillsFolder.RelativePath"/>s of folders the contributor declined to add when their user-scope
+        /// home appeared, so the startup check does not offer them again. Never null.
+        /// </summary>
+        public IReadOnlyList<string> DeclinedFolders
+        {
+            get => GetStringList(DeclinedFoldersKey);
+            set => SetStringList(DeclinedFoldersKey, value);
         }
 
         string GetString(string key) => Get(key) as string;

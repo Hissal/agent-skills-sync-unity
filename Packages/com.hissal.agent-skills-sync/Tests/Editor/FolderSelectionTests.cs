@@ -113,5 +113,137 @@ namespace Hissal.AgentSkillsSync.Tests
                 Path.Combine(_home, ".copilot", "skills"),
             }));
         }
+
+        LocalPrefs Prefs => LocalPrefs.Load(_project);
+
+        static SkillsFolder Agents => Table.Find(".agents/skills");
+        static SkillsFolder Claude => Table.Find(".claude/skills");
+
+        void Choose(params SkillsFolder[] folders)
+        {
+            var prefs = Prefs;
+            FolderSelection.Save(prefs, Table, folders, Environment);
+            prefs.Save();
+        }
+
+        IEnumerable<string> Effective() => FolderSelection.Effective(Prefs, Table, Environment).Select(f => f.RelativePath);
+
+        IEnumerable<string> Offers() => FolderSelection.Offers(Prefs, Table, Environment).Select(f => f.RelativePath);
+
+        [Test]
+        public void Effective_NeverChosen_IsTheAutofill()
+        {
+            MakeHome(".codex");
+
+            Assert.That(FolderSelection.IsChosen(Prefs), Is.False);
+            Assert.That(Effective(), Is.EqualTo(new[] { ".agents/skills" }));
+        }
+
+        [Test]
+        public void Effective_ChosenNone_StaysNoneWhateverHomesExist()
+        {
+            Choose();
+            MakeHome(".claude");
+            MakeHome(".agents");
+
+            Assert.That(FolderSelection.IsChosen(Prefs), Is.True);
+            Assert.That(Effective(), Is.Empty);
+        }
+
+        [Test]
+        public void Effective_HomeVanished_KeepsTheChosenFolder()
+        {
+            MakeHome(".claude");
+            MakeHome(".agents");
+            Choose(Agents, Claude);
+            Directory.Delete(Path.Combine(_home, ".agents"));
+
+            Assert.That(Effective(), Is.EqualTo(new[] { ".agents/skills", ".claude/skills" }));
+            Assert.That(Offers(), Is.Empty);
+        }
+
+        [Test]
+        public void Effective_StoredFolderNoLongerInTheTable_IsIgnored()
+        {
+            var prefs = Prefs;
+            prefs.SelectedFolders = new[] { ".windsurf/skills", ".claude/skills" };
+            prefs.Save();
+
+            Assert.That(Effective(), Is.EqualTo(new[] { ".claude/skills" }));
+        }
+
+        [Test]
+        public void Offers_NeverChosen_OffersNothing()
+        {
+            MakeHome(".claude");
+            MakeHome(".codex");
+
+            Assert.That(Offers(), Is.Empty);
+        }
+
+        [Test]
+        public void Offers_NewlyAppearedHome_OffersItsFolderUntilDeclined()
+        {
+            MakeHome(".claude");
+            Choose(Claude);
+            Assert.That(Offers(), Is.Empty);
+
+            MakeHome(".codex");
+            Assert.That(Offers(), Is.EqualTo(new[] { ".agents/skills" }));
+
+            var prefs = Prefs;
+            FolderSelection.Decline(prefs, Agents);
+            prefs.Save();
+            Assert.That(Offers(), Is.Empty);
+            Assert.That(Effective(), Is.EqualTo(new[] { ".claude/skills" }));
+        }
+
+        [Test]
+        public void Offers_NoneChosenThenAgentsHomeAppears_OffersTheAgentsFolder()
+        {
+            Choose();
+            MakeHome(".agents");
+
+            Assert.That(Offers(), Is.EqualTo(new[] { ".agents/skills" }));
+        }
+
+        [Test]
+        public void Accept_AddsTheOfferedFolderToTheSelection()
+        {
+            MakeHome(".claude");
+            Choose(Claude);
+            MakeHome(".agents");
+
+            var prefs = Prefs;
+            FolderSelection.Accept(prefs, Table, Agents, Environment);
+            prefs.Save();
+
+            Assert.That(Effective(), Is.EqualTo(new[] { ".agents/skills", ".claude/skills" }));
+            Assert.That(Offers(), Is.Empty);
+        }
+
+        [Test]
+        public void Save_LeavingOutAFolderWhoseHomeExists_CountsAsDecliningIt()
+        {
+            MakeHome(".claude");
+            MakeHome(".agents");
+
+            Choose(Claude);
+
+            Assert.That(Prefs.DeclinedFolders, Is.EqualTo(new[] { ".agents/skills" }));
+            Assert.That(Offers(), Is.Empty);
+        }
+
+        [Test]
+        public void Save_SelectingADeclinedFolder_ClearsTheDecline()
+        {
+            MakeHome(".agents");
+            Choose();
+            Assert.That(Prefs.DeclinedFolders, Is.EqualTo(new[] { ".agents/skills" }));
+
+            Choose(Agents);
+
+            Assert.That(Prefs.DeclinedFolders, Is.Empty);
+        }
     }
 }

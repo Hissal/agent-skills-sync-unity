@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 
 namespace Hissal.AgentSkillsSync.Tests
@@ -230,6 +231,41 @@ namespace Hissal.AgentSkillsSync.Tests
             File.WriteAllText(Path.Combine(_project, Lockfile.FileName), "{ broken");
 
             Assert.That(ShouldNotify(), Is.True);
+        }
+
+        static SkillsFolder[] Only(params string[] paths) => paths.Select(FolderLayout.Default.Find).ToArray();
+
+        [Test]
+        public void ShouldNotify_NoFolderSelected_NeverNotifies()
+        {
+            var status = SyncStatus.Read(_project, selected: Only());
+
+            Assert.That(status.NoFolderSelected, Is.True);
+            Assert.That(StartupCheck.ShouldNotify(status, Prefs), Is.False);
+        }
+
+        [Test]
+        public void ShouldNotify_NoFolderSelectedWithManagedEntriesLeft_NeverNotifies()
+        {
+            InstallAll();
+
+            Assert.That(StartupCheck.ShouldNotify(SyncStatus.Read(_project, selected: Only()), Prefs), Is.False);
+        }
+
+        [Test]
+        public void Read_OnlyAgentsSelectedAndInstalledThere_ReportsNothingMissing()
+        {
+            var layout = FolderLayout.Default;
+            var selected = Only(".agents/skills");
+            var plan = InstallPlanner.Plan(Lockfile.Load(_project), ProjectScanner.Scan(_project, layout), layout, selected: selected);
+            new PlanExecutor().Execute(_project, plan, new Dictionary<string, string>
+            {
+                ["tdd"] = Path.Combine(FixturesRoot, "minimal"),
+                ["code-review"] = Path.Combine(FixturesRoot, "nested"),
+            });
+
+            Assert.That(SyncStatus.Read(_project, selected: selected).MissingSkills, Is.Empty);
+            Assert.That(SyncStatus.Read(_project).MissingSkills, Is.EqualTo(new[] { "code-review", "tdd" }));
         }
     }
 }
