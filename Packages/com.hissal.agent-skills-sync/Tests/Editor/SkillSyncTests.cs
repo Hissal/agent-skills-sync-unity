@@ -83,5 +83,63 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(summary.NothingChanged, Is.True);
         }
+
+        const string UserGitignore = "# my own rules\n*.tmp\n/my-own-skill\n";
+
+        string WriteUserGitignore(string folder)
+        {
+            var path = Path.Combine(_project, folder, ManagedStateFile.FileName);
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllText(path, UserGitignore);
+            return path;
+        }
+
+        [TestCase(".agents/skills")]
+        [TestCase(".claude/skills")]
+        public void Run_ExistingUserGitignore_KeepsTheUserRulesAndAddsTheManagedNames(string folder)
+        {
+            var path = WriteUserGitignore(folder);
+
+            new SkillSync(_project, _fetcher).Run();
+
+            var text = File.ReadAllText(path);
+            Assert.That(text, Does.StartWith(UserGitignore));
+            Assert.That(text.Split('\n'), Does.Contain("/tdd").And.Contain("/code-review"));
+        }
+
+        [Test]
+        public void Run_ExistingUserGitignore_SecondRunChangesNothing()
+        {
+            var path = WriteUserGitignore(".agents/skills");
+            new SkillSync(_project, _fetcher).Run();
+            var afterFirst = File.ReadAllText(path);
+
+            var summary = new SkillSync(_project, _fetcher).Run();
+
+            Assert.That(summary.NothingChanged, Is.True);
+            Assert.That(File.ReadAllText(path), Is.EqualTo(afterFirst));
+        }
+
+        [Test]
+        public void Scan_UserGitignoreRules_AreNotTreatedAsManaged()
+        {
+            WriteUserGitignore(".agents/skills");
+            Directory.CreateDirectory(Path.Combine(_project, ".agents/skills/my-own-skill"));
+
+            var state = ProjectScanner.Scan(_project, FolderLayout.Default).For(FolderLayout.Default.Canonical);
+
+            Assert.That(state.Managed, Is.Empty);
+        }
+
+        [Test]
+        public void Scan_AfterSyncIntoUserGitignore_ManagesOnlyTheSyncedSkills()
+        {
+            WriteUserGitignore(".agents/skills");
+            new SkillSync(_project, _fetcher).Run();
+
+            var state = ProjectScanner.Scan(_project, FolderLayout.Default).For(FolderLayout.Default.Canonical);
+
+            Assert.That(state.Managed, Is.EquivalentTo(new[] { "tdd", "code-review" }));
+        }
     }
 }
