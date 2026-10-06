@@ -85,6 +85,20 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(plan.HasChanges, Is.True, "the Install still changes the project");
         }
 
+        [TestCase(null)]
+        [TestCase("")]
+        [TestCase("   ")]
+        public void Plan_LockHasNoHash_NoWarning(string hash)
+        {
+            // Nothing to compare against, so the copy can't be judged to differ.
+            var copy = MinimalCopy(ClaudePath);
+            Edit(copy);
+
+            var plan = Plan(Lock(hash), Skip(ClaudePath), copy);
+
+            Assert.That(Warnings(plan), Is.Empty);
+        }
+
         [Test]
         public void Plan_ChangedCopyNotSkipped_NoWarning()
         {

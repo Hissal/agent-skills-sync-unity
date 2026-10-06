@@ -117,10 +117,12 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Whether <paramref name="folder"/> (a copy of the skill) verifiably differs from the lock: false when it hashes
-        /// to the lock as it is or as a CRLF checkout, and when a mismatch can't tell (skills.sh hash, non-ASCII paths).
+        /// to the lock as it is or as a CRLF checkout, and when a mismatch can't tell (no locked hash, skills.sh hash,
+        /// non-ASCII paths).
         /// </summary>
         internal static bool DiffersFromLock(LockedSkill skill, string folder) =>
-            CanVerify(skill)
+            !string.IsNullOrWhiteSpace(skill.ComputedHash)
+            && CanVerify(skill)
             && !MatchesLock(skill, SkillFolderHash.Compute(folder))
             && !MatchesLock(skill, SkillFolderHash.ComputeAsCrlfCheckout(folder))
             && !SkillFolderHash.HasNonAsciiPath(folder);

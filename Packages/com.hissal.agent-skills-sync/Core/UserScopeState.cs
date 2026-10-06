@@ -52,7 +52,7 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Whether this copy's content verifiably differs from <paramref name="skill"/>'s locked hash. False whenever the
-        /// difference can't be judged: a skills.sh hash, a CRLF-checkout match, non-ASCII paths, or a copy that can't be
+        /// difference can't be judged: no locked hash, a skills.sh hash, a CRLF-checkout match, non-ASCII paths, or a copy that can't be
         /// read (gone since the scan, no path). It only says "differs", never which side is newer. Reads the copy once per
         /// locked hash.
         /// </summary>
