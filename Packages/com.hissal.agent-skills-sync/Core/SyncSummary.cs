@@ -6,10 +6,22 @@ namespace Hissal.AgentSkillsSync
     /// <summary>What a sync did, for the window's summary.</summary>
     public sealed class SyncSummary
     {
-        public SyncSummary(IReadOnlyList<PlanAction> applied) => Applied = applied;
+        public SyncSummary(IReadOnlyList<PlanAction> applied, IReadOnlyDictionary<PlanAction, LinkMethod> linkMethods = null)
+        {
+            Applied = applied;
+            LinkMethods = linkMethods ?? new Dictionary<PlanAction, LinkMethod>();
+        }
 
         /// <summary>Every action applied, in order, including LeaveForeign (which changes nothing).</summary>
         public IReadOnlyList<PlanAction> Applied { get; }
+
+        /// <summary>How each applied Link action was made.</summary>
+        public IReadOnlyDictionary<PlanAction, LinkMethod> LinkMethods { get; }
+
+        /// <summary>Names of skills linked into at least one link folder by <paramref name="method"/>.</summary>
+        public IReadOnlyList<string> LinkedBy(LinkMethod method) =>
+            Applied.Where(a => a.Kind == PlanActionKind.Link && LinkMethods.TryGetValue(a, out var m) && m == method)
+                .Select(a => a.SkillName).Distinct().ToList();
 
         /// <summary>Names of skills given a canonical copy.</summary>
         public IReadOnlyList<string> Installed => NamesOf(PlanActionKind.Install);

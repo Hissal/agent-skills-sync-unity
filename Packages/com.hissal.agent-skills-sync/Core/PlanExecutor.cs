@@ -8,7 +8,7 @@ namespace Hissal.AgentSkillsSync
     {
         readonly ILinkCreator _linker;
 
-        public PlanExecutor(ILinkCreator linker = null) => _linker = linker ?? new SymlinkCreator();
+        public PlanExecutor(ILinkCreator linker = null) => _linker = linker ?? FallbackLinkCreator.Default;
 
         /// <param name="projectRoot">The folder holding <c>skills-lock.json</c>.</param>
         /// <param name="plan">The plan to apply.</param>
@@ -17,6 +17,7 @@ namespace Hissal.AgentSkillsSync
         public SyncSummary Execute(string projectRoot, InstallPlan plan, IReadOnlyDictionary<string, string> fetchedFolders)
         {
             var applied = new List<PlanAction>();
+            var linkMethods = new Dictionary<PlanAction, LinkMethod>();
             foreach (var action in plan.Actions)
             {
                 var folder = Paths.InProject(projectRoot, action.Folder.RelativePath);
@@ -36,7 +37,7 @@ namespace Hissal.AgentSkillsSync
                     case PlanActionKind.Link:
                         Directory.CreateDirectory(folder);
                         var target = Path.Combine(Paths.InProject(projectRoot, action.LinkTarget.RelativePath), action.SkillName);
-                        _linker.CreateDirectoryLink(entry, target);
+                        linkMethods[action] = _linker.CreateDirectoryLink(entry, target);
                         break;
                     case PlanActionKind.Remove:
                         RemoveEntry(entry);
@@ -54,7 +55,7 @@ namespace Hissal.AgentSkillsSync
                     ManagedStateFile.Write(folder, managed.Value);
             }
 
-            return new SyncSummary(applied);
+            return new SyncSummary(applied, linkMethods);
         }
 
         static string Fetched(IReadOnlyDictionary<string, string> fetchedFolders, PlanAction action) =>

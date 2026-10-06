@@ -4,12 +4,21 @@ using System.Runtime.InteropServices;
 
 namespace Hissal.AgentSkillsSync
 {
+    /// <summary>How a link folder entry was made to show the canonical copy.</summary>
+    public enum LinkMethod
+    {
+        Symlink,
+        Junction,
+        Copy,
+    }
+
     /// <summary>Creates a folder link. The seam where the symlink, junction and copy fallbacks plug in.</summary>
     public interface ILinkCreator
     {
         /// <summary>Makes <paramref name="linkPath"/> show the contents of the existing directory <paramref name="targetPath"/>.</summary>
+        /// <returns>The method that made the link.</returns>
         /// <exception cref="IOException">The link could not be created.</exception>
-        void CreateDirectoryLink(string linkPath, string targetPath);
+        LinkMethod CreateDirectoryLink(string linkPath, string targetPath);
     }
 
     /// <summary>
@@ -21,7 +30,7 @@ namespace Hissal.AgentSkillsSync
         const int SymbolicLinkFlagDirectory = 0x1;
         const int SymbolicLinkFlagAllowUnprivilegedCreate = 0x2;
 
-        public void CreateDirectoryLink(string linkPath, string targetPath)
+        public LinkMethod CreateDirectoryLink(string linkPath, string targetPath)
         {
             var parent = Path.GetDirectoryName(Path.GetFullPath(linkPath));
             var relativeTarget = Paths.Relative(parent, targetPath);
@@ -36,6 +45,8 @@ namespace Hissal.AgentSkillsSync
             {
                 throw new IOException($"Could not create symlink {linkPath} -> {relativeTarget} (errno {Marshal.GetLastWin32Error()}).");
             }
+
+            return LinkMethod.Symlink;
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
