@@ -229,6 +229,8 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(summary.NothingChanged, Is.False);
         }
     
+        // Project-authored skills
+
         void CommitProjectAuthoredSkill(string name)
         {
             var folder = InProject(".agents/skills/" + name);
@@ -236,50 +238,45 @@ namespace Hissal.AgentSkillsSync.Tests
             File.WriteAllText(Path.Combine(folder, "SKILL.md"), "# " + name);
         }
 
-        static IEnumerable<string> ManagedLines(string gitignore) =>
-            File.Exists(gitignore)
-                ? File.ReadAllLines(gitignore).Where(l => l.Length > 0 && !l.StartsWith("#"))
-                : Enumerable.Empty<string>();
-
         [Test]
         public void Execute_ProjectAuthoredSkill_LinksItIntoClaudeAsManagedButKeepsItTracked()
         {
             CommitProjectAuthoredSkill("house-style");
 
-            ExecuteFreshPlan();
+            Sync("tdd=v1");
 
             var link = InProject(".claude/skills/house-style");
             Assert.That(File.GetAttributes(link).HasFlag(FileAttributes.ReparsePoint), Is.True, "expected a link, not a copy");
             Assert.That(File.ReadAllText(Path.Combine(link, "SKILL.md")), Is.EqualTo("# house-style"));
-            Assert.That(ManagedLines(InProject(".claude/skills/.gitignore")), Is.EqualTo(new[] { "/house-style", "/tdd" }));
-            Assert.That(ManagedLines(InProject(".agents/skills/.gitignore")), Is.EqualTo(new[] { "/tdd" }));
+            Assert.That(ManagedLines(".claude/skills"), Is.EqualTo(new[] { "/house-style", "/tdd" }));
+            Assert.That(ManagedLines(".agents/skills"), Is.EqualTo(new[] { "/tdd" }));
         }
 
         [Test]
         public void Execute_ProjectAuthoredSkillDeleted_NextSyncRemovesItsLink()
         {
             CommitProjectAuthoredSkill("house-style");
-            ExecuteFreshPlan();
+            Sync("tdd=v1");
 
             Directory.Delete(InProject(".agents/skills/house-style"), recursive: true);
-            ExecuteFreshPlan();
+            Sync("tdd=v1");
 
             Assert.That(ProjectScanner.Scan(_project, FolderLayout.Default).For(FolderLayout.Default.Folders[1]).Has("house-style"), Is.False);
-            Assert.That(ManagedLines(InProject(".claude/skills/.gitignore")), Is.EqualTo(new[] { "/tdd" }));
+            Assert.That(ManagedLines(".claude/skills"), Is.EqualTo(new[] { "/tdd" }));
         }
-    
+
         [Test]
         public void Execute_StrayFilesInCanonicalFolder_AreNotLinked()
         {
             CommitProjectAuthoredSkill("house-style");
             File.WriteAllText(InProject(".agents/skills/README.md"), "about our skills");
 
-            ExecuteFreshPlan();
-            var rescan = InstallPlanner.Plan(LockTdd(), ProjectScanner.Scan(_project, FolderLayout.Default), FolderLayout.Default);
+            Sync("tdd=v1");
+            var rescan = Plan(new[] { new LockedSkill("tdd", "owner/repo", "github", "skills/tdd/SKILL.md", FakeGitHub.MinimalHash) });
 
             Assert.That(Directory.GetFileSystemEntries(InProject(".claude/skills")).Select(Path.GetFileName),
                 Is.EquivalentTo(new[] { ".gitignore", "house-style", "tdd" }));
-            Assert.That(ManagedLines(InProject(".claude/skills/.gitignore")), Is.EqualTo(new[] { "/house-style", "/tdd" }));
+            Assert.That(ManagedLines(".claude/skills"), Is.EqualTo(new[] { "/house-style", "/tdd" }));
             Assert.That(rescan.Actions, Is.Empty, "the managed .gitignore must not be planned as a skill");
         }
     }
