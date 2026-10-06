@@ -43,7 +43,7 @@ namespace Hissal.AgentSkillsSync.Editor
             FolderSelection.Effective(LocalPrefs.Load(ProjectRoot), Table, UserEnvironment.Current);
 
         static UserScopeState ScanUserScope(IReadOnlyList<SkillsFolder> selected) =>
-            UserScopeScanner.Scan(selected, UserEnvironment.Current);
+            UserScopeScanner.Scan(selected, UserEnvironment.Current, UserScopeScanner.DefaultSourcesFor(ProjectRoot));
 
         static SkipChoices Skips() => SkipChoices.From(LocalPrefs.Load(ProjectRoot));
 
@@ -181,8 +181,8 @@ namespace Hissal.AgentSkillsSync.Editor
             container.Add(row);
 
             if (copies.Count > 0)
-                container.Add(new Label("The project also provides this skill, and you already have it at " +
-                                        string.Join(", ", copies.Select(c => c.FoundIn)) + ".")
+                container.Add(new Label("The project also provides this skill, and you already have it " +
+                                        string.Join(", ", copies.Select(Where)) + ".")
                 {
                     tooltip = string.Join("\n", copies.Select(c => c.Agents == null ? c.Path : $"{c.Path} - read by {c.Agents}")),
                     style = { whiteSpace = WhiteSpace.Normal, color = new Color(0.9f, 0.6f, 0.1f) },
@@ -204,6 +204,10 @@ namespace Hissal.AgentSkillsSync.Editor
             }
             return container;
         }
+
+        /// <summary>Where a user-scope copy comes from, as the end of "you already have it ...".</summary>
+        static string Where(UserScopeCopy copy) =>
+            copy.Plugin != null ? $"provided by plugin {copy.Plugin}" : $"at {copy.FoundIn}";
 
         void SaveSkip(SkillsFolder folder, string skillName, bool skip)
         {
