@@ -82,6 +82,47 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Scan_SkillSyncedByClaudeAi_IsADuplicateForTheClaudeFolder()
+        {
+            var path = MakeSkill(".claude/skills/synced", "tdd");
+
+            var state = Scan(Agents, Claude);
+
+            Assert.That(FoundIn(state, Claude, "tdd"), Is.EqualTo(new[] { "~/.claude/skills/synced" }));
+            Assert.That(state.CopiesOf(Claude, "tdd").Single().Path, Is.EqualTo(Path.GetFullPath(path)));
+            Assert.That(state.Has(Claude, "synced"), Is.False);
+            Assert.That(state.Has(Agents, "tdd"), Is.False);
+        }
+
+        [Test]
+        public void Scan_ClaudeConfigDirSet_LooksForSyncedSkillsUnderIt()
+        {
+            var configDir = Path.Combine(_root, "claude-config");
+            _variables["CLAUDE_CONFIG_DIR"] = configDir;
+            MakeSkill(".claude/skills/synced", "ignored");
+            var moved = Path.Combine(configDir, "skills", "synced", "tdd");
+            Directory.CreateDirectory(moved);
+            File.WriteAllText(Path.Combine(moved, "SKILL.md"), "x");
+
+            var state = Scan(Claude);
+
+            Assert.That(FoundIn(state, Claude, "tdd"), Is.EqualTo(new[] { Path.Combine(configDir, "skills", "synced") }));
+            Assert.That(state.Has(Claude, "ignored"), Is.False);
+        }
+
+        [Test]
+        public void Scan_SkillWithNestedSkillFolders_ReportsOnlyTheSkill()
+        {
+            MakeSkill(".claude/skills", "tdd");
+            MakeSkill(".claude/skills/tdd", "inner");
+            MakeSkill(".claude/skills/synced/review", "inner");
+
+            var state = Scan(Claude);
+
+            Assert.That(state.Copies.Select(c => c.SkillName), Is.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
         public void Scan_SkillInSeveralLocations_ReportsEachInTableOrder()
         {
             MakeSkill(".cursor/skills", "tdd");

@@ -104,7 +104,11 @@ namespace Hissal.AgentSkillsSync.Tests
             var agents = Table.Folders.Single(f => f.RelativePath == ".agents/skills");
 
             Assert.That(claude.UserScopeSkillsFolders(Environment),
-                Is.EqualTo(new[] { Path.Combine(_root, "claude-config", "skills") }));
+                Is.EqualTo(new[]
+                {
+                    Path.Combine(_root, "claude-config", "skills"),
+                    Path.Combine(_root, "claude-config", "skills", "synced"),
+                }));
             Assert.That(agents.UserScopeSkillsFolders(Environment), Is.SupersetOf(new[]
             {
                 Path.Combine(_home, ".agents", "skills"),
