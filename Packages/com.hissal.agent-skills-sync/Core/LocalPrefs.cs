@@ -23,6 +23,7 @@ namespace Hissal.AgentSkillsSync
         const string VersionKey = "version";
         const string LastSyncedLockHashKey = "lastSyncedLockHash";
         const string DeclinedStateKey = "declinedState";
+        const string SyncedSourcesKey = "syncedSources";
 
         readonly string _path;
         readonly List<KeyValuePair<string, object>> _members;
@@ -71,7 +72,31 @@ namespace Hissal.AgentSkillsSync
             set => Set(DeclinedStateKey, value);
         }
 
+        /// <summary>
+        /// Source repos (<c>owner/repo</c>) of every skill synced so far; a source missing here is new
+        /// and needs the contributor's explicit confirmation (see <see cref="SourceConsent"/>). Never null.
+        /// </summary>
+        public IReadOnlyList<string> SyncedSources
+        {
+            get => GetStringList(SyncedSourcesKey);
+            set => SetStringList(SyncedSourcesKey, value);
+        }
+
         string GetString(string key) => Get(key) as string;
+
+        /// <summary>The string items of an array member; empty when the member is missing or not an array.</summary>
+        IReadOnlyList<string> GetStringList(string key)
+        {
+            var list = new List<string>();
+            if (Get(key) is List<object> items)
+                foreach (var item in items)
+                    if (item is string s) list.Add(s);
+            return list;
+        }
+
+        /// <summary>Stores the strings as an array member; null removes it.</summary>
+        void SetStringList(string key, IEnumerable<string> values) =>
+            Set(key, values == null ? null : new List<object>(values));
 
         object Get(string key)
         {
