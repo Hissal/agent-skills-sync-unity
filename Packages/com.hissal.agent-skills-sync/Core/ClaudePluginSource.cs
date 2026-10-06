@@ -18,7 +18,8 @@ namespace Hissal.AgentSkillsSync
     /// scope, or project/local scope for this project) and it is enabled: the first <c>enabledPlugins</c> entry naming it
     /// in the project's <c>.claude/settings.local.json</c>, <c>.claude/settings.json</c>, then the user's
     /// <c>settings.json</c>, else the marketplace entry's <c>defaultEnabled</c> when its <c>marketplace.json</c> is on disk, else
-    /// the manifest's (default true). A plugin whose manifest is present but
+    /// the manifest's (default true). A plugin that an enabled plugin depends on is enabled whatever its default, and a
+    /// plugin with a dependency that is missing or set to false is not. A plugin whose manifest is present but
     /// unreadable or invalid JSON is skipped (Claude Code fails to load it); other unreadable files count as empty.
     /// </remarks>
     public sealed class ClaudePluginSource : IUserScopeSource
@@ -62,23 +63,110 @@ namespace Hissal.AgentSkillsSync
             settings.Add(EnabledPlugins(Path.Combine(configDir, "settings.json")));
 
             var marketplaces = new Marketplaces(pluginsRoot);
-            var copies = new List<UserScopeCopy>();
-            foreach (var plugin in installed)
+            var plugins = new List<Plugin>();
+            foreach (var record in installed)
             {
-                var installPath = InstallPath(plugin.Value);
+                var installPath = InstallPath(record.Value);
                 if (installPath == null || !Directory.Exists(installPath)) continue;
                 if (!TryReadManifest(installPath, out var manifest)) continue;
-                if (!IsEnabled(plugin.Key, settings, marketplaces.Entry(plugin.Key), manifest)) continue;
+                plugins.Add(new Plugin(record.Key, installPath, manifest, marketplaces.Entry(record.Key), settings));
+            }
 
-                var name = Member(manifest, "name") as string ?? plugin.Key.Split('@')[0];
-                foreach (var skill in SkillFolders(installPath, manifest))
+            var copies = new List<UserScopeCopy>();
+            var enabled = Enabled(plugins);
+            foreach (var plugin in plugins.Where(p => enabled.Contains(p.Id)))
+            {
+                var name = Member(plugin.Manifest, "name") as string ?? plugin.Id.Split('@')[0];
+                foreach (var skill in SkillFolders(plugin.InstallPath, plugin.Manifest))
                 {
-                    var skillName = PathComparer.Equals(skill, installPath) ? name : Path.GetFileName(skill);
-                    copies.Add(new UserScopeCopy(folder, skillName, skill, "plugin " + plugin.Key,
-                        $"Claude Code, as /{name}:{skillName}", plugin.Key));
+                    var skillName = PathComparer.Equals(skill, plugin.InstallPath) ? name : Path.GetFileName(skill);
+                    copies.Add(new UserScopeCopy(folder, skillName, skill, "plugin " + plugin.Id,
+                        $"Claude Code, as /{name}:{skillName}", plugin.Id));
                 }
             }
             return copies;
+        }
+
+        /// <summary>
+        /// The ids Claude Code loads, over the installed plugins' dependency graph. A plugin loads only when each of its
+        /// dependencies is installed, not set to false, and loadable itself (else Claude Code leaves it disabled with
+        /// "Dependency ... is not installed / is disabled"). The roots are the loadable plugins enabled by a setting or
+        /// by default; the dependencies of each enabled plugin are enabled too, whatever their own default.
+        /// </summary>
+        static HashSet<string> Enabled(List<Plugin> plugins)
+        {
+            var byId = new Dictionary<string, Plugin>();
+            foreach (var plugin in plugins)
+                if (!byId.ContainsKey(plugin.Id))
+                    byId.Add(plugin.Id, plugin);
+
+            var loadable = new Dictionary<string, bool>();
+            bool Loadable(Plugin plugin)
+            {
+                if (loadable.TryGetValue(plugin.Id, out var known)) return known;
+                loadable[plugin.Id] = true; // assumed while its own dependencies are checked, so a cycle ends
+                var result = plugin.Dependencies.All(id =>
+                    byId.TryGetValue(id, out var dependency) && dependency.Setting != false && Loadable(dependency));
+                loadable[plugin.Id] = result;
+                return result;
+            }
+
+            var enabled = new HashSet<string>();
+            var pending = new Stack<Plugin>(byId.Values.Where(p => (p.Setting ?? p.ByDefault) && Loadable(p)));
+            while (pending.Count > 0)
+            {
+                var plugin = pending.Pop();
+                if (!enabled.Add(plugin.Id)) continue;
+                foreach (var id in plugin.Dependencies)
+                    pending.Push(byId[id]); // installed and loadable, as the plugin itself is loadable
+            }
+            return enabled;
+        }
+
+        /// <summary>An installed plugin whose install record applies here and whose manifest, if any, is valid.</summary>
+        sealed class Plugin
+        {
+            public readonly string Id;
+            public readonly string InstallPath;
+            public readonly List<KeyValuePair<string, object>> Manifest;
+
+            /// <summary>The first <c>enabledPlugins</c> value naming the plugin, or null when no settings file does.</summary>
+            public readonly bool? Setting;
+
+            /// <summary>The marketplace entry's <c>defaultEnabled</c>, else the manifest's, else true.</summary>
+            public readonly bool ByDefault;
+
+            /// <summary>Ids of the plugins that the manifest and the marketplace entry declare as dependencies.</summary>
+            public readonly List<string> Dependencies;
+
+            public Plugin(string id, string installPath, List<KeyValuePair<string, object>> manifest,
+                List<KeyValuePair<string, object>> entry, IEnumerable<List<KeyValuePair<string, object>>> settings)
+            {
+                Id = id;
+                InstallPath = installPath;
+                Manifest = manifest;
+                Setting = settings.Select(enabledPlugins => Member(enabledPlugins, id)).OfType<bool>().Cast<bool?>().FirstOrDefault();
+                ByDefault = Member(entry, "defaultEnabled") as bool? ?? Member(manifest, "defaultEnabled") as bool? ?? true;
+                var at = id.LastIndexOf('@');
+                var marketplace = at < 0 ? "" : id.Substring(at + 1);
+                Dependencies = DependencyIds(manifest, marketplace).Concat(DependencyIds(entry, marketplace)).Distinct().ToList();
+            }
+
+            /// <summary>
+            /// The <c>dependencies</c> items as ids: <c>"name"</c> (in this plugin's marketplace), <c>"name@marketplace"</c>,
+            /// or <c>{ "name", "marketplace", "version" }</c>. Version constraints are not checked.
+            /// </summary>
+            static IEnumerable<string> DependencyIds(List<KeyValuePair<string, object>> manifest, string marketplace)
+            {
+                if (!(Member(manifest, "dependencies") is List<object> items)) yield break;
+                foreach (var item in items)
+                {
+                    if (item is string text && text.Length > 0)
+                        yield return text.Contains("@") ? text : text + "@" + marketplace;
+                    else if (item is List<KeyValuePair<string, object>> spec && Member(spec, "name") is string name && name.Length > 0)
+                        yield return name + "@" + (Member(spec, "marketplace") as string ?? marketplace);
+                }
+            }
         }
 
         /// <summary>The install path of the record that applies here: this project's local or project install, else a user or managed one.</summary>
@@ -96,16 +184,6 @@ namespace Hissal.AgentSkillsSync
         bool IsThisProject(List<KeyValuePair<string, object>> record) =>
             _projectRoot != null && Member(record, "projectPath") is string path && path.Length > 0 &&
             PathComparer.Equals(Normalize(path), _projectRoot);
-
-        static bool IsEnabled(string id, IEnumerable<List<KeyValuePair<string, object>>> settings,
-            List<KeyValuePair<string, object>> entry, List<KeyValuePair<string, object>> manifest)
-        {
-            foreach (var enabledPlugins in settings)
-                if (Member(enabledPlugins, id) is bool enabled)
-                    return enabled;
-            if (Member(entry, "defaultEnabled") is bool entryDefault) return entryDefault;
-            return !(Member(manifest, "defaultEnabled") is bool byDefault) || byDefault;
-        }
 
         /// <summary>
         /// The marketplaces' plugin entries, read from each marketplace's <c>marketplace.json</c> on disk. Found through

@@ -235,6 +235,59 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(Scan().Copies, Is.Empty);
         }
 
+        static string Manifest(string name, string fields) => "{ \"name\": \"" + name + "\", " + fields + " }";
+
+        const string OffByDefault = "\"defaultEnabled\": false";
+
+        [Test]
+        public void Scan_DependenciesOfAnEnabledPlugin_AreEnabledDespiteTheirDefault()
+        {
+            InstallAt("kit@market", "user", null, new[] { "deploy" },
+                Manifest("kit", "\"dependencies\": [\"vault\", \"audit@shared\", { \"name\": \"store\", \"marketplace\": \"shared\" }]"));
+            InstallAt("vault@market", "user", null, new[] { "secret" }, Manifest("vault", OffByDefault + ", \"dependencies\": [\"core\"]"));
+            InstallAt("core@market", "user", null, new[] { "base" }, Manifest("core", OffByDefault));
+            InstallAt("audit@shared", "user", null, new[] { "log" }, Manifest("audit", OffByDefault));
+            InstallAt("store@shared", "user", null, new[] { "keep" }, Manifest("store", OffByDefault));
+            InstallAt("lone@market", "user", null, new[] { "alone" }, Manifest("lone", OffByDefault));
+
+            var state = Scan();
+
+            Assert.That(state.Copies.Select(c => c.SkillName),
+                Is.EquivalentTo(new[] { "deploy", "secret", "base", "log", "keep" }));
+        }
+
+        [Test]
+        public void Scan_DependenciesOfADisabledPlugin_KeepTheirDefault()
+        {
+            InstallAt("kit@market", "user", null, new[] { "deploy" }, Manifest("kit", "\"dependencies\": [\"vault\"]"));
+            InstallAt("vault@market", "user", null, new[] { "secret" }, Manifest("vault", OffByDefault));
+            UserSettings(Enabled("kit@market", false));
+
+            Assert.That(Scan().Copies, Is.Empty);
+        }
+
+        [Test]
+        public void Scan_PluginWhoseDependencyIsDisabledOrMissing_DoesNotLoad()
+        {
+            InstallAt("kit@market", "user", null, new[] { "deploy" }, Manifest("kit", "\"dependencies\": [\"vault\"]"));
+            Install("vault@market", "secret");
+            InstallAt("orphan@market", "user", null, new[] { "lost" }, Manifest("orphan", "\"dependencies\": [\"gone\"]"));
+            InstallAt("top@market", "user", null, new[] { "peak" }, Manifest("top", "\"dependencies\": [\"orphan\"]"));
+            UserSettings(Enabled("vault@market", false));
+
+            Assert.That(Scan().Copies, Is.Empty);
+        }
+
+        [Test]
+        public void Scan_MarketplaceEntryDependencies_CountToo()
+        {
+            InstallAt("kit@market", "user", null, new[] { "deploy" }, manifest: null);
+            InstallAt("vault@market", "user", null, new[] { "secret" }, Manifest("vault", OffByDefault));
+            GitHubMarketplace("market", Entry("kit", "\"dependencies\": [\"vault\"]"), Entry("vault"));
+
+            Assert.That(Scan().Has(Claude, "secret"), Is.True);
+        }
+
         [Test]
         public void Scan_ProjectAndLocalSettings_OverrideTheUserSetting()
         {

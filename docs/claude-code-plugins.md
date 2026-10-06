@@ -62,7 +62,14 @@ Installed is not the same as loaded. `enabledPlugins` in the settings files maps
 
 When no source mentions the id, `defaultEnabled` applies (default `true`). The plugin's marketplace entry's `defaultEnabled` overrides the manifest's ([metadata precedence](https://code.claude.com/docs/en/plugins-reference#metadata-precedence)). On the observed machine, four of the seven installed plugins were set to `false` in user settings, so they hold skills on disk that Claude Code does not load.
 
-**The tool's rule:** it reads local, then project, then user settings, and falls back to `defaultEnabled`: the marketplace entry's, else the manifest's.
+**The tool's rule:** it reads local, then project, then user settings, and falls back to `defaultEnabled`: the marketplace entry's, else the manifest's. The session-only sources (`--add-dir`, `--settings`, `--plugin-dir`) and managed settings are not read. A project skill can never see them, and managed paths are per OS.
+
+**Dependencies.** A plugin's `dependencies` (in `plugin.json` or its marketplace entry) name the plugins that must be enabled for it to work: `"name"` (same marketplace), `"name@marketplace"`, or `{ "name", "marketplace", "version" }` ([dependencies](https://code.claude.com/docs/en/plugins/dependencies)). They change the enabled state both ways:
+
+- A plugin that an enabled plugin depends on starts enabled regardless of its own `defaultEnabled` ([defaultEnabled](https://code.claude.com/docs/en/plugins-reference#defaultenabled)).
+- A plugin whose dependency is not installed, or is installed but turned off, stays disabled with `Dependency "<dep>" is not installed` or `is disabled` ([dependency errors](https://code.claude.com/docs/en/plugins/troubleshooting#dependency-errors)).
+
+The tool computes this over the installed plugins: a plugin is loadable when each dependency is installed (an applicable install record with a valid manifest), not set to `false`, and loadable itself. The plugins enabled by a setting or by default that are loadable are enabled, and so is every dependency they reach. The docs don't say how `plugin.json` and entry `dependencies` combine, so the tool takes both.
 
 **Where the marketplace entry is.** `known_marketplaces.json` (under the plugins root) maps each marketplace name to its `source` and `installLocation` ([find plugins on disk](https://code.claude.com/docs/en/plugins/loading#find-plugins-on-disk)). The entry is the item in `marketplace.json`'s `plugins` array whose `name` is the id's name part. Where `marketplace.json` is ([marketplace sources](https://code.claude.com/docs/en/plugins/marketplace-reference#marketplace-sources)):
 
@@ -72,7 +79,7 @@ When no source mentions the id, `defaultEnabled` applies (default `true`). The p
 | `directory` | `<installLocation>/.claude-plugin/marketplace.json` (`installLocation` is the path given) |
 | `file` | `installLocation` itself (the path given) |
 
-A `url` marketplace is a download under `marketplaces/<name>/` whose file name is undocumented, and a claude.ai marketplace has no local copy (`known_marketplaces_claudeai.json`), so for those the tool uses the manifest's value (see §5). The clone is the marketplace's current state, which can be newer than the installed plugin version. The session-only sources (`--add-dir`, `--settings`, `--plugin-dir`) and managed settings are not read. A project skill can never see them, and managed paths are per OS.
+A `url` marketplace is a download under `marketplaces/<name>/` whose file name is undocumented, and a claude.ai marketplace has no local copy (`known_marketplaces_claudeai.json`), so for those the tool uses the manifest's value (see §5). The clone is the marketplace's current state, which can be newer than the installed plugin version.
 
 ## 4. Where a plugin's skills are
 
@@ -81,7 +88,7 @@ The plugin root is the `installPath`. The manifest is `.claude-plugin/plugin.jso
 - **Default:** `skills/<name>/SKILL.md`, one folder per skill. All seven observed plugins use it.
 - **Manifest `skills`:** a path or an array of paths, each starting with `./`, such as `"./extra-skills/"`, or `"."` for the root. Each path is either a folder of `<name>/SKILL.md` folders or one folder holding `SKILL.md` directly. The listed paths **add to** `skills/`; they do not replace it. Observed example: `andrej-karpathy-skills` sets `"skills": ["./skills/karpathy-guidelines"]`. A path that resolves outside the plugin root is rejected.
 - **A root `SKILL.md`, with no `skills/` folder and no `skills` key:** the plugin loads as a single skill. The tool does not handle this case.
-- **Marketplace entry `skills`:** a marketplace entry can add skills to a plugin (non-strict entries), or limit which ones load for a plugin whose source is the marketplace root. The tool reads marketplace entries (§3) but not their `skills`. None of the observed marketplaces did this.
+- **Marketplace entry `skills`:** a marketplace entry can add skills to a plugin (non-strict entries), or limit which ones load for a plugin whose source is the marketplace root. The tool reads marketplace entries for `defaultEnabled` and `dependencies` (§3), not for `skills`. None of the observed marketplaces did this.
 
 **Namespacing.** Plugin skills appear as `/<manifest name>:<skill folder>`, for example `/unity:ui`. Without a manifest, the name comes from the marketplace entry. The namespace uses the manifest `name`, while the id in `enabledPlugins` uses the marketplace entry name, and the two can differ. The namespaced skill loads **beside** a same-named skill in `~/.claude/skills` or the project's `.claude/skills`; it does not shadow them. So `unity:ui` and a project `ui` both load, and Claude sees the same skill twice. That is why the tool counts a plugin skill as a user-scope duplicate of the project skill with the same folder name, for `.claude/skills` only.
 
@@ -91,5 +98,6 @@ The plugin root is the `installPath`. The manifest is `.claude-plugin/plugin.jso
 - **Skills-directory plugins:** a plugin folder with `.claude-plugin/plugin.json` saved under `~/.claude/skills/` or `.claude/skills/` (`<name>@skills-dir`).
 - **Session-only plugins:** `--plugin-dir`, `--plugin-url` and `CLAUDE_CODE_PLUGIN_DIRS` (`@inline`).
 - **Seed directories** (`CLAUDE_CODE_PLUGIN_SEED_DIR`): read-only, pre-populated plugin roots for containers.
-- **Marketplace entries of `url` and claude.ai marketplaces:** no documented local `marketplace.json`, so their `defaultEnabled` override is not applied; the manifest's value is used.
+- **Dependency version ranges:** a dependency outside the declaring plugin's `version` range also leaves that plugin disabled (`Requires "<dep>" <range>, installed <version>`). The tool doesn't check ranges, so it can report such a plugin's skills.
+- **Marketplace entries of `url` and claude.ai marketplaces:** no documented local `marketplace.json`, so their `defaultEnabled` override and entry `dependencies` are not applied; the manifest's values are used.
 - **Plugins read by other agents.** Amp also reads `~/.claude/plugins/cache/`. The tool reports plugin skills only for `.claude/skills`, in line with how the folder table leaves cross-reads out.
