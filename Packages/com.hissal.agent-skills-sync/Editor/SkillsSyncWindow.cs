@@ -73,13 +73,15 @@ namespace Hissal.AgentSkillsSync.Editor
             {
                 var lockfile = Lockfile.Load(ProjectRoot);
                 var plan = new SkillSync(ProjectRoot, fetcher: null).Plan();
-                var pending = plan.Actions.Select(a => a.SkillName).ToHashSet();
-
                 foreach (var skill in lockfile.Skills)
-                    _skillList.Add(SkillRow(skill, pending.Contains(skill.Name), _failures.TryGetValue(skill.Name, out var failure) ? failure : null));
+                    _skillList.Add(SkillRow(skill, PendingLabel(plan, skill.Name), _failures.TryGetValue(skill.Name, out var failure) ? failure : null));
 
-                if (lockfile.Skills.Count == 0) ShowStatus("The lockfile lists no skills.", HelpBoxMessageType.Info);
-                _canSync = lockfile.Skills.Count > 0;
+                var removals = plan.Actions.Where(a => a.Kind == PlanActionKind.Remove).Select(a => a.SkillName).Distinct().ToList();
+                if (removals.Count > 0)
+                    ShowStatus($"No longer locked, removed on Sync: {string.Join(", ", removals)}", HelpBoxMessageType.Info);
+                else if (lockfile.Skills.Count == 0)
+                    ShowStatus("The lockfile lists no skills.", HelpBoxMessageType.Info);
+                _canSync = lockfile.Skills.Count > 0 || plan.HasChanges;
             }
             catch (LockfileException e)
             {
@@ -89,19 +91,30 @@ namespace Hissal.AgentSkillsSync.Editor
             UpdateSyncButton();
         }
 
-        static VisualElement SkillRow(LockedSkill skill, bool pending, SkillFetchException failure)
+        /// <summary>What Sync would do to the skill, most significant first.</summary>
+        static string PendingLabel(InstallPlan plan, string skillName)
+        {
+            var kinds = plan.Actions.Where(a => a.SkillName == skillName).Select(a => a.Kind).ToList();
+            if (kinds.Contains(PlanActionKind.Install)) return "to install";
+            if (kinds.Contains(PlanActionKind.Update)) return "to update";
+            if (kinds.Contains(PlanActionKind.Link)) return "to link";
+            if (kinds.Contains(PlanActionKind.LeaveForeign)) return "left alone (not managed)";
+            return "installed";
+        }
+
+        static VisualElement SkillRow(LockedSkill skill, string pending, SkillFetchException failure)
         {
             var container = new VisualElement { style = { marginBottom = 2 } };
             var row = new VisualElement { style = { flexDirection = FlexDirection.Row } };
             row.Add(new Label(skill.Name) { style = { width = 200, unityFontStyleAndWeight = FontStyle.Bold } });
             row.Add(new Label(skill.Source) { style = { flexGrow = 1 } });
-            if (failure == null && pending && !GitHubSkillFetcher.CanVerify(skill))
+            if (failure == null && !GitHubSkillFetcher.CanVerify(skill))
                 row.Add(new Label("can't verify lock hash")
                 {
-                    tooltip = "Locked with a skills.sh server hash, which this tool cannot check. Sync will refuse to install it.",
+                    tooltip = "Locked with a skills.sh server hash, which this tool cannot check. Sync refuses to install or update it.",
                     style = { marginRight = 8 },
                 });
-            row.Add(new Label(failure != null ? FailureLabel(failure.Failure) : pending ? "to install" : "installed")
+            row.Add(new Label(failure != null ? FailureLabel(failure.Failure) : pending)
             {
                 style = { color = failure != null ? new StyleColor(new Color(0.9f, 0.3f, 0.3f)) : new StyleColor(StyleKeyword.Null) },
             });
@@ -160,9 +173,19 @@ namespace Hissal.AgentSkillsSync.Editor
         {
             if (summary.NothingChanged) return "Everything is already in sync.";
             var text = new StringBuilder();
-            if (summary.Installed.Count > 0) text.AppendLine($"Installed ({summary.Installed.Count}): {string.Join(", ", summary.Installed)}");
+            Line(text, "Installed", summary.Installed);
+            Line(text, "Updated", summary.Updated);
+            Line(text, "Removed", summary.Removed);
+            Line(text, "Skipped (not managed by the tool)", summary.Skipped);
             if (summary.Linked.Count > 0) text.AppendLine($"Linked ({summary.Linked.Count}): {string.Join(", ", summary.Linked)}");
             return text.ToString().TrimEnd();
+        }
+
+        static void Line(StringBuilder text, string label, IReadOnlyList<string> names)
+        {
+            text.Append($"{label}: {names.Count}");
+            if (names.Count > 0) text.Append(" (").Append(string.Join(", ", names)).Append(')');
+            text.AppendLine();
         }
 
         void ShowStatus(string message, HelpBoxMessageType type)
