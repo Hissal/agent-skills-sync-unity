@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 
@@ -6,13 +7,20 @@ namespace Hissal.AgentSkillsSync.Tests
 {
     public class StartupCheckTests
     {
+        // Locked at the real hashes of the `minimal` and `nested` fixtures, so installed copies count as current.
         const string Lock = @"{
   ""version"": 1,
   ""skills"": {
-    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": ""a"" },
-    ""code-review"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/code-review/SKILL.md"", ""computedHash"": ""b"" }
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" },
+    ""code-review"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/code-review/SKILL.md"", ""computedHash"": """ + FakeGitHub.NestedHash + @""" }
   }
 }";
+
+        static readonly string FixturesRoot =
+            Path.GetFullPath("Packages/com.hissal.agent-skills-sync/Tests/Editor/Fixtures~/SkillFolderHash");
+
+        /// <summary>The lock with tdd's hash replaced, as after `npx skills update`.</summary>
+        static string LockWithTddHash(string hash) => Lock.Replace(FakeGitHub.MinimalHash, hash);
 
         string _project;
 
@@ -27,15 +35,22 @@ namespace Hissal.AgentSkillsSync.Tests
         [TearDown]
         public void TearDown()
         {
-            if (Directory.Exists(_project)) Directory.Delete(_project, recursive: true);
+            TempDirectory.Delete(_project);
         }
 
+        /// <summary>Syncs the locked skills from the hash fixtures: managed canonical copies plus links.</summary>
         void InstallAll()
         {
-            foreach (var folder in new[] { ".agents/skills", ".claude/skills" })
-            foreach (var name in new[] { "tdd", "code-review" })
-                Directory.CreateDirectory(Path.Combine(_project, folder, name));
+            var layout = FolderLayout.Default;
+            var plan = InstallPlanner.Plan(Lockfile.Load(_project), ProjectScanner.Scan(_project, layout), layout);
+            new PlanExecutor().Execute(_project, plan, new Dictionary<string, string>
+            {
+                ["tdd"] = Path.Combine(FixturesRoot, "minimal"),
+                ["code-review"] = Path.Combine(FixturesRoot, "nested"),
+            });
         }
+
+        void Unlink(string relativePath) => DirectoryLink.Remove(Path.Combine(_project, relativePath));
 
         LocalPrefs Prefs => LocalPrefs.Load(_project);
 
@@ -78,7 +93,7 @@ namespace Hissal.AgentSkillsSync.Tests
             InstallAll();
             RecordSynced();
 
-            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), Lock.Replace(@"""a""", @"""a2"""));
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), LockWithTddHash("changed-2"));
 
             Assert.That(ShouldNotify(), Is.True);
         }
@@ -102,7 +117,7 @@ namespace Hissal.AgentSkillsSync.Tests
             InstallAll();
             RecordSynced();
 
-            Directory.Delete(Path.Combine(_project, ".claude/skills/tdd"));
+            Unlink(".claude/skills/tdd");
 
             Assert.That(ShouldNotify(), Is.True);
             Assert.That(SyncStatus.Read(_project).MissingSkills, Is.EqualTo(new[] { "tdd" }));
@@ -113,7 +128,7 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             InstallAll();
             RecordSynced();
-            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), Lock.Replace(@"""a""", @"""a2"""));
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), LockWithTddHash("changed-2"));
             RecordDeclined();
 
             Assert.That(ShouldNotify(), Is.False);
@@ -124,10 +139,10 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             InstallAll();
             RecordSynced();
-            Directory.Delete(Path.Combine(_project, ".claude/skills/tdd"));
+            Unlink(".claude/skills/tdd");
             RecordDeclined();
 
-            Directory.Delete(Path.Combine(_project, ".claude/skills/code-review"));
+            Unlink(".claude/skills/code-review");
 
             Assert.That(ShouldNotify(), Is.True);
         }
@@ -137,10 +152,10 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             InstallAll();
             RecordSynced();
-            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), Lock.Replace(@"""a""", @"""a2"""));
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), LockWithTddHash("changed-2"));
             RecordDeclined();
 
-            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), Lock.Replace(@"""a""", @"""a3"""));
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), LockWithTddHash("changed-3"));
 
             Assert.That(ShouldNotify(), Is.True);
         }
@@ -150,13 +165,13 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             InstallAll();
             RecordSynced();
-            Directory.Delete(Path.Combine(_project, ".claude/skills/tdd"));
+            Unlink(".claude/skills/tdd");
             RecordDeclined();
-            Directory.CreateDirectory(Path.Combine(_project, ".claude/skills/tdd"));
+            InstallAll();
             RecordSynced();
 
             Assert.That(Prefs.DeclinedState, Is.Null);
-            Directory.Delete(Path.Combine(_project, ".claude/skills/tdd"));
+            Unlink(".claude/skills/tdd");
             Assert.That(ShouldNotify(), Is.True);
         }
 
