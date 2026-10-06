@@ -35,6 +35,9 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Names of locked skills left alone in at least one folder because the entry there is not the tool's.</summary>
         public IReadOnlyList<string> Skipped => NamesOf(PlanActionKind.LeaveForeign);
 
+        /// <summary>Names of locked skills left out of at least one folder in favour of the contributor's user-scope copy.</summary>
+        public IReadOnlyList<string> SkippedForUserScope => NamesOf(PlanActionKind.SkipUserScope);
+
         /// <summary>Names of skills linked into at least one link folder.</summary>
         public IReadOnlyList<string> Linked => NamesOf(PlanActionKind.Link);
 

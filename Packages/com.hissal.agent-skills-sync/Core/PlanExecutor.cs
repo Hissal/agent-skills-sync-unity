@@ -56,6 +56,7 @@ namespace Hissal.AgentSkillsSync
                         DirectoryLink.Remove(entry);
                         break;
                     case PlanActionKind.LeaveForeign:
+                    case PlanActionKind.SkipUserScope:
                         break;
                     case PlanActionKind.Unlink:
                         DirectoryLink.Remove(entry);

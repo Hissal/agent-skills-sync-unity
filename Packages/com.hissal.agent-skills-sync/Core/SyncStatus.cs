@@ -53,7 +53,10 @@ namespace Hissal.AgentSkillsSync
         /// no missing skills, so only a hash change surfaces it.
         /// </summary>
         /// <param name="selected">The folders this machine installs into (see <see cref="FolderSelection.Effective"/>); null = every folder in the layout.</param>
-        public static SyncStatus Read(string projectRoot, FolderLayout layout = null, IEnumerable<SkillsFolder> selected = null)
+        /// <param name="userScope">The user-scope copies found (see <see cref="UserScopeScanner"/>); null = none.</param>
+        /// <param name="skips">The contributor's per-folder skip choices; null = none. A skipped skill does not count as missing.</param>
+        public static SyncStatus Read(string projectRoot, FolderLayout layout = null, IEnumerable<SkillsFolder> selected = null,
+            UserScopeState userScope = null, SkipChoices skips = null)
         {
             var lockHash = LockfileHash.Compute(projectRoot);
             if (lockHash == null) return null;
@@ -66,7 +69,7 @@ namespace Hissal.AgentSkillsSync
             {
                 var project = ProjectScanner.Scan(projectRoot, layout, readContents: false);
                 var plan = InstallPlanner.Plan(Lockfile.Load(projectRoot), project, layout, PresentCopyIsCurrent.Instance,
-                    selected: selection);
+                    selected: selection, userScope: userScope, skips: skips);
                 // A left-alone (foreign) entry is never synced, so it does not count as out of sync.
                 missing = plan.Actions.Where(a => a.ChangesProject).Select(a => a.SkillName);
             }
