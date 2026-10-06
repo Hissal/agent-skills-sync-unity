@@ -64,15 +64,30 @@ namespace Hissal.AgentSkillsSync
                 applied.Add(action);
             }
 
-            foreach (var managed in plan.ManagedNames)
+            foreach (var ignored in plan.IgnoredNames)
             {
-                var folder = Paths.InProject(projectRoot, managed.Key.RelativePath);
-                if (managed.Value.Count > 0 || Directory.Exists(folder))
-                    ManagedStateFile.Write(folder, managed.Value);
+                var folder = Paths.InProject(projectRoot, ignored.Key.RelativePath);
+                if (ignored.Value.Count > 0 || Directory.Exists(folder))
+                    ManagedStateFile.Write(folder, ignored.Value);
             }
+            RecordManaged(projectRoot, plan);
 
             return new SyncSummary(applied, linkMethods);
         }
+
+        /// <summary>Records what this machine now manages in its local prefs; the committed .gitignore does not say.</summary>
+        static void RecordManaged(string projectRoot, InstallPlan plan)
+        {
+            var managed = plan.ManagedNames.ToDictionary(m => m.Key.RelativePath, m => m.Value, StringComparer.Ordinal);
+            var prefs = LocalPrefs.Load(projectRoot);
+            var recorded = prefs.ManagedSkills;
+            if (recorded != null && Flatten(recorded).SequenceEqual(Flatten(managed))) return;
+            prefs.ManagedSkills = managed;
+            prefs.Save();
+        }
+
+        static IEnumerable<string> Flatten(IReadOnlyDictionary<string, IReadOnlyList<string>> namesByFolder) =>
+            namesByFolder.SelectMany(f => f.Value.Select(name => f.Key + "/" + name)).OrderBy(n => n, StringComparer.Ordinal);
 
         /// <summary>
         /// A symlink or junction follows an updated canonical copy by itself; a link made by the Copy fallback does

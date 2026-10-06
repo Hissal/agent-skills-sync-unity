@@ -7,9 +7,11 @@ using System.Text;
 namespace Hissal.AgentSkillsSync
 {
     /// <summary>
-    /// The tool's block inside the <c>.gitignore</c> of each skills folder. The block ignores exactly the names
-    /// the tool manages there, and doubles as the record of which entries are the tool's (everything else is
-    /// foreign). Lines outside the block belong to the user: they are kept as they are and never read as managed.
+    /// The tool's block inside the <c>.gitignore</c> of each skills folder. The block is committed, so it lists the
+    /// same names on every machine: every locked skill, plus project-authored skills in link folders (see
+    /// <see cref="InstallPlan.IgnoredNames"/>). Which entries this machine actually manages is kept in its
+    /// <see cref="LocalPrefs.ManagedSkills"/>; the block is read as that record only before a sync first wrote it.
+    /// Lines outside the block belong to the user: they are kept as they are and never read as the tool's.
     /// </summary>
     public static class ManagedStateFile
     {
@@ -19,10 +21,10 @@ namespace Hissal.AgentSkillsSync
         const string EndMarker = "# <<< Agent Skills Sync";
 
         const string BlockIntro =
-            "# Lists exactly the skills the tool installed here. Anything else in this folder stays tracked.\n";
+            "# Lists every skill the tool may install or link here, on any machine. Anything else stays tracked.\n";
 
         /// <summary>
-        /// The managed names recorded in <paramref name="folderPath"/>'s block; empty when there is no file or
+        /// The names listed in <paramref name="folderPath"/>'s block; empty when there is no file or
         /// the file has no block (a <c>.gitignore</c> the tool never wrote to).
         /// </summary>
         public static IReadOnlyList<string> Read(string folderPath)
@@ -43,7 +45,7 @@ namespace Hissal.AgentSkillsSync
         }
 
         /// <summary>
-        /// Records <paramref name="names"/> as managed, creating the folder if needed. Replaces only the tool's
+        /// Lists <paramref name="names"/> in the block, creating the folder if needed. Replaces only the tool's
         /// block (appending one to a file that has none) and leaves an unchanged file untouched.
         /// </summary>
         public static void Write(string folderPath, IEnumerable<string> names)

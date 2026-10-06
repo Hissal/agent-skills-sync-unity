@@ -13,13 +13,21 @@ namespace Hissal.AgentSkillsSync
         /// False for a quick scan that reads names and links only: no installed hashes and no check of copied links'
         /// content, so the planner can't see outdated copies (see <see cref="SyncStatus.Read"/>).
         /// </param>
-        public static ProjectState Scan(string projectRoot, FolderLayout layout, bool readContents = true) =>
-            new ProjectState(layout.Folders.Select(folder => ScanFolder(projectRoot, folder, layout.Canonical, readContents)));
+        public static ProjectState Scan(string projectRoot, FolderLayout layout, bool readContents = true)
+        {
+            // What this machine manages lives in its local prefs. Until a sync first records it, the names in the
+            // committed .gitignore blocks count as managed (before, the block listed exactly this machine's entries).
+            var recorded = LocalPrefs.Load(projectRoot).ManagedSkills;
+            return new ProjectState(layout.Folders.Select(folder =>
+                ScanFolder(projectRoot, folder, layout.Canonical, readContents, recorded)));
+        }
 
-        static FolderState ScanFolder(string projectRoot, SkillsFolder folder, SkillsFolder canonicalFolder, bool readContents)
+        static FolderState ScanFolder(string projectRoot, SkillsFolder folder, SkillsFolder canonicalFolder, bool readContents,
+            IReadOnlyDictionary<string, IReadOnlyList<string>> recorded)
         {
             var path = Paths.InProject(projectRoot, folder.RelativePath);
-            if (!Directory.Exists(path)) return new FolderState(folder, null, null);
+            if (!Directory.Exists(path))
+                return new FolderState(folder, null, recorded == null ? null : Recorded(recorded, folder));
 
             var entries = Directory.GetFileSystemEntries(path)
                 .Where(entry => Path.GetFileName(entry) != ManagedStateFile.FileName)
@@ -30,7 +38,8 @@ namespace Hissal.AgentSkillsSync
                 .Where(entry => !files.Contains(Path.GetFileName(entry)) && !File.Exists(Path.Combine(entry, SkillFile)))
                 .Select(Path.GetFileName)
                 .ToList();
-            var managed = ManagedStateFile.Read(path);
+            var ignored = ManagedStateFile.Read(path);
+            var managed = recorded == null ? ignored : Recorded(recorded, folder);
 
             // Only canonical copies are compared with the lock; link folders point at them.
             var hashes = new Dictionary<string, string>();
@@ -65,8 +74,11 @@ namespace Hissal.AgentSkillsSync
             }
 
             return new FolderState(folder, names, managed, installedHashes: hashes, files: files, staleLinks: staleLinks,
-                withoutSkillFile: withoutSkillFile);
+                withoutSkillFile: withoutSkillFile, ignored: ignored);
         }
+
+        static IReadOnlyList<string> Recorded(IReadOnlyDictionary<string, IReadOnlyList<string>> recorded, SkillsFolder folder) =>
+            recorded.TryGetValue(folder.RelativePath, out var names) ? names : new string[0];
 
         // A dangling link fails Directory.Exists but is still a link entry, not a plain file.
         static bool IsLink(string entry) => File.GetAttributes(entry).HasFlag(FileAttributes.ReparsePoint);

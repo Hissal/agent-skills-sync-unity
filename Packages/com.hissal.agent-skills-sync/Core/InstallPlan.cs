@@ -79,13 +79,18 @@ namespace Hissal.AgentSkillsSync
     /// <summary>The planner's output: the ordered actions, and what each folder's managed-state file lists afterwards.</summary>
     public sealed class InstallPlan
     {
-        /// <param name="managedNamesChange">Whether <paramref name="managedNames"/> differs from what the folders record now.</param>
+        /// <param name="managedNamesChange">
+        /// Whether <paramref name="managedNames"/> differs from what this machine records now, or
+        /// <paramref name="ignoredNames"/> from a folder's <c>.gitignore</c> block.
+        /// </param>
+        /// <param name="ignoredNames">Per folder whose <c>.gitignore</c> block the sync writes, the names it lists; null = none.</param>
         public InstallPlan(IReadOnlyList<PlanAction> actions, IReadOnlyDictionary<SkillsFolder, IReadOnlyList<string>> managedNames,
-            bool managedNamesChange = false)
+            bool managedNamesChange = false, IReadOnlyDictionary<SkillsFolder, IReadOnlyList<string>> ignoredNames = null)
         {
             Actions = actions;
             ManagedNames = managedNames;
             ManagedNamesChange = managedNamesChange;
+            IgnoredNames = ignoredNames ?? new Dictionary<SkillsFolder, IReadOnlyList<string>>();
         }
 
         /// <summary>
@@ -96,15 +101,25 @@ namespace Hissal.AgentSkillsSync
         public IReadOnlyList<PlanAction> Actions { get; }
 
         /// <summary>
-        /// Whether applying the plan changes anything: an action other than LeaveForeign, or a managed-state file to
-        /// rewrite (e.g. dropping a no-longer-locked name whose entry is already gone from disk).
+        /// Whether applying the plan changes anything: an action other than LeaveForeign, or managed names or a
+        /// <c>.gitignore</c> block to rewrite (e.g. dropping a no-longer-locked name whose entry is already gone from disk).
         /// </summary>
         public bool HasChanges => ManagedNamesChange || Actions.Any(a => a.ChangesProject);
 
-        /// <summary>Whether some folder's managed names differ from what its managed-state file records now.</summary>
+        /// <summary>Whether some folder's managed names or <c>.gitignore</c> block differ from what is recorded now.</summary>
         public bool ManagedNamesChange { get; }
 
-        /// <summary>Per folder in the layout, the sorted names the tool manages there once the plan is applied.</summary>
+        /// <summary>
+        /// Per folder in the layout, the sorted names this machine manages there once the plan is applied. Recorded in
+        /// <see cref="LocalPrefs.ManagedSkills"/>; it depends on this machine's folder selection.
+        /// </summary>
         public IReadOnlyDictionary<SkillsFolder, IReadOnlyList<string>> ManagedNames { get; }
+
+        /// <summary>
+        /// Per folder whose <c>.gitignore</c> block the sync writes (a folder this machine keeps entries in, or one
+        /// whose block exists), the sorted names the block lists: every locked skill, plus project-authored skills in
+        /// link folders. The block is committed, so it never depends on this machine's selection or skips.
+        /// </summary>
+        public IReadOnlyDictionary<SkillsFolder, IReadOnlyList<string>> IgnoredNames { get; }
     }
 }

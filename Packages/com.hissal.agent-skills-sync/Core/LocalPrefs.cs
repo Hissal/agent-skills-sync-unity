@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace Hissal.AgentSkillsSync
 {
@@ -26,6 +27,7 @@ namespace Hissal.AgentSkillsSync
         const string SyncedSourcesKey = "syncedSources";
         const string SelectedFoldersKey = "selectedFolders";
         const string DeclinedFoldersKey = "declinedFolders";
+        const string ManagedSkillsKey = "managedSkills";
 
         readonly string _path;
         readonly List<KeyValuePair<string, object>> _members;
@@ -103,6 +105,43 @@ namespace Hissal.AgentSkillsSync
         {
             get => GetStringList(DeclinedFoldersKey);
             set => SetStringList(DeclinedFoldersKey, value);
+        }
+
+        /// <summary>
+        /// Per skills folder (<see cref="SkillsFolder.RelativePath"/>), the names of the entries this machine's syncs
+        /// created there and still manage; null until the first sync records it (the scanner then falls back to the
+        /// names in each folder's <c>.gitignore</c> block). Written by <see cref="PlanExecutor"/>.
+        /// </summary>
+        public IReadOnlyDictionary<string, IReadOnlyList<string>> ManagedSkills
+        {
+            get
+            {
+                if (!(Get(ManagedSkillsKey) is List<KeyValuePair<string, object>> folders)) return null;
+                var result = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+                foreach (var folder in folders)
+                {
+                    var names = new List<string>();
+                    if (folder.Value is List<object> items)
+                        foreach (var item in items)
+                            if (item is string s) names.Add(s);
+                    result[folder.Key] = names;
+                }
+                return result;
+            }
+            set
+            {
+                if (value == null)
+                {
+                    Set(ManagedSkillsKey, null);
+                    return;
+                }
+                var folders = new List<KeyValuePair<string, object>>();
+                foreach (var folder in value.OrderBy(f => f.Key, StringComparer.Ordinal))
+                    if (folder.Value.Count > 0)
+                        folders.Add(new KeyValuePair<string, object>(folder.Key,
+                            new List<object>(folder.Value.OrderBy(n => n, StringComparer.Ordinal))));
+                Set(ManagedSkillsKey, folders);
+            }
         }
 
         string GetString(string key) => Get(key) as string;

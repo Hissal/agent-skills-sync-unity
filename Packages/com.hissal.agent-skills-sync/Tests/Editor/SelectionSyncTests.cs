@@ -60,7 +60,16 @@ namespace Hissal.AgentSkillsSync.Tests
 
         void MakeFolder(string relative) => Directory.CreateDirectory(InProject(relative));
 
-        string[] ManagedIn(string folder) => ManagedStateFile.Read(InProject(folder)).ToArray();
+        /// <summary>What this machine manages in the folder, from its local prefs.</summary>
+        string[] ManagedIn(string folder) =>
+            LocalPrefs.Load(_project).ManagedSkills is var managed && managed != null && managed.TryGetValue(folder, out var names)
+                ? names.ToArray()
+                : new string[0];
+
+        /// <summary>The names the folder's committed .gitignore block lists.</summary>
+        string[] IgnoredIn(string folder) => ManagedStateFile.Read(InProject(folder)).ToArray();
+
+        string GitignoreText(string folder) => File.ReadAllText(InProject(folder + "/.gitignore"));
 
         [Test]
         public void Run_NoneSelected_InstallsNothing()
@@ -86,6 +95,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(Exists(Claude + "/mine"), Is.True);
             Assert.That(File.ReadAllText(InProject(Claude + "/.gitignore")), Does.Contain("/local-notes"));
             Assert.That(ManagedIn(Claude), Is.Empty);
+            Assert.That(IgnoredIn(Claude), Is.EqualTo(new[] { "tdd" }), "the committed block does not follow this machine's selection");
             Assert.That(Exists(Agents + "/tdd"), Is.True);
             Assert.That(ManagedIn(Agents), Is.EqualTo(new[] { "tdd" }));
         }
@@ -119,6 +129,57 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(Exists(Agents + "/house-style"), Is.True);
             Assert.That(Exists(Claude + "/mine"), Is.True);
             Assert.That(ManagedIn(Agents), Is.Empty);
+            Assert.That(ManagedIn(Claude), Is.Empty);
+            Assert.That(IgnoredIn(Agents), Is.EqualTo(new[] { "tdd" }));
+            Assert.That(IgnoredIn(Claude), Is.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
+        public void Run_DifferentSelections_WriteTheSameGitignores()
+        {
+            MakeFolder(Agents + "/house-style");
+            File.WriteAllText(InProject(Agents + "/house-style/SKILL.md"), "# house style");
+            Sync(Agents, Claude);
+            var agentsText = GitignoreText(Agents);
+            var claudeText = GitignoreText(Claude);
+
+            foreach (var selection in new[] { new[] { Agents }, new[] { Claude }, new string[0], new[] { Agents, Claude } })
+            {
+                Sync(selection);
+
+                Assert.That(GitignoreText(Agents), Is.EqualTo(agentsText), "with " + string.Join(", ", selection));
+                Assert.That(GitignoreText(Claude), Is.EqualTo(claudeText), "with " + string.Join(", ", selection));
+            }
+            Assert.That(IgnoredIn(Agents), Is.EqualTo(new[] { "tdd" }));
+            Assert.That(IgnoredIn(Claude), Is.EqualTo(new[] { "house-style", "tdd" }));
+        }
+
+        [Test]
+        public void Run_NothingRecordedYet_AdoptsTheGitignoreBlockAsManaged()
+        {
+            Sync(Agents, Claude);
+            File.Delete(LocalPrefs.PathFor(_project)); // as after updating from a version that kept this in the block
+
+            var summary = Sync(Agents);
+
+            Assert.That(summary.Unlinked, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(ManagedIn(Agents), Is.EqualTo(new[] { "tdd" }));
+            Assert.That(ManagedIn(Claude), Is.Empty);
+        }
+
+        [Test]
+        public void Run_BlockListsANameThisMachineNeverManaged_LeavesTheEntryAlone()
+        {
+            Sync(Agents);
+            // A teammate's sync committed .claude/skills/.gitignore; this machine has its own tdd folder there.
+            ManagedStateFile.Write(InProject(Claude), new[] { "tdd" });
+            MakeFolder(Claude + "/tdd");
+            File.WriteAllText(InProject(Claude + "/tdd/SKILL.md"), "# my own");
+
+            var summary = Sync(Agents);
+
+            Assert.That(summary.NothingChanged, Is.True);
+            Assert.That(File.ReadAllText(InProject(Claude + "/tdd/SKILL.md")), Is.EqualTo("# my own"));
             Assert.That(ManagedIn(Claude), Is.Empty);
         }
 
