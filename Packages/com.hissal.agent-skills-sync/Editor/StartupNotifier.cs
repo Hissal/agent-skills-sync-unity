@@ -35,7 +35,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 OfferNewFolders(prefs, table, environment);
 
                 var selected = FolderSelection.Effective(prefs, table, environment);
-                var status = SyncStatus.Read(projectRoot, table, selected, UserScopeScanner.Scan(selected, environment),
+                var status = SyncStatus.Read(projectRoot, table, selected, UserScopeScanner.Scan(selected, environment, UserScopeScanner.DefaultSourcesFor(projectRoot)),
                     SkipChoices.From(prefs));
                 if (!StartupCheck.ShouldNotify(status, prefs)) return;
 
