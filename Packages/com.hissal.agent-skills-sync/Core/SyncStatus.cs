@@ -70,8 +70,9 @@ namespace Hissal.AgentSkillsSync
             IEnumerable<string> missing;
             try
             {
+                // The quick scan has no hashes: any installed copy counts as current.
                 var project = ProjectScanner.Scan(projectRoot, layout, readContents: false);
-                var plan = InstallPlanner.Plan(Lockfile.Load(projectRoot), project, choices, PresentCopyIsCurrent.Instance);
+                var plan = InstallPlanner.Plan(Lockfile.Load(projectRoot), project, choices, FixedCheck.AlwaysCurrent);
                 // A left-alone (foreign) entry is never synced, so it does not count as out of sync.
                 missing = plan.Actions.Where(a => a.ChangesProject).Select(a => a.SkillName);
             }
@@ -83,14 +84,6 @@ namespace Hissal.AgentSkillsSync
                 .Where(f => selection == null || selection.Any(s => s?.RelativePath == f.RelativePath))
                 .Select(f => f.RelativePath);
             return new SyncStatus(lockHash, missing, noFolderSelected, selectedFolders);
-        }
-
-        /// <summary>The quick scan has no hashes: any installed copy counts as current.</summary>
-        sealed class PresentCopyIsCurrent : IInstalledCopyCheck
-        {
-            public static readonly PresentCopyIsCurrent Instance = new PresentCopyIsCurrent();
-
-            public bool IsCurrent(LockedSkill skill, string installedHash) => true;
         }
     }
 }

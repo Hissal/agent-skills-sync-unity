@@ -21,6 +21,7 @@ namespace Hissal.AgentSkillsSync
         readonly ISkillFetcher _fetcher;
         readonly MachineChoices _choices;
         readonly PlanExecutor _executor;
+        readonly InstallModeStrategy _strategy;
 
         /// <summary>Shorthand for the <see cref="MachineChoices"/> constructor with the choices given one by one (see there).</summary>
         public SkillSync(string projectRoot, ISkillFetcher fetcher, FolderLayout layout = null, ILinkCreator linker = null,
@@ -43,6 +44,7 @@ namespace Hissal.AgentSkillsSync
             _choices = choices ?? MachineChoices.Default;
             _executor = new PlanExecutor(linker);
             Mode = mode;
+            _strategy = InstallModeStrategy.For(mode);
         }
 
         public InstallMode Mode { get; }
@@ -77,8 +79,7 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>What syncing <paramref name="lockfile"/> would do now, without doing it (see <see cref="Plan()"/>).</summary>
         public InstallPlan Plan(Lockfile lockfile) =>
-            PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout),
-                Mode == InstallMode.Latest ? FixedCheck.AlwaysCurrent : (IInstalledCopyCheck)LockedHashCheck.Instance);
+            PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout), _strategy.PreviewCheck);
 
         /// <summary>Plans with this sync's folder selection, user-scope copies and skips.</summary>
         InstallPlan PlanWith(Lockfile lockfile, ProjectState project, IInstalledCopyCheck check) =>
@@ -97,11 +98,9 @@ namespace Hissal.AgentSkillsSync
         public SyncSummary Run(Lockfile lockfile)
         {
             var project = ProjectScanner.Scan(_projectRoot, _choices.Layout);
-            var latest = Mode == InstallMode.Latest;
 
             // Latest compares every managed copy with upstream, so it fetches them all; Pinned only what the lock says is stale.
-            var toFetch = PlanWith(lockfile, project,
-                latest ? FixedCheck.NeverCurrent : (IInstalledCopyCheck)LockedHashCheck.Instance);
+            var toFetch = PlanWith(lockfile, project, _strategy.FetchCheck);
 
             var fetched = new Dictionary<string, string>();
             var upstreamHashes = new Dictionary<string, string>();
@@ -112,9 +111,7 @@ namespace Hissal.AgentSkillsSync
                 {
                     var folder = _fetcher.Fetch(action.Skill);
                     var hash = SkillFolderHash.Compute(folder);
-                    // Pinned refuses a changed source whichever fetcher is in use.
-                    if (!latest && GitHubSkillFetcher.CanVerify(action.Skill) && !GitHubSkillFetcher.MatchesLock(action.Skill, hash))
-                        throw GitHubSkillFetcher.SourceChangedSinceLocked(action.Skill, hash);
+                    _strategy.Accept(action.Skill, hash);
                     fetched[action.SkillName] = folder;
                     upstreamHashes[action.SkillName] = hash;
                 }
@@ -126,17 +123,11 @@ namespace Hissal.AgentSkillsSync
 
             if (failures.Count > 0) throw new SyncAbortedException(failures);
 
-            // Judged on the fetched copies, as fetched.
-            var differs = latest
-                ? lockfile.Skills.Where(s => fetched.TryGetValue(s.Name, out var folder) && GitHubSkillFetcher.DiffersFromLock(s, folder))
-                    .Select(s => s.Name).ToList()
-                : null;
-
-            var plan = latest ? PlanWith(lockfile, project, new UpstreamHashCheck(upstreamHashes)) : toFetch;
+            var differs = _strategy.DiffersFromLock(lockfile, fetched);
+            var applyCheck = _strategy.ApplyCheck(upstreamHashes);
+            var plan = applyCheck == null ? toFetch : PlanWith(lockfile, project, applyCheck);
             var summary = _executor.Execute(_projectRoot, plan, fetched);
-            if (!latest) return summary;
-
-            return new SyncSummary(summary.Applied, summary.LinkMethods, differs);
+            return differs == null ? summary : new SyncSummary(summary.Applied, summary.LinkMethods, differs);
         }
     }
 }

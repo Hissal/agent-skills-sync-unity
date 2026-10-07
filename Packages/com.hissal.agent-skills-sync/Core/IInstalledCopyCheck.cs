@@ -53,7 +53,10 @@ namespace Hissal.AgentSkillsSync
     /// <summary>A fixed answer: every installed copy is current, or none is.</summary>
     internal sealed class FixedCheck : IInstalledCopyCheck
     {
-        /// <summary>Plans no Update; Latest mode's offline preview, which cannot know upstream.</summary>
+        /// <summary>
+        /// Plans no Update: Latest mode's offline preview, which cannot know upstream, and the startup status, whose quick
+        /// scan has no hashes.
+        /// </summary>
         public static FixedCheck AlwaysCurrent { get; } = new FixedCheck(true);
 
         /// <summary>Plans an Update for every managed copy; finds what Latest mode must fetch to compare.</summary>
