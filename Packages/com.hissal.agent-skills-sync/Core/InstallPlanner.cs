@@ -10,9 +10,12 @@ namespace Hissal.AgentSkillsSync
     /// </summary>
     /// <remarks>
     /// Per locked skill and folder: no entry -> Install (canonical) or Link (link folder); a managed canonical copy that
-    /// is not current -> Update; a managed link that is broken or resolves anywhere but the canonical entry -> Link
-    /// again, replacing it; an entry the tool does not manage -> LeaveForeign. Names managed but no longer locked
-    /// -> Remove wherever the entry still exists. Entries that are neither locked nor managed are never looked at.
+    /// is not current -> Update; a managed link that no longer shows the canonical entry (a broken symlink or junction,
+    /// one resolving elsewhere, or a Copy-fallback copy whose content differs) -> Link again, replacing it; an entry
+    /// the tool does not manage -> LeaveForeign. An unmanaged, unlocked folder with a SKILL.md in the
+    /// canonical folder is project-authored -> Link (link folders only). Names managed but neither locked nor
+    /// project-authored, wherever the entry still exists: canonical entry gone -> Unlink (the link is dangling);
+    /// otherwise -> Remove. Other unlocked, unmanaged entries are never looked at.
     /// </remarks>
     public static class InstallPlanner
     {
@@ -23,6 +26,7 @@ namespace Hissal.AgentSkillsSync
             var check = installedCopyCheck ?? LockedHashCheck.Instance;
             var actions = new List<PlanAction>();
             var managed = layout.Folders.ToDictionary(f => f, f => new SortedSet<string>(StringComparer.Ordinal));
+            var linkFolders = layout.Folders.Where(f => f.Role == SkillsFolderRole.Link).ToList();
 
             foreach (var skill in lockfile.Skills)
             {
@@ -52,21 +56,54 @@ namespace Hissal.AgentSkillsSync
                 }
             }
 
+            // Project-authored skills: folders with a SKILL.md committed in the canonical folder, neither locked nor
+            // installed by the tool.
+            // They stay tracked there; only the links the tool makes for them are managed.
             var locked = new HashSet<string>(lockfile.Skills.Select(s => s.Name), StringComparer.Ordinal);
+            var canonicalState = project.For(layout.Canonical);
+            var projectAuthored = canonicalState.Entries
+                .Where(name => !locked.Contains(name) && !canonicalState.Manages(name) && canonicalState.IsSkillFolder(name))
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToList();
+            foreach (var name in projectAuthored)
+            {
+                foreach (var folder in linkFolders)
+                {
+                    var state = project.For(folder);
+                    if (!state.Has(name))
+                    {
+                        actions.Add(PlanAction.Link(name, folder, layout.Canonical));
+                        managed[folder].Add(name);
+                    }
+                    else if (state.Manages(name))
+                    {
+                        if (state.IsStaleLink(name)) actions.Add(PlanAction.Link(name, folder, layout.Canonical));
+                        managed[folder].Add(name);
+                    }
+                }
+            }
+
+            // Names managed but neither locked nor project-authored. With the canonical entry gone (e.g. a deleted
+            // project-authored skill) a managed link is dangling -> Unlink; otherwise the tool's copy and links are
+            // deleted -> Remove. Either way the name stops being managed.
+            var authored = new HashSet<string>(projectAuthored, StringComparer.Ordinal);
             var stale = layout.Folders
                 .SelectMany(f => project.For(f).Managed)
-                .Where(name => !locked.Contains(name))
+                .Where(name => !locked.Contains(name) && !authored.Contains(name))
                 .Distinct()
                 .OrderBy(name => name, StringComparer.Ordinal);
             // Links first, so no link is left pointing at a deleted copy if a removal fails.
             var removalOrder = layout.Folders.OrderBy(f => f.Role == SkillsFolderRole.Canonical ? 1 : 0).ToList();
             foreach (var name in stale)
+            {
+                var canonicalGone = !canonicalState.Has(name);
                 foreach (var folder in removalOrder)
                 {
                     var state = project.For(folder);
-                    if (state.Manages(name) && state.Has(name))
-                        actions.Add(PlanAction.Remove(name, folder));
+                    if (!state.Manages(name) || !state.Has(name)) continue;
+                    actions.Add(canonicalGone ? PlanAction.Unlink(name, folder) : PlanAction.Remove(name, folder));
                 }
+            }
 
             var managedNamesChange = layout.Folders.Any(f => !managed[f].SetEquals(project.For(f).Managed));
             return new InstallPlan(

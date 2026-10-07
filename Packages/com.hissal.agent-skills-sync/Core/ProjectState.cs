@@ -8,19 +8,26 @@ namespace Hissal.AgentSkillsSync
     public sealed class FolderState
     {
         /// <param name="installedHashes">Content hash of each managed skill copy in the folder (see <see cref="InstalledHash"/>).</param>
-        /// <param name="staleLinks">Managed link-folder entries that are symlinks or junctions not resolving to the canonical entry (see <see cref="IsStaleLink"/>).</param>
+        /// <param name="files">Names in <paramref name="entries"/> that are plain files rather than folders or folder links.</param>
+        /// <param name="withoutSkillFile">Folders in <paramref name="entries"/> with no <c>SKILL.md</c>, which are not skills.</param>
+        /// <param name="staleLinks">Managed link-folder entries that no longer show the canonical entry (see <see cref="IsStaleLink"/>).</param>
         public FolderState(SkillsFolder folder, IEnumerable<string> entries, IEnumerable<string> managed,
-            IReadOnlyDictionary<string, string> installedHashes = null, IEnumerable<string> staleLinks = null)
+            IReadOnlyDictionary<string, string> installedHashes = null, IEnumerable<string> files = null,
+            IEnumerable<string> staleLinks = null, IEnumerable<string> withoutSkillFile = null)
         {
             Folder = folder;
             Entries = new HashSet<string>(entries ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
             Managed = new HashSet<string>(managed ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
             _installedHashes = installedHashes ?? new Dictionary<string, string>();
+            _files = new HashSet<string>(files ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
             _staleLinks = new HashSet<string>(staleLinks ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
+            _withoutSkillFile = new HashSet<string>(withoutSkillFile ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
         }
 
         readonly IReadOnlyDictionary<string, string> _installedHashes;
+        readonly HashSet<string> _files;
         readonly HashSet<string> _staleLinks;
+        readonly HashSet<string> _withoutSkillFile;
 
         public SkillsFolder Folder { get; }
 
@@ -40,9 +47,16 @@ namespace Hissal.AgentSkillsSync
         /// </summary>
         public string InstalledHash(string name) => _installedHashes.TryGetValue(name, out var hash) ? hash : null;
 
+        /// <summary>True when the entry is a plain file (e.g. a README), which can never be a skill.</summary>
+        public bool IsFile(string name) => _files.Contains(name);
+
+        /// <summary>True when the entry is a skill: a folder (or folder link) holding a <c>SKILL.md</c>.</summary>
+        public bool IsSkillFolder(string name) => Has(name) && !_files.Contains(name) && !_withoutSkillFile.Contains(name);
+
         /// <summary>
-        /// True when the managed link-folder entry is a symlink or junction that is broken or resolves somewhere other
-        /// than this project's canonical entry, so it must be re-linked.
+        /// True when the managed link-folder entry no longer shows the canonical entry, so it must be re-linked: a
+        /// symlink or junction that is broken or resolves somewhere else, or a copy made by the Copy fallback whose
+        /// content differs from the canonical folder's.
         /// </summary>
         public bool IsStaleLink(string name) => _staleLinks.Contains(name);
     }

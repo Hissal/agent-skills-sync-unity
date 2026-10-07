@@ -19,6 +19,9 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>Leave an entry the tool does not manage untouched, though a locked skill has its name. Changes nothing.</summary>
         LeaveForeign,
+
+        /// <summary>Delete a managed link whose canonical entry is gone.</summary>
+        Unlink,
     }
 
     /// <summary>One thing the executor does to one skill in one folder.</summary>
@@ -47,6 +50,9 @@ namespace Hissal.AgentSkillsSync
 
         public static PlanAction LeaveForeign(LockedSkill skill, SkillsFolder folder) =>
             new PlanAction(PlanActionKind.LeaveForeign, skill, skill.Name, folder, null);
+
+        public static PlanAction Unlink(string skillName, SkillsFolder folder) =>
+            new PlanAction(PlanActionKind.Unlink, null, skillName, folder, null);
 
         public PlanActionKind Kind { get; }
 
@@ -83,8 +89,9 @@ namespace Hissal.AgentSkillsSync
         }
 
         /// <summary>
-        /// Actions in execution order: per locked skill, the canonical folder first; then removals of skills no longer
-        /// locked, by name, link folders before the canonical copy.
+        /// Actions in execution order: per locked skill, the canonical folder first; then links for project-authored
+        /// skills; then, per name no longer locked, unlinks of dangling links and removals, link folders before the
+        /// canonical copy.
         /// </summary>
         public IReadOnlyList<PlanAction> Actions { get; }
 
