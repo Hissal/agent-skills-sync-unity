@@ -80,7 +80,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 ? "This project's agent skills have not been synced on this machine yet."
                 : status.LockHash != prefs.LastSyncedLockHash
                 ? $"{Lockfile.FileName} changed since the last sync."
-                : $"Some locked skills are missing: {string.Join(", ", status.MissingSkills)}.";
+                : $"Some locked skills are missing: {string.Join(", ", status.OutOfSyncSkills)}.";
             return reason + "\n\nOpen the sync window to review and install them? If you choose Not Now, " +
                    "you won't be asked again until something changes.";
         }

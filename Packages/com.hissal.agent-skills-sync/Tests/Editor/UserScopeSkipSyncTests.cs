@@ -113,7 +113,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(IgnoredIn(Claude), Is.EqualTo(new[] { "tdd" }));
             Assert.That(Exists(Agents + "/tdd"), Is.True);
             Assert.That(Exists(Path.Combine(_home, ".claude", "skills", "tdd")), Is.True);
-            Assert.That(Status().MissingSkills, Is.Empty);
+            Assert.That(Status().OutOfSyncSkills, Is.Empty);
 
             SetSkip(Claude, false);
             var unskipped = Sync();
@@ -172,7 +172,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Sync();
             Directory.Delete(Path.Combine(_home, ".claude", "skills", "tdd"), recursive: true);
 
-            Assert.That(Status().MissingSkills, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(Status().OutOfSyncSkills, Is.EqualTo(new[] { "tdd" }));
         }
     }
 }

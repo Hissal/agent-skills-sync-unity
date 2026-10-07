@@ -11,7 +11,7 @@ namespace Hissal.AgentSkillsSync
         public static bool ShouldNotify(SyncStatus status, LocalPrefs prefs)
         {
             if (status == null || status.NoFolderSelected) return false;
-            var outOfSync = status.LockHash != prefs.LastSyncedLockHash || status.MissingSkills.Count > 0;
+            var outOfSync = status.LockHash != prefs.LastSyncedLockHash || status.OutOfSyncSkills.Count > 0;
             return outOfSync && status.Fingerprint != prefs.DeclinedState;
         }
 
