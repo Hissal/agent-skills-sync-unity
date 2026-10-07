@@ -38,6 +38,13 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Names of locked skills left out of at least one folder in favour of the contributor's user-scope copy.</summary>
         public IReadOnlyList<string> SkippedForUserScope => NamesOf(PlanActionKind.SkipUserScope);
 
+        /// <summary>
+        /// One WarnUserScopeDiffers per skill and folder whose skipped project copy the contributor replaces with a
+        /// user-scope copy that differs from the lock (<see cref="PlanAction.UserScopeCopies"/> names the copies).
+        /// </summary>
+        public IReadOnlyList<PlanAction> UserScopeDiffers =>
+            Applied.Where(a => a.Kind == PlanActionKind.WarnUserScopeDiffers).ToList();
+
         /// <summary>Names of skills linked into at least one link folder.</summary>
         public IReadOnlyList<string> Linked => NamesOf(PlanActionKind.Link);
 
