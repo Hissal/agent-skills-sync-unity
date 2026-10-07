@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace Hissal.AgentSkillsSync
 {
@@ -7,8 +9,16 @@ namespace Hissal.AgentSkillsSync
     public sealed class PlanExecutor
     {
         readonly ILinkCreator _linker;
+        readonly Action<string, string> _copyDirectory;
 
-        public PlanExecutor(ILinkCreator linker = null) => _linker = linker ?? new SymlinkCreator();
+        public PlanExecutor(ILinkCreator linker = null) : this(linker, null) { }
+
+        /// <param name="copyDirectory">Copies a folder (source, destination); a test seam for copy failures.</param>
+        internal PlanExecutor(ILinkCreator linker, Action<string, string> copyDirectory)
+        {
+            _linker = linker ?? FallbackLinkCreator.Default;
+            _copyDirectory = copyDirectory ?? Paths.CopyDirectory;
+        }
 
         /// <param name="projectRoot">The folder holding <c>skills-lock.json</c>.</param>
         /// <param name="plan">The plan to apply.</param>
@@ -17,6 +27,7 @@ namespace Hissal.AgentSkillsSync
         public SyncSummary Execute(string projectRoot, InstallPlan plan, IReadOnlyDictionary<string, string> fetchedFolders)
         {
             var applied = new List<PlanAction>();
+            var linkMethods = new Dictionary<PlanAction, LinkMethod>();
             foreach (var action in plan.Actions)
             {
                 var folder = Paths.InProject(projectRoot, action.Folder.RelativePath);
@@ -26,20 +37,23 @@ namespace Hissal.AgentSkillsSync
                 {
                     case PlanActionKind.Install:
                         Directory.CreateDirectory(folder);
-                        Paths.CopyDirectory(Fetched(fetchedFolders, action), entry);
+                        _copyDirectory(Fetched(fetchedFolders, action), entry);
                         break;
                     case PlanActionKind.Update:
                         var source = Fetched(fetchedFolders, action);
-                        RemoveEntry(entry);
-                        Paths.CopyDirectory(source, entry);
+                        DirectoryLink.Remove(entry);
+                        _copyDirectory(source, entry);
+                        RefreshCopiedLinks(projectRoot, plan, action.SkillName, entry);
                         break;
                     case PlanActionKind.Link:
                         Directory.CreateDirectory(folder);
+                        // The planner links over an existing entry only to replace a stale managed link.
+                        DirectoryLink.Remove(entry);
                         var target = Path.Combine(Paths.InProject(projectRoot, action.LinkTarget.RelativePath), action.SkillName);
-                        _linker.CreateDirectoryLink(entry, target);
+                        linkMethods[action] = _linker.CreateDirectoryLink(entry, target);
                         break;
                     case PlanActionKind.Remove:
-                        RemoveEntry(entry);
+                        DirectoryLink.Remove(entry);
                         break;
                     case PlanActionKind.LeaveForeign:
                         break;
@@ -54,50 +68,52 @@ namespace Hissal.AgentSkillsSync
                     ManagedStateFile.Write(folder, managed.Value);
             }
 
-            return new SyncSummary(applied);
+            return new SyncSummary(applied, linkMethods);
+        }
+
+        /// <summary>
+        /// A symlink or junction follows an updated canonical copy by itself; a link made by the Copy fallback does
+        /// not, so re-copy it from the new canonical copy. A copy that fails partway is deleted, so the next scan finds
+        /// the link missing and plans a new Link instead of taking the partial copy for a current link.
+        /// </summary>
+        void RefreshCopiedLinks(string projectRoot, InstallPlan plan, string skillName, string canonicalEntry)
+        {
+            foreach (var managed in plan.ManagedNames)
+            {
+                if (managed.Key.Role != SkillsFolderRole.Link || !managed.Value.Contains(skillName)) continue;
+                var link = Path.Combine(Paths.InProject(projectRoot, managed.Key.RelativePath), skillName);
+                if (!Directory.Exists(link) || File.GetAttributes(link).HasFlag(FileAttributes.ReparsePoint)) continue;
+                DirectoryLink.Remove(link);
+                try
+                {
+                    _copyDirectory(canonicalEntry, link);
+                }
+                catch
+                {
+                    TryRemove(link);
+                    throw;
+                }
+            }
+        }
+
+        // Best effort: the copy's own failure is the one worth reporting.
+        static void TryRemove(string path)
+        {
+            try
+            {
+                DirectoryLink.Remove(path);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
         }
 
         static string Fetched(IReadOnlyDictionary<string, string> fetchedFolders, PlanAction action) =>
             fetchedFolders.TryGetValue(action.SkillName, out var source)
                 ? source
                 : throw new KeyNotFoundException($"No fetched folder for skill \"{action.SkillName}\".");
-
-        /// <summary>
-        /// Deletes a managed entry: a link (symlink or junction) is removed without touching what it points at; a real
-        /// folder (a canonical copy, or a copied link) is deleted with its contents. A missing entry is fine.
-        /// </summary>
-        // The one place entries are deleted; landing #6 swaps the body for DirectoryLink.Remove.
-        static void RemoveEntry(string path)
-        {
-            FileAttributes attributes;
-            try
-            {
-                attributes = File.GetAttributes(path);
-            }
-            catch (FileNotFoundException)
-            {
-                return;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                return;
-            }
-
-            var isDirectory = (attributes & FileAttributes.Directory) != 0;
-            if ((attributes & FileAttributes.ReparsePoint) != 0)
-            {
-                // Windows removes a directory link with a non-recursive RemoveDirectory; elsewhere a symlink is a file.
-                if (isDirectory && Path.DirectorySeparatorChar == '\\') Directory.Delete(path);
-                else File.Delete(path);
-            }
-            else if (isDirectory)
-            {
-                Directory.Delete(path, recursive: true);
-            }
-            else
-            {
-                File.Delete(path);
-            }
-        }
     }
 }

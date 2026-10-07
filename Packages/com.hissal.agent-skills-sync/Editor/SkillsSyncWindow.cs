@@ -178,6 +178,10 @@ namespace Hissal.AgentSkillsSync.Editor
             Line(text, "Removed", summary.Removed);
             Line(text, "Skipped (not managed by the tool)", summary.Skipped);
             if (summary.Linked.Count > 0) text.AppendLine($"Linked ({summary.Linked.Count}): {string.Join(", ", summary.Linked)}");
+            var junctions = summary.LinkedBy(LinkMethod.Junction);
+            if (junctions.Count > 0) text.AppendLine($"Linked as junctions (symlinks unavailable): {string.Join(", ", junctions)}");
+            var copies = summary.LinkedBy(LinkMethod.Copy);
+            if (copies.Count > 0) text.AppendLine($"Linked as plain copies (symlinks and junctions unavailable; re-sync after edits): {string.Join(", ", copies)}");
             return text.ToString().TrimEnd();
         }
 

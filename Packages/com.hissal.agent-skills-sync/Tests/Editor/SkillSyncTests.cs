@@ -64,7 +64,7 @@ namespace Hissal.AgentSkillsSync.Tests
         [TearDown]
         public void TearDown()
         {
-            if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
+            TempDirectory.Delete(_root);
         }
 
         [Test]
