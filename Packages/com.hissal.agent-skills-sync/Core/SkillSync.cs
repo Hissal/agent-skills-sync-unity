@@ -25,15 +25,25 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>What a sync would do now, without doing it.</summary>
         /// <exception cref="LockfileException">The lockfile is missing or unusable.</exception>
-        public InstallPlan Plan() =>
-            InstallPlanner.Plan(Lockfile.Load(_projectRoot), ProjectScanner.Scan(_projectRoot, _layout), _layout);
+        public InstallPlan Plan() => Plan(Lockfile.Load(_projectRoot));
 
-        /// <summary>Plans and applies. Call only after the contributor consented.</summary>
+        /// <summary>What syncing <paramref name="lockfile"/> would do now, without doing it.</summary>
+        public InstallPlan Plan(Lockfile lockfile) =>
+            InstallPlanner.Plan(lockfile, ProjectScanner.Scan(_projectRoot, _layout), _layout);
+
+        /// <summary>Loads the lockfile, plans and applies. Call only after the contributor consented.</summary>
         /// <exception cref="LockfileException">The lockfile is missing or unusable; nothing was changed.</exception>
         /// <exception cref="SyncAbortedException">One or more skills could not be fetched or verified; nothing was changed.</exception>
-        public SyncSummary Run()
+        public SyncSummary Run() => Run(Lockfile.Load(_projectRoot));
+
+        /// <summary>
+        /// Plans and applies exactly <paramref name="lockfile"/>, not whatever is on disk now. Pass the instance the
+        /// contributor's consent was checked against, so a lockfile changed after the check cannot run unconfirmed.
+        /// </summary>
+        /// <exception cref="SyncAbortedException">One or more skills could not be fetched or verified; nothing was changed.</exception>
+        public SyncSummary Run(Lockfile lockfile)
         {
-            var plan = Plan();
+            var plan = Plan(lockfile);
             var fetched = new Dictionary<string, string>();
             var failures = new Dictionary<string, SkillFetchException>();
             foreach (var action in plan.Actions.Where(a => a.NeedsFetch))

@@ -11,7 +11,8 @@ namespace Hissal.AgentSkillsSync.Editor
 {
     /// <summary>
     /// Lists the locked skills with their sources and installs them on Sync, once the contributor has
-    /// ticked the consent box. Consent is held only by this window instance and resets on reload.
+    /// ticked the consent box and confirmed every source repo new since the last sync. Consent and
+    /// confirmations are held only by this window instance and reset on refresh or reload.
     /// A failed sync marks each skill that could not be fetched or verified with its error.
     /// </summary>
     public sealed class SkillsSyncWindow : EditorWindow
@@ -19,12 +20,15 @@ namespace Hissal.AgentSkillsSync.Editor
         const string Title = "Agent Skills Sync";
 
         HelpBox _status;
+        VisualElement _newSources;
         VisualElement _skillList;
         Toggle _consent;
         Button _syncButton;
         HelpBox _summary;
         bool _canSync;
         IReadOnlyDictionary<string, SkillFetchException> _failures = new Dictionary<string, SkillFetchException>();
+        Lockfile _lockfile;
+        readonly HashSet<string> _confirmedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         static string ProjectRoot => Path.GetDirectoryName(Application.dataPath);
 
@@ -37,12 +41,14 @@ namespace Hissal.AgentSkillsSync.Editor
             var root = rootVisualElement;
             root.style.paddingLeft = root.style.paddingRight = root.style.paddingTop = root.style.paddingBottom = 8;
 
-            root.Add(new Label($"Skills locked in {Lockfile.FileName}") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
+            // Everything above the Sync controls scrolls, so many new-source confirmations or skills never push them off-screen.
+            var scroll = new ScrollView { style = { flexGrow = 1, marginBottom = 4 } };
+            scroll.Add(new Label($"Skills locked in {Lockfile.FileName}") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
             _status = new HelpBox("", HelpBoxMessageType.None) { style = { display = DisplayStyle.None } };
-            root.Add(_status);
-
-            var scroll = new ScrollView { style = { flexGrow = 1, marginTop = 4, marginBottom = 4 } };
-            _skillList = new VisualElement();
+            scroll.Add(_status);
+            _newSources = new VisualElement { style = { marginTop = 4 } };
+            scroll.Add(_newSources);
+            _skillList = new VisualElement { style = { marginTop = 4 } };
             scroll.Add(_skillList);
             root.Add(scroll);
 
@@ -65,16 +71,25 @@ namespace Hissal.AgentSkillsSync.Editor
         void Refresh()
         {
             _skillList.Clear();
+            _newSources.Clear();
+            _confirmedSources.Clear();
             _consent.SetValueWithoutNotify(false);
             _canSync = false;
+            _lockfile = null;
             ShowStatus(null, HelpBoxMessageType.None);
 
             try
             {
                 var lockfile = Lockfile.Load(ProjectRoot);
                 var plan = new SkillSync(ProjectRoot, fetcher: null).Plan();
+                var newSources = SourceConsent.NewSources(lockfile, LocalPrefs.Load(ProjectRoot));
+                var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
                 foreach (var skill in lockfile.Skills)
-                    _skillList.Add(SkillRow(skill, PendingLabel(plan, skill.Name), _failures.TryGetValue(skill.Name, out var failure) ? failure : null));
+                    _skillList.Add(SkillRow(skill, PendingLabel(plan, skill.Name), isNew.Contains(skill.Source),
+                        _failures.TryGetValue(skill.Name, out var failure) ? failure : null));
+                ShowNewSources(newSources);
+
+                _lockfile = lockfile;
 
                 var removals = plan.Actions.Where(a => a.Kind == PlanActionKind.Remove).Select(a => a.SkillName).Distinct().ToList();
                 if (removals.Count > 0)
@@ -102,12 +117,13 @@ namespace Hissal.AgentSkillsSync.Editor
             return "installed";
         }
 
-        static VisualElement SkillRow(LockedSkill skill, string pending, SkillFetchException failure)
+        static VisualElement SkillRow(LockedSkill skill, string pending, bool newSource, SkillFetchException failure)
         {
             var container = new VisualElement { style = { marginBottom = 2 } };
             var row = new VisualElement { style = { flexDirection = FlexDirection.Row } };
             row.Add(new Label(skill.Name) { style = { width = 200, unityFontStyleAndWeight = FontStyle.Bold } });
             row.Add(new Label(skill.Source) { style = { flexGrow = 1 } });
+            if (newSource) row.Add(new Label("NEW SOURCE") { style = { unityFontStyleAndWeight = FontStyle.Bold, color = new Color(0.9f, 0.6f, 0.1f), marginRight = 8 } });
             if (failure == null && !GitHubSkillFetcher.CanVerify(skill))
                 row.Add(new Label("can't verify lock hash")
                 {
@@ -137,7 +153,31 @@ namespace Hissal.AgentSkillsSync.Editor
             }
         }
 
-        void UpdateSyncButton() => _syncButton.SetEnabled(_canSync && _consent.value);
+        /// <summary>A warning plus one confirmation toggle per source repo not synced before.</summary>
+        void ShowNewSources(IReadOnlyList<string> newSources)
+        {
+            if (newSources.Count == 0) return;
+            _newSources.Add(new HelpBox(
+                "These source repos are new since the last sync. Their skills run with your agent's full permissions. " +
+                "Confirm each one you trust before syncing.", HelpBoxMessageType.Warning));
+            foreach (var source in newSources)
+            {
+                var toggle = new Toggle($"I trust the new source {source}");
+                toggle.RegisterValueChangedCallback(e =>
+                {
+                    if (e.newValue) _confirmedSources.Add(source);
+                    else _confirmedSources.Remove(source);
+                    UpdateSyncButton();
+                });
+                _newSources.Add(toggle);
+            }
+        }
+
+        bool HasUnconfirmedSources(Lockfile lockfile) =>
+            SourceConsent.Unconfirmed(lockfile, LocalPrefs.Load(ProjectRoot), _confirmedSources).Count > 0;
+
+        void UpdateSyncButton() =>
+            _syncButton.SetEnabled(_canSync && _consent.value && _lockfile != null && !HasUnconfirmedSources(_lockfile));
 
         void Sync()
         {
@@ -145,10 +185,21 @@ namespace Hissal.AgentSkillsSync.Editor
             _failures = new Dictionary<string, SkillFetchException>();
 
             SyncSummary summary = null;
+            Lockfile lockfile = null;
             try
             {
+                // Re-check against the lockfile as it is now: it may have gained a source since the window listed it.
+                lockfile = Lockfile.Load(ProjectRoot);
+                if (HasUnconfirmedSources(lockfile))
+                {
+                    ShowSummary("The lockfile has a new source you have not confirmed. Review it and sync again.", HelpBoxMessageType.Warning);
+                    Refresh();
+                    return;
+                }
+
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
-                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher()).Run();
+                // Run the very instance that passed the check, never a fresh read of the file.
+                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher()).Run(lockfile);
                 ShowSummary(Describe(summary), HelpBoxMessageType.Info);
             }
             catch (SyncAbortedException e)
@@ -172,7 +223,7 @@ namespace Hissal.AgentSkillsSync.Editor
             {
                 try
                 {
-                    RecordSynced();
+                    RecordSynced(lockfile);
                 }
                 catch (Exception e) when (e is LockfileException || e is IOException || e is UnauthorizedAccessException)
                 {
@@ -185,11 +236,15 @@ namespace Hissal.AgentSkillsSync.Editor
             Refresh();
         }
 
-        /// <summary>Remembers the synced lockfile so the startup check stays quiet until something changes.</summary>
-        static void RecordSynced()
+        /// <summary>
+        /// Remembers the synced lockfile so the startup check stays quiet until something changes,
+        /// and its sources so they are not flagged as new again. Only after a successful sync.
+        /// </summary>
+        static void RecordSynced(Lockfile lockfile)
         {
             var prefs = LocalPrefs.Load(ProjectRoot);
             StartupCheck.RecordSynced(prefs, SyncStatus.Read(ProjectRoot));
+            SourceConsent.RecordSynced(prefs, lockfile);
             prefs.Save();
         }
 

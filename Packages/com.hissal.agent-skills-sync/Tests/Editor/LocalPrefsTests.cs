@@ -48,6 +48,22 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void SyncedSources_Unset_IsEmpty()
+        {
+            Assert.That(LocalPrefs.Load(_project).SyncedSources, Is.Empty);
+        }
+
+        [Test]
+        public void SyncedSources_SaveThenLoad_RoundTrips()
+        {
+            var prefs = LocalPrefs.Load(_project);
+            prefs.SyncedSources = new[] { "owner/skills", "other/unity-skills" };
+            prefs.Save();
+
+            Assert.That(LocalPrefs.Load(_project).SyncedSources, Is.EqualTo(new[] { "owner/skills", "other/unity-skills" }));
+        }
+
+        [Test]
         public void Save_ValueSetToNull_RemovesIt()
         {
             var prefs = LocalPrefs.Load(_project);
