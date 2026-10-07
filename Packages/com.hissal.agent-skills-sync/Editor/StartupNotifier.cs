@@ -29,12 +29,12 @@ namespace Hissal.AgentSkillsSync.Editor
             var projectRoot = Path.GetDirectoryName(Application.dataPath);
             try
             {
-                var table = FolderLayout.Default;
+                var layout = FolderLayout.Default;
                 var environment = UserEnvironment.Current;
                 var prefs = LocalPrefs.Load(projectRoot);
-                OfferNewFolders(prefs, table, environment);
+                OfferNewFolders(prefs, layout, environment);
 
-                var status = SyncStatus.Read(projectRoot, MachineChoices.Read(projectRoot, prefs, environment, table));
+                var status = SyncStatus.Read(projectRoot, MachineChoices.Read(projectRoot, prefs, environment, layout));
                 if (!StartupCheck.ShouldNotify(status, prefs)) return;
 
                 if (EditorUtility.DisplayDialog(
@@ -57,9 +57,9 @@ namespace Hissal.AgentSkillsSync.Editor
         }
 
         /// <summary>One dialog per folder whose home appeared and was neither selected nor declined; saves each answer.</summary>
-        static void OfferNewFolders(LocalPrefs prefs, FolderLayout table, UserEnvironment environment)
+        static void OfferNewFolders(LocalPrefs prefs, FolderLayout layout, UserEnvironment environment)
         {
-            foreach (var folder in FolderSelection.Offers(prefs, table, environment))
+            foreach (var folder in FolderSelection.Offers(prefs, layout, environment))
             {
                 var add = EditorUtility.DisplayDialog(
                     "Agent Skills Sync",
@@ -68,7 +68,7 @@ namespace Hissal.AgentSkillsSync.Editor
                     "If you choose Not Now, you won't be asked about this folder again (you can still select it in the sync window).",
                     "Add Folder",
                     "Not Now");
-                if (add) FolderSelection.Accept(prefs, table, folder, environment);
+                if (add) FolderSelection.Accept(prefs, layout, folder, environment);
                 else FolderSelection.Decline(prefs, folder);
                 prefs.Save();
             }

@@ -100,4 +100,4 @@ The plugin root is the `installPath`. The manifest is `.claude-plugin/plugin.jso
 - **Seed directories** (`CLAUDE_CODE_PLUGIN_SEED_DIR`): read-only, pre-populated plugin roots for containers.
 - **Dependency version ranges:** a dependency outside the declaring plugin's `version` range also leaves that plugin disabled (`Requires "<dep>" <range>, installed <version>`). The tool doesn't check ranges, so it can report such a plugin's skills.
 - **Marketplace entries of `url` and claude.ai marketplaces:** no documented local `marketplace.json`, so their `defaultEnabled` override and entry `dependencies` are not applied; the manifest's values are used.
-- **Plugins read by other agents.** Amp also reads `~/.claude/plugins/cache/`. The tool reports plugin skills only for `.claude/skills`, in line with how the folder table leaves cross-reads out.
+- **Plugins read by other agents.** Amp also reads `~/.claude/plugins/cache/`. The tool reports plugin skills only for `.claude/skills`, in line with how the folder layout leaves cross-reads out.

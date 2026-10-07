@@ -42,11 +42,11 @@ namespace Hissal.AgentSkillsSync.Editor
 
         static string ProjectRoot => Path.GetDirectoryName(Application.dataPath);
 
-        static FolderLayout Table => FolderLayout.Default;
+        static FolderLayout Layout => FolderLayout.Default;
 
         /// <summary>This machine's folder selection, user-scope copies and skips, as stored now.</summary>
         static MachineChoices Choices() =>
-            MachineChoices.Read(ProjectRoot, LocalPrefs.Load(ProjectRoot), UserEnvironment.Current, Table);
+            MachineChoices.Read(ProjectRoot, LocalPrefs.Load(ProjectRoot), UserEnvironment.Current, Layout);
 
         [MenuItem("Window/Agent Skills Sync")]
         public static void Open() => GetWindow<SkillsSyncWindow>(Title).Show();
@@ -345,13 +345,13 @@ namespace Hissal.AgentSkillsSync.Editor
             }
         }
 
-        /// <summary>One toggle per folder-table entry; a change is stored at once and re-plans.</summary>
+        /// <summary>One toggle per folder-layout entry; a change is stored at once and re-plans.</summary>
         void ShowFolders(IReadOnlyList<SkillsFolder> selected)
         {
             var environment = UserEnvironment.Current;
             var chosen = new HashSet<string>(selected.Select(f => f.RelativePath), StringComparer.Ordinal);
             var toggles = new List<KeyValuePair<SkillsFolder, Toggle>>();
-            foreach (var folder in Table.Folders)
+            foreach (var folder in Layout.Folders)
             {
                 var toggle = new Toggle($"{folder.RelativePath}  ({folder.Label})")
                 {
@@ -377,7 +377,7 @@ namespace Hissal.AgentSkillsSync.Editor
             try
             {
                 var prefs = LocalPrefs.Load(ProjectRoot);
-                FolderSelection.Save(prefs, Table, selected, environment);
+                FolderSelection.Save(prefs, Layout, selected, environment);
                 prefs.Save();
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
@@ -490,7 +490,7 @@ namespace Hissal.AgentSkillsSync.Editor
         static void RecordSynced(Lockfile lockfile, MachineChoices choices)
         {
             var prefs = LocalPrefs.Load(ProjectRoot);
-            FolderSelection.Save(prefs, Table, choices.Selected, UserEnvironment.Current);
+            FolderSelection.Save(prefs, Layout, choices.Selected, UserEnvironment.Current);
             StartupCheck.RecordSynced(prefs, SyncStatus.Read(ProjectRoot, choices));
             SourceConsent.RecordSynced(prefs, lockfile);
             prefs.Save();

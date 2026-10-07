@@ -6,7 +6,7 @@ using System.Linq;
 namespace Hissal.AgentSkillsSync
 {
     /// <summary>
-    /// One kind of place a user-scope duplicate of a project skill can come from, e.g. the folder table's user-scope
+    /// One kind of place a user-scope duplicate of a project skill can come from, e.g. the folder layout's user-scope
     /// locations (<see cref="UserScopeLocationSource"/>). The set is open: another source (installed Claude Code
     /// plugins) reports its copies the same way.
     /// </summary>
@@ -20,7 +20,7 @@ namespace Hissal.AgentSkillsSync
     public static class UserScopeScanner
     {
         /// <summary>
-        /// The sources <see cref="Scan"/> uses when given none: the table's locations and installed Claude Code plugins,
+        /// The sources <see cref="Scan"/> uses when given none: the layout's locations and installed Claude Code plugins,
         /// the latter read without a project (user settings only; see <see cref="DefaultSourcesFor"/>).
         /// </summary>
         public static IReadOnlyList<IUserScopeSource> DefaultSources { get; } =
@@ -46,7 +46,7 @@ namespace Hissal.AgentSkillsSync
     }
 
     /// <summary>
-    /// The folder table's user-scope locations (<see cref="SkillsFolder.UserScopeLocations"/>): every sub-folder holding
+    /// The folder layout's user-scope locations (<see cref="SkillsFolder.UserScopeLocations"/>): every sub-folder holding
     /// a <c>SKILL.md</c> is a skill. Locations resolving to the same folder are read once.
     /// </summary>
     public sealed class UserScopeLocationSource : IUserScopeSource
@@ -84,7 +84,7 @@ namespace Hissal.AgentSkillsSync
                 .OrderBy(child => child, StringComparer.Ordinal);
         }
 
-        /// <summary>The location as the table writes it, or its resolved folder when an environment variable moved it.</summary>
+        /// <summary>The location as the layout writes it, or its resolved folder when an environment variable moved it.</summary>
         static string Describe(UserScopeLocation location, UserEnvironment environment) =>
             location.EnvVar != null && environment.Variable(location.EnvVar) != null
                 ? location.ResolveSkillsFolder(environment)

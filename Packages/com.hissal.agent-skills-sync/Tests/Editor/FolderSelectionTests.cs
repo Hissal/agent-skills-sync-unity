@@ -32,9 +32,9 @@ namespace Hissal.AgentSkillsSync.Tests
 
         void MakeHome(string relativePath) => Directory.CreateDirectory(Path.Combine(_home, relativePath));
 
-        static FolderLayout Table => FolderLayout.Default;
+        static FolderLayout Layout => FolderLayout.Default;
 
-        IEnumerable<string> Autofill() => FolderSelection.Autofill(Table, Environment).Select(f => f.RelativePath);
+        IEnumerable<string> Autofill() => FolderSelection.Autofill(Layout, Environment).Select(f => f.RelativePath);
 
         [Test]
         public void Autofill_NoAgentHomes_SelectsNothing()
@@ -69,7 +69,7 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
-        public void Autofill_BothHomes_SelectsBothInTableOrder()
+        public void Autofill_BothHomes_SelectsBothInLayoutOrder()
         {
             MakeHome(".claude");
             MakeHome(".agents");
@@ -100,8 +100,8 @@ namespace Hissal.AgentSkillsSync.Tests
         public void UserScopeSkillsFolders_ResolveEnvVarOverridesAndDefaults()
         {
             _variables["CLAUDE_CONFIG_DIR"] = Path.Combine(_root, "claude-config");
-            var claude = Table.Folders.Single(f => f.RelativePath == ".claude/skills");
-            var agents = Table.Folders.Single(f => f.RelativePath == ".agents/skills");
+            var claude = Layout.Folders.Single(f => f.RelativePath == ".claude/skills");
+            var agents = Layout.Folders.Single(f => f.RelativePath == ".agents/skills");
 
             Assert.That(claude.UserScopeSkillsFolders(Environment),
                 Is.EqualTo(new[]
@@ -120,19 +120,19 @@ namespace Hissal.AgentSkillsSync.Tests
 
         LocalPrefs Prefs => LocalPrefs.Load(_project);
 
-        static SkillsFolder Agents => Table.Find(".agents/skills");
-        static SkillsFolder Claude => Table.Find(".claude/skills");
+        static SkillsFolder Agents => Layout.Find(".agents/skills");
+        static SkillsFolder Claude => Layout.Find(".claude/skills");
 
         void Choose(params SkillsFolder[] folders)
         {
             var prefs = Prefs;
-            FolderSelection.Save(prefs, Table, folders, Environment);
+            FolderSelection.Save(prefs, Layout, folders, Environment);
             prefs.Save();
         }
 
-        IEnumerable<string> Effective() => FolderSelection.Effective(Prefs, Table, Environment).Select(f => f.RelativePath);
+        IEnumerable<string> Effective() => FolderSelection.Effective(Prefs, Layout, Environment).Select(f => f.RelativePath);
 
-        IEnumerable<string> Offers() => FolderSelection.Offers(Prefs, Table, Environment).Select(f => f.RelativePath);
+        IEnumerable<string> Offers() => FolderSelection.Offers(Prefs, Layout, Environment).Select(f => f.RelativePath);
 
         [Test]
         public void Effective_NeverChosen_IsTheAutofill()
@@ -167,7 +167,7 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
-        public void Effective_StoredFolderNoLongerInTheTable_IsIgnored()
+        public void Effective_StoredFolderNoLongerInTheLayout_IsIgnored()
         {
             var prefs = Prefs;
             prefs.SelectedFolders = new[] { ".windsurf/skills", ".claude/skills" };
@@ -219,7 +219,7 @@ namespace Hissal.AgentSkillsSync.Tests
             MakeHome(".agents");
 
             var prefs = Prefs;
-            FolderSelection.Accept(prefs, Table, Agents, Environment);
+            FolderSelection.Accept(prefs, Layout, Agents, Environment);
             prefs.Save();
 
             Assert.That(Effective(), Is.EqualTo(new[] { ".agents/skills", ".claude/skills" }));
