@@ -179,7 +179,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(error.Failure, Is.EqualTo(SkillFetchFailure.Unverifiable));
             Assert.That(error.SkillName, Is.EqualTo("tdd"));
             Assert.That(error.Message, Does.Contain(source).And.Contain("can't verify"));
-            Assert.That(GitHubSkillFetcher.CanVerify(skill), Is.False);
+            Assert.That(LockVerification.CanVerify(skill), Is.False);
             Assert.That(Directory.Exists(Path.Combine(_cache, "skills")), Is.False, "nothing unverified may be extracted");
         }
 
@@ -267,7 +267,7 @@ namespace Hissal.AgentSkillsSync.Tests
         [TestCase("vercel-labs-fork/skills")]
         public void CanVerify_OtherSources_IsTrue(string source)
         {
-            Assert.That(GitHubSkillFetcher.CanVerify(Skill("tdd", "x", source)), Is.True);
+            Assert.That(LockVerification.CanVerify(Skill("tdd", "x", source)), Is.True);
         }
     }
 }

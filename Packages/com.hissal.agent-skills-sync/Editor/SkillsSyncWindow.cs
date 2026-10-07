@@ -303,7 +303,7 @@ namespace Hissal.AgentSkillsSync.Editor
             row.Add(new Label(skill.Name) { style = { width = 200, unityFontStyleAndWeight = FontStyle.Bold } });
             row.Add(new Label(skill.Source) { style = { flexGrow = 1 } });
             if (newSource) row.Add(new Label("NEW SOURCE") { style = { unityFontStyleAndWeight = FontStyle.Bold, color = new Color(0.9f, 0.6f, 0.1f), marginRight = 8 } });
-            if (failure == null && !GitHubSkillFetcher.CanVerify(skill))
+            if (failure == null && !LockVerification.CanVerify(skill))
                 row.Add(mode == InstallMode.Pinned
                     ? new Label("can't verify lock hash")
                     {

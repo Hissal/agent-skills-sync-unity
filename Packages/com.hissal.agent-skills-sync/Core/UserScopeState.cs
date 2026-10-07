@@ -63,7 +63,7 @@ namespace Hissal.AgentSkillsSync
             if (_differsByLockHash.TryGetValue(key, out var differs)) return differs;
             try
             {
-                differs = GitHubSkillFetcher.DiffersFromLock(skill, Path);
+                differs = LockVerification.DiffersFromLock(skill, Path);
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
             {

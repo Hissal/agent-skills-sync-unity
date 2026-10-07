@@ -59,7 +59,7 @@ namespace Hissal.AgentSkillsSync
         /// <summary>
         /// Locked skills whose managed canonical copy does not hash to the locked <c>computedHash</c> (as is or as a CRLF
         /// checkout), in lock order. Skills where a mismatch can't tell are never listed: a skills.sh-hashed source
-        /// (<see cref="GitHubSkillFetcher.CanVerify"/>) or a copy with non-ASCII paths.
+        /// (<see cref="LockVerification.CanVerify"/>) or a copy with non-ASCII paths.
         /// </summary>
         /// <exception cref="LockfileException">The lockfile is missing or unusable.</exception>
         public IReadOnlyList<string> InstalledDiffersFromLock() => InstalledDiffersFromLock(Lockfile.Load(_projectRoot));
@@ -72,7 +72,7 @@ namespace Hissal.AgentSkillsSync
             var canonicalPath = Paths.InProject(_projectRoot, layout.Canonical.RelativePath);
             return lockfile.Skills
                 .Where(s => canonical.InstalledHash(s.Name) != null // a managed copy
-                            && GitHubSkillFetcher.DiffersFromLock(s, Path.Combine(canonicalPath, s.Name)))
+                            && LockVerification.DiffersFromLock(s, Path.Combine(canonicalPath, s.Name)))
                 .Select(s => s.Name)
                 .ToList();
         }

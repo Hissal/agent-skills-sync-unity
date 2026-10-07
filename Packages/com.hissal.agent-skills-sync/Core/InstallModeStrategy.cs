@@ -46,8 +46,8 @@ namespace Hissal.AgentSkillsSync
             // Pinned refuses a changed source whichever fetcher is in use.
             public override void Accept(LockedSkill skill, string hash)
             {
-                if (GitHubSkillFetcher.CanVerify(skill) && !GitHubSkillFetcher.MatchesLock(skill, hash))
-                    throw GitHubSkillFetcher.SourceChangedSinceLocked(skill, hash);
+                if (LockVerification.CanVerify(skill) && !LockVerification.MatchesLock(skill, hash))
+                    throw LockVerification.SourceChangedSinceLocked(skill, hash);
             }
 
             public override IInstalledCopyCheck ApplyCheck(IReadOnlyDictionary<string, string> upstreamHashes) => null;
@@ -72,7 +72,7 @@ namespace Hissal.AgentSkillsSync
 
             // Judged on the fetched copies, as fetched.
             public override IReadOnlyList<string> DiffersFromLock(Lockfile lockfile, IReadOnlyDictionary<string, string> fetched) =>
-                lockfile.Skills.Where(s => fetched.TryGetValue(s.Name, out var folder) && GitHubSkillFetcher.DiffersFromLock(s, folder))
+                lockfile.Skills.Where(s => fetched.TryGetValue(s.Name, out var folder) && LockVerification.DiffersFromLock(s, folder))
                     .Select(s => s.Name).ToList();
         }
     }

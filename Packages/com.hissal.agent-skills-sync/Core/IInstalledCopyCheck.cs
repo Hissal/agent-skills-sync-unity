@@ -26,7 +26,7 @@ namespace Hissal.AgentSkillsSync
         {
             // A skills.sh server hash is not comparable with ours: every installed copy would look stale and re-sync
             // forever. Such a copy counts as current; it is refreshed only when it goes missing.
-            if (!GitHubSkillFetcher.CanVerify(skill)) return true;
+            if (!LockVerification.CanVerify(skill)) return true;
             return installedHash != null && string.Equals(installedHash, skill.ComputedHash, StringComparison.OrdinalIgnoreCase);
         }
     }
