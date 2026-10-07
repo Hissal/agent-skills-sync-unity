@@ -20,12 +20,6 @@ namespace Hissal.AgentSkillsSync
         readonly Dictionary<string, string> _archives = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, Exception> _failedDownloads = new Dictionary<string, Exception>(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>
-        /// Owners (and owner/repo sources) the <c>skills</c> CLI installs from skills.sh snapshots, locking a server hash
-        /// of another algorithm. See docs/skills-cli-findings.md §1 "Blob-installed sources".
-        /// </summary>
-        static readonly string[] SkillsShHashedSources = { "vercel", "vercel-labs", "heygen-com", "remotion-dev", "zapier/connectors" };
-
         /// <param name="cacheRoot">Cache folder; defaults to <see cref="DefaultCacheRoot"/>.</param>
         /// <param name="downloader">Network access; defaults to <see cref="HttpArchiveDownloader"/>.</param>
         /// <param name="mode">
@@ -49,34 +43,11 @@ namespace Hissal.AgentSkillsSync
             }
         }
 
-        /// <summary>
-        /// Whether the skill's <c>computedHash</c> can be checked. False for sources the CLI locks with a skills.sh
-        /// server hash, which <see cref="SkillFolderHash"/> does not reproduce; <see cref="Fetch"/> refuses those.
-        /// </summary>
-        public static bool CanVerify(LockedSkill skill)
-        {
-            string owner, name;
-            try
-            {
-                (owner, name) = ParseRepo(skill);
-            }
-            catch (SkillFetchException)
-            {
-                return true; // Fetch refuses it anyway.
-            }
-
-            foreach (var source in SkillsShHashedSources)
-                if (string.Equals(source, owner, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(source, owner + "/" + name, StringComparison.OrdinalIgnoreCase))
-                    return false;
-            return true;
-        }
-
         public string Fetch(LockedSkill skill)
         {
             var repo = ParseRepo(skill);
             // Latest installs current upstream without checking the lock, so an unverifiable lock hash is no reason to refuse.
-            if (_mode == InstallMode.Pinned && !CanVerify(skill))
+            if (_mode == InstallMode.Pinned && !LockVerification.CanVerify(skill))
                 throw Unverifiable(skill,
                     $"the lock holds a skills.sh server hash for {skill.Source}, which this tool cannot reproduce");
             var archive = DownloadOnce(repo, skill);
@@ -89,10 +60,10 @@ namespace Hissal.AgentSkillsSync
         static void Verify(string folder, LockedSkill skill)
         {
             var actual = SkillFolderHash.Compute(folder);
-            if (MatchesLock(skill, actual)) return;
+            if (LockVerification.MatchesLock(skill, actual)) return;
             // Locked from a checkout with core.autocrlf=true: the CLI hashed CRLF text files, the archive has LF.
             // Hand out that checkout's bytes, so the installed copy hashes to the lock and is not seen as outdated.
-            if (MatchesLock(skill, SkillFolderHash.ComputeAsCrlfCheckout(folder)))
+            if (LockVerification.MatchesLock(skill, SkillFolderHash.ComputeAsCrlfCheckout(folder)))
             {
                 SkillFolderHash.ConvertToCrlfCheckout(folder);
                 return;
@@ -111,42 +82,14 @@ namespace Hissal.AgentSkillsSync
                     "it has non-ASCII file names, and the CLI's hash orders those in a way this tool does not reproduce, " +
                     "so a mismatch does not show whether the source changed");
 
-            throw SourceChangedSinceLocked(skill, actual);
+            throw LockVerification.SourceChangedSinceLocked(skill, actual);
         }
-
-        /// <summary>Whether <paramref name="hash"/> (a <see cref="SkillFolderHash"/>) is the skill's locked <c>computedHash</c>.</summary>
-        internal static bool MatchesLock(LockedSkill skill, string hash) =>
-            hash != null && string.Equals(hash, skill.ComputedHash?.Trim() ?? "", StringComparison.OrdinalIgnoreCase);
-
-        /// <summary>The Pinned-mode refusal of a skill whose upstream content hashes to <paramref name="actual"/>, not the lock.</summary>
-        internal static SkillFetchException SourceChangedSinceLocked(LockedSkill skill, string actual)
-        {
-            var locked = skill.ComputedHash?.Trim() ?? "";
-            var lockedText = locked.Length == 0 ? "no hash" : Short(locked);
-            return new SkillFetchException(skill.Name, SkillFetchFailure.HashMismatch,
-                $"Skill \"{skill.Name}\": source {skill.Source} changed since it was locked (locked {lockedText}, now {Short(actual)}). " +
-                $"Run `npx skills update` and commit {Lockfile.FileName}, or switch the install mode to Latest.");
-        }
-
-        /// <summary>
-        /// Whether <paramref name="folder"/> (a copy of the skill) verifiably differs from the lock: false when it hashes
-        /// to the lock as it is or as a CRLF checkout, and when a mismatch can't tell (no locked hash, skills.sh hash,
-        /// non-ASCII paths).
-        /// </summary>
-        internal static bool DiffersFromLock(LockedSkill skill, string folder) =>
-            !string.IsNullOrWhiteSpace(skill.ComputedHash)
-            && CanVerify(skill)
-            && !MatchesLock(skill, SkillFolderHash.Compute(folder))
-            && !MatchesLock(skill, SkillFolderHash.ComputeAsCrlfCheckout(folder))
-            && !SkillFolderHash.HasNonAsciiPath(folder);
 
         static SkillFetchException Unverifiable(LockedSkill skill, string reason) =>
             new SkillFetchException(skill.Name, SkillFetchFailure.Unverifiable,
                 $"Skill \"{skill.Name}\": can't verify this source's lock hash ({reason}). " +
                 "It was not installed, because an unverified copy could differ from what was locked. " +
                 "Switch the install mode to Latest to install the current upstream copy without this check.");
-
-        static string Short(string hash) => hash.Length > 12 ? hash.Substring(0, 12) : hash;
 
         string DownloadOnce((string Owner, string Name) repo, LockedSkill skill)
         {
@@ -250,7 +193,9 @@ namespace Hissal.AgentSkillsSync
             return name;
         }
 
-        static (string Owner, string Name) ParseRepo(LockedSkill skill)
+        /// <summary>The skill's GitHub <c>owner/repo</c> source.</summary>
+        /// <exception cref="SkillFetchException">The source is not an owner/repo GitHub source.</exception>
+        internal static (string Owner, string Name) ParseRepo(LockedSkill skill)
         {
             var source = skill.Source.Trim();
             foreach (var prefix in new[] { "https://github.com/", "http://github.com/", "github.com/" })

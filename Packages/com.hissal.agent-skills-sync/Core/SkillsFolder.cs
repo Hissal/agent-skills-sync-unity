@@ -15,7 +15,7 @@ namespace Hissal.AgentSkillsSync
     }
 
     /// <summary>
-    /// One entry of the folder table: a project-relative folder a set of agents reads skills from, e.g.
+    /// One entry of the folder layout: a project-relative folder a set of agents reads skills from, e.g.
     /// <c>.claude/skills</c>, with every user-scope folder those agents read.
     /// </summary>
     public sealed class SkillsFolder
@@ -45,28 +45,28 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Every user-scope skills folder an agent reading this project folder reads from its own home (e.g.
-        /// <c>~/.codex/skills</c> for Codex), in table order. Locations that agents read only as a cross-read of
-        /// another table entry's home (Cursor reading <c>~/.claude/skills</c>) are not listed here.
+        /// <c>~/.codex/skills</c> for Codex), in layout order. Locations that agents read only as a cross-read of
+        /// another layout entry's home (Cursor reading <c>~/.claude/skills</c>) are not listed here.
         /// </summary>
         public IReadOnlyList<UserScopeLocation> UserScopeLocations { get; }
 
-        /// <summary>The resolved agent homes of <see cref="UserScopeLocations"/>, distinct, in table order.</summary>
+        /// <summary>The resolved agent homes of <see cref="UserScopeLocations"/>, distinct, in layout order.</summary>
         public IReadOnlyList<string> UserScopeHomes(UserEnvironment environment) =>
             Distinct(UserScopeLocations.Select(l => l.ResolveHome(environment)));
 
-        /// <summary>The resolved user-scope skills folders of <see cref="UserScopeLocations"/>, distinct, in table order.</summary>
+        /// <summary>The resolved user-scope skills folders of <see cref="UserScopeLocations"/>, distinct, in layout order.</summary>
         public IReadOnlyList<string> UserScopeSkillsFolders(UserEnvironment environment) =>
             Distinct(UserScopeLocations.Select(l => l.ResolveSkillsFolder(environment)));
 
         static IReadOnlyList<string> Distinct(IEnumerable<string> paths) =>
-            paths.Distinct(System.IO.Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToList();
+            paths.Distinct(Paths.Comparer).ToList();
 
         public override string ToString() => RelativePath;
     }
 
     /// <summary>
     /// The skills folders the tool keeps in sync: exactly one canonical folder plus any number of link folders.
-    /// Everything downstream iterates this table rather than naming folders.
+    /// Everything downstream iterates this layout rather than naming folders.
     /// </summary>
     public sealed partial class FolderLayout
     {

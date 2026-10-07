@@ -29,14 +29,12 @@ namespace Hissal.AgentSkillsSync.Editor
             var projectRoot = Path.GetDirectoryName(Application.dataPath);
             try
             {
-                var table = FolderLayout.Default;
+                var layout = FolderLayout.Default;
                 var environment = UserEnvironment.Current;
                 var prefs = LocalPrefs.Load(projectRoot);
-                OfferNewFolders(prefs, table, environment);
+                OfferNewFolders(prefs, layout, environment);
 
-                var selected = FolderSelection.Effective(prefs, table, environment);
-                var status = SyncStatus.Read(projectRoot, table, selected, UserScopeScanner.Scan(selected, environment, UserScopeScanner.DefaultSourcesFor(projectRoot)),
-                    SkipChoices.From(prefs));
+                var status = SyncStatus.Read(projectRoot, MachineChoices.Read(projectRoot, prefs, environment, layout));
                 if (!StartupCheck.ShouldNotify(status, prefs)) return;
 
                 if (EditorUtility.DisplayDialog(
@@ -59,9 +57,9 @@ namespace Hissal.AgentSkillsSync.Editor
         }
 
         /// <summary>One dialog per folder whose home appeared and was neither selected nor declined; saves each answer.</summary>
-        static void OfferNewFolders(LocalPrefs prefs, FolderLayout table, UserEnvironment environment)
+        static void OfferNewFolders(LocalPrefs prefs, FolderLayout layout, UserEnvironment environment)
         {
-            foreach (var folder in FolderSelection.Offers(prefs, table, environment))
+            foreach (var folder in FolderSelection.Offers(prefs, layout, environment))
             {
                 var add = EditorUtility.DisplayDialog(
                     "Agent Skills Sync",
@@ -70,7 +68,7 @@ namespace Hissal.AgentSkillsSync.Editor
                     "If you choose Not Now, you won't be asked about this folder again (you can still select it in the sync window).",
                     "Add Folder",
                     "Not Now");
-                if (add) FolderSelection.Accept(prefs, table, folder, environment);
+                if (add) FolderSelection.Accept(prefs, layout, folder, environment);
                 else FolderSelection.Decline(prefs, folder);
                 prefs.Save();
             }
@@ -82,7 +80,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 ? "This project's agent skills have not been synced on this machine yet."
                 : status.LockHash != prefs.LastSyncedLockHash
                 ? $"{Lockfile.FileName} changed since the last sync."
-                : $"Some locked skills are missing: {string.Join(", ", status.MissingSkills)}.";
+                : $"Some locked skills are missing: {string.Join(", ", status.OutOfSyncSkills)}.";
             return reason + "\n\nOpen the sync window to review and install them? If you choose Not Now, " +
                    "you won't be asked again until something changes.";
         }

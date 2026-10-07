@@ -19,31 +19,32 @@ namespace Hissal.AgentSkillsSync
     {
         readonly string _projectRoot;
         readonly ISkillFetcher _fetcher;
-        readonly FolderLayout _layout;
-        readonly IReadOnlyList<SkillsFolder> _selected;
-        readonly UserScopeState _userScope;
-        readonly SkipChoices _skips;
+        readonly MachineChoices _choices;
         readonly PlanExecutor _executor;
+        readonly InstallModeStrategy _strategy;
 
-        /// <param name="selected">The folders this machine installs into (see <see cref="FolderSelection.Effective"/>); null = every folder in the layout.</param>
-        /// <param name="userScope">The user-scope copies found (see <see cref="UserScopeScanner"/>); null = none.</param>
-        /// <param name="skips">The contributor's per-folder skip choices (see <see cref="SkipChoices.From"/>); null = none.</param>
+        /// <summary>Shorthand for the <see cref="MachineChoices"/> constructor with the choices given one by one (see there).</summary>
+        public SkillSync(string projectRoot, ISkillFetcher fetcher, FolderLayout layout = null, ILinkCreator linker = null,
+            IEnumerable<SkillsFolder> selected = null, UserScopeState userScope = null, SkipChoices skips = null,
+            InstallMode mode = InstallMode.Pinned)
+            : this(projectRoot, fetcher, new MachineChoices(layout, selected, userScope, skips), linker, mode)
+        {
+        }
+
+        /// <param name="choices">This machine's layout, folder selection, user-scope copies and skips (see <see cref="MachineChoices.Read"/>).</param>
         /// <param name="mode">
         /// Defaults to <see cref="InstallMode.Pinned"/>, the behaviour without install modes. The project's own choice
         /// (default Latest) is in <see cref="ProjectSyncSettings"/>; callers pass it here and to the fetcher.
         /// </param>
-        public SkillSync(string projectRoot, ISkillFetcher fetcher, FolderLayout layout = null, ILinkCreator linker = null,
-            IEnumerable<SkillsFolder> selected = null, UserScopeState userScope = null, SkipChoices skips = null,
+        public SkillSync(string projectRoot, ISkillFetcher fetcher, MachineChoices choices, ILinkCreator linker = null,
             InstallMode mode = InstallMode.Pinned)
         {
-            _userScope = userScope;
-            _skips = skips;
             _projectRoot = projectRoot;
             _fetcher = fetcher;
-            _layout = layout ?? FolderLayout.Default;
-            _selected = selected?.ToList();
+            _choices = choices ?? MachineChoices.Default;
             _executor = new PlanExecutor(linker);
             Mode = mode;
+            _strategy = InstallModeStrategy.For(mode);
         }
 
         public InstallMode Mode { get; }
@@ -58,7 +59,7 @@ namespace Hissal.AgentSkillsSync
         /// <summary>
         /// Locked skills whose managed canonical copy does not hash to the locked <c>computedHash</c> (as is or as a CRLF
         /// checkout), in lock order. Skills where a mismatch can't tell are never listed: a skills.sh-hashed source
-        /// (<see cref="GitHubSkillFetcher.CanVerify"/>) or a copy with non-ASCII paths.
+        /// (<see cref="LockVerification.CanVerify"/>) or a copy with non-ASCII paths.
         /// </summary>
         /// <exception cref="LockfileException">The lockfile is missing or unusable.</exception>
         public IReadOnlyList<string> InstalledDiffersFromLock() => InstalledDiffersFromLock(Lockfile.Load(_projectRoot));
@@ -66,23 +67,23 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Like <see cref="InstalledDiffersFromLock()"/>, against exactly <paramref name="lockfile"/>.</summary>
         public IReadOnlyList<string> InstalledDiffersFromLock(Lockfile lockfile)
         {
-            var canonical = ProjectScanner.Scan(_projectRoot, _layout).For(_layout.Canonical);
-            var canonicalPath = Paths.InProject(_projectRoot, _layout.Canonical.RelativePath);
+            var layout = _choices.Layout;
+            var canonical = ProjectScanner.Scan(_projectRoot, layout).For(layout.Canonical);
+            var canonicalPath = Paths.InProject(_projectRoot, layout.Canonical.RelativePath);
             return lockfile.Skills
                 .Where(s => canonical.InstalledHash(s.Name) != null // a managed copy
-                            && GitHubSkillFetcher.DiffersFromLock(s, Path.Combine(canonicalPath, s.Name)))
+                            && LockVerification.DiffersFromLock(s, Path.Combine(canonicalPath, s.Name)))
                 .Select(s => s.Name)
                 .ToList();
         }
 
         /// <summary>What syncing <paramref name="lockfile"/> would do now, without doing it (see <see cref="Plan()"/>).</summary>
         public InstallPlan Plan(Lockfile lockfile) =>
-            PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _layout),
-                Mode == InstallMode.Latest ? FixedCheck.AlwaysCurrent : (IInstalledCopyCheck)LockedHashCheck.Instance);
+            PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout), _strategy.PreviewCheck);
 
         /// <summary>Plans with this sync's folder selection, user-scope copies and skips.</summary>
         InstallPlan PlanWith(Lockfile lockfile, ProjectState project, IInstalledCopyCheck check) =>
-            InstallPlanner.Plan(lockfile, project, _layout, check, selected: _selected, userScope: _userScope, skips: _skips);
+            InstallPlanner.Plan(lockfile, project, _choices, check);
 
         /// <summary>Loads the lockfile, plans and applies. Call only after the contributor consented.</summary>
         /// <exception cref="LockfileException">The lockfile is missing or unusable; nothing was changed.</exception>
@@ -96,12 +97,10 @@ namespace Hissal.AgentSkillsSync
         /// <exception cref="SyncAbortedException">One or more skills could not be fetched or verified; nothing was changed.</exception>
         public SyncSummary Run(Lockfile lockfile)
         {
-            var project = ProjectScanner.Scan(_projectRoot, _layout);
-            var latest = Mode == InstallMode.Latest;
+            var project = ProjectScanner.Scan(_projectRoot, _choices.Layout);
 
             // Latest compares every managed copy with upstream, so it fetches them all; Pinned only what the lock says is stale.
-            var toFetch = PlanWith(lockfile, project,
-                latest ? FixedCheck.NeverCurrent : (IInstalledCopyCheck)LockedHashCheck.Instance);
+            var toFetch = PlanWith(lockfile, project, _strategy.FetchCheck);
 
             var fetched = new Dictionary<string, string>();
             var upstreamHashes = new Dictionary<string, string>();
@@ -112,9 +111,7 @@ namespace Hissal.AgentSkillsSync
                 {
                     var folder = _fetcher.Fetch(action.Skill);
                     var hash = SkillFolderHash.Compute(folder);
-                    // Pinned refuses a changed source whichever fetcher is in use.
-                    if (!latest && GitHubSkillFetcher.CanVerify(action.Skill) && !GitHubSkillFetcher.MatchesLock(action.Skill, hash))
-                        throw GitHubSkillFetcher.SourceChangedSinceLocked(action.Skill, hash);
+                    _strategy.Accept(action.Skill, hash);
                     fetched[action.SkillName] = folder;
                     upstreamHashes[action.SkillName] = hash;
                 }
@@ -126,17 +123,11 @@ namespace Hissal.AgentSkillsSync
 
             if (failures.Count > 0) throw new SyncAbortedException(failures);
 
-            // Judged on the fetched copies, as fetched.
-            var differs = latest
-                ? lockfile.Skills.Where(s => fetched.TryGetValue(s.Name, out var folder) && GitHubSkillFetcher.DiffersFromLock(s, folder))
-                    .Select(s => s.Name).ToList()
-                : null;
-
-            var plan = latest ? PlanWith(lockfile, project, new UpstreamHashCheck(upstreamHashes)) : toFetch;
+            var differs = _strategy.DiffersFromLock(lockfile, fetched);
+            var applyCheck = _strategy.ApplyCheck(upstreamHashes);
+            var plan = applyCheck == null ? toFetch : PlanWith(lockfile, project, applyCheck);
             var summary = _executor.Execute(_projectRoot, plan, fetched);
-            if (!latest) return summary;
-
-            return new SyncSummary(summary.Applied, summary.LinkMethods, differs);
+            return differs == null ? summary : new SyncSummary(summary.Applied, summary.LinkMethods, differs);
         }
     }
 }

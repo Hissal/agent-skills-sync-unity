@@ -19,7 +19,7 @@ namespace Hissal.AgentSkillsSync.Tests
         const string AgentsPath = ".agents/skills";
         const string ClaudePath = ".claude/skills";
 
-        static FolderLayout Table => FolderLayout.Default;
+        static FolderLayout Layout => FolderLayout.Default;
 
         string _root;
 
@@ -41,7 +41,7 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             var path = Path.Combine(_root, "home", Guid.NewGuid().ToString("N"), "tdd");
             Paths.CopyDirectory(Path.Combine(FixturesRoot, "minimal"), path);
-            return new UserScopeCopy(Table.Find(folder), "tdd", path, foundIn);
+            return new UserScopeCopy(Layout.Find(folder), "tdd", path, foundIn);
         }
 
         static void Edit(UserScopeCopy copy) => File.AppendAllText(Path.Combine(copy.Path, "SKILL.md"), "\nmy own tweak\n");
@@ -50,7 +50,7 @@ namespace Hissal.AgentSkillsSync.Tests
             new SkipChoices(folders.ToDictionary(f => f, f => (IReadOnlyList<string>)new[] { "tdd" }));
 
         static InstallPlan Plan(Lockfile lockfile, SkipChoices skips, params UserScopeCopy[] copies) =>
-            InstallPlanner.Plan(lockfile, ProjectState.Empty, Table, userScope: new UserScopeState(copies), skips: skips);
+            InstallPlanner.Plan(lockfile, ProjectState.Empty, Layout, userScope: new UserScopeState(copies), skips: skips);
 
         static IEnumerable<string> Describe(InstallPlan plan) =>
             plan.Actions.Select(a => $"{a.Kind} {a.Folder.RelativePath}/{a.SkillName}");

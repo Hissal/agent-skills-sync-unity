@@ -28,11 +28,11 @@ namespace Hissal.AgentSkillsSync.Tests
         UserEnvironment Environment =>
             new UserEnvironment(_home, name => _variables.TryGetValue(name, out var value) ? value : null);
 
-        static FolderLayout Table => FolderLayout.Default;
+        static FolderLayout Layout => FolderLayout.Default;
 
-        static SkillsFolder Agents => Table.Find(".agents/skills");
+        static SkillsFolder Agents => Layout.Find(".agents/skills");
 
-        static SkillsFolder Claude => Table.Find(".claude/skills");
+        static SkillsFolder Claude => Layout.Find(".claude/skills");
 
         /// <summary>Creates <c>skill/SKILL.md</c> under <paramref name="skillsFolder"/>, relative to the home.</summary>
         string MakeSkill(string skillsFolder, string skill)
@@ -123,7 +123,7 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
-        public void Scan_SkillInSeveralLocations_ReportsEachInTableOrder()
+        public void Scan_SkillInSeveralLocations_ReportsEachInLayoutOrder()
         {
             MakeSkill(".cursor/skills", "tdd");
             MakeSkill(".agents/skills", "tdd");

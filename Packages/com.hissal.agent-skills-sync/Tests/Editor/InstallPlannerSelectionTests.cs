@@ -9,8 +9,8 @@ namespace Hissal.AgentSkillsSync.Tests
     {
         const string Hash = "locked-hash";
 
-        /// <summary>The default table plus one more link folder, as a future table entry would add.</summary>
-        static readonly FolderLayout ExtendedTable = new FolderLayout(FolderLayout.Default.Folders
+        /// <summary>The default layout plus one more link folder, as a future layout entry would add.</summary>
+        static readonly FolderLayout ExtendedLayout = new FolderLayout(FolderLayout.Default.Folders
             .Concat(new[] { new SkillsFolder("junie", ".junie/skills", SkillsFolderRole.Link, "Junie") }));
 
         static Lockfile Lock(params string[] names) =>
@@ -21,20 +21,20 @@ namespace Hissal.AgentSkillsSync.Tests
                 ? $"Link {action.Folder.RelativePath}/{action.SkillName} -> {action.LinkTarget.RelativePath}/{action.SkillName}"
                 : $"{action.Kind} {action.Folder.RelativePath}/{action.SkillName}";
 
-        static IEnumerable<SkillsFolder> Select(FolderLayout table, string selected) =>
-            selected.Split(',').Where(p => p.Length > 0).Select(p => table.Find(p.Trim()));
+        static IEnumerable<SkillsFolder> Select(FolderLayout layout, string selected) =>
+            selected.Split(',').Where(p => p.Length > 0).Select(p => layout.Find(p.Trim()));
 
         /// <summary>
         /// Each folder spec is <c>path=entries</c>; entries are comma-separated, <c>name</c> = managed (at the locked
         /// hash in the canonical folder), <c>name?</c> = present but not managed.
         /// </summary>
-        static ProjectState Project(FolderLayout table, params string[] folders)
+        static ProjectState Project(FolderLayout layout, params string[] folders)
         {
             var states = new List<FolderState>();
             foreach (var spec in folders)
             {
                 var parts = spec.Split('=');
-                var folder = table.Find(parts[0]);
+                var folder = layout.Find(parts[0]);
                 var present = new List<string>();
                 var managed = new List<string>();
                 var hashes = new Dictionary<string, string>();
@@ -51,30 +51,30 @@ namespace Hissal.AgentSkillsSync.Tests
             return new ProjectState(states);
         }
 
-        static TestCaseData Fresh(string name, FolderLayout table, string selected, params string[] expected) =>
-            new TestCaseData(table, selected, expected).SetName("Plan_FreshProject_" + name);
+        static TestCaseData Fresh(string name, FolderLayout layout, string selected, params string[] expected) =>
+            new TestCaseData(layout, selected, expected).SetName("Plan_FreshProject_" + name);
 
         static IEnumerable<TestCaseData> FreshCases()
         {
-            var table = FolderLayout.Default;
-            yield return Fresh("NoneSelected_InstallsNothing", table, "");
-            yield return Fresh("ClaudeOnly_CopiesIntoAgentsAndLinksClaude", table, ".claude/skills",
+            var layout = FolderLayout.Default;
+            yield return Fresh("NoneSelected_InstallsNothing", layout, "");
+            yield return Fresh("ClaudeOnly_CopiesIntoAgentsAndLinksClaude", layout, ".claude/skills",
                 "Install .agents/skills/tdd", "Link .claude/skills/tdd -> .agents/skills/tdd");
-            yield return Fresh("AgentsOnly_CopiesIntoAgentsOnly", table, ".agents/skills",
+            yield return Fresh("AgentsOnly_CopiesIntoAgentsOnly", layout, ".agents/skills",
                 "Install .agents/skills/tdd");
-            yield return Fresh("Both_CopiesAndLinks", table, ".agents/skills,.claude/skills",
+            yield return Fresh("Both_CopiesAndLinks", layout, ".agents/skills,.claude/skills",
                 "Install .agents/skills/tdd", "Link .claude/skills/tdd -> .agents/skills/tdd");
-            yield return Fresh("ExtraEntryOnly_CopiesIntoAgentsAndLinksTheExtraFolder", ExtendedTable, ".junie/skills",
+            yield return Fresh("ExtraEntryOnly_CopiesIntoAgentsAndLinksTheExtraFolder", ExtendedLayout, ".junie/skills",
                 "Install .agents/skills/tdd", "Link .junie/skills/tdd -> .agents/skills/tdd");
-            yield return Fresh("ExtraEntryAndClaude_LinksBoth", ExtendedTable, ".claude/skills,.junie/skills",
+            yield return Fresh("ExtraEntryAndClaude_LinksBoth", ExtendedLayout, ".claude/skills,.junie/skills",
                 "Install .agents/skills/tdd", "Link .claude/skills/tdd -> .agents/skills/tdd",
                 "Link .junie/skills/tdd -> .agents/skills/tdd");
         }
 
         [TestCaseSource(nameof(FreshCases))]
-        public void Plan_FreshProject(FolderLayout table, string selected, string[] expected)
+        public void Plan_FreshProject(FolderLayout layout, string selected, string[] expected)
         {
-            var plan = InstallPlanner.Plan(Lock("tdd"), ProjectState.Empty, table, selected: Select(table, selected));
+            var plan = InstallPlanner.Plan(Lock("tdd"), ProjectState.Empty, layout, selected: Select(layout, selected));
 
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(expected));
         }
@@ -97,23 +97,23 @@ namespace Hissal.AgentSkillsSync.Tests
         [TestCaseSource(nameof(InstalledCases))]
         public void Plan_InstalledInBoth(string selected, string[] expected, string[] managedAgents, string[] managedClaude)
         {
-            var table = FolderLayout.Default;
-            var project = Project(table, ".agents/skills=tdd", ".claude/skills=tdd");
+            var layout = FolderLayout.Default;
+            var project = Project(layout, ".agents/skills=tdd", ".claude/skills=tdd");
 
-            var plan = InstallPlanner.Plan(Lock("tdd"), project, table, selected: Select(table, selected));
+            var plan = InstallPlanner.Plan(Lock("tdd"), project, layout, selected: Select(layout, selected));
 
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(expected));
-            Assert.That(plan.ManagedNames[table.Canonical], Is.EqualTo(managedAgents));
-            Assert.That(plan.ManagedNames[table.Find(".claude/skills")], Is.EqualTo(managedClaude));
+            Assert.That(plan.ManagedNames[layout.Canonical], Is.EqualTo(managedAgents));
+            Assert.That(plan.ManagedNames[layout.Find(".claude/skills")], Is.EqualTo(managedClaude));
         }
 
         [Test]
         public void Plan_DeselectedFolderHoldsAForeignEntry_LeavesItWithoutAnyAction()
         {
-            var table = FolderLayout.Default;
-            var project = Project(table, ".agents/skills=tdd", ".claude/skills=tdd?");
+            var layout = FolderLayout.Default;
+            var project = Project(layout, ".agents/skills=tdd", ".claude/skills=tdd?");
 
-            var plan = InstallPlanner.Plan(Lock("tdd"), project, table, selected: Select(table, ".agents/skills"));
+            var plan = InstallPlanner.Plan(Lock("tdd"), project, layout, selected: Select(layout, ".agents/skills"));
 
             Assert.That(plan.Actions, Is.Empty);
         }
@@ -121,10 +121,10 @@ namespace Hissal.AgentSkillsSync.Tests
         [Test]
         public void Plan_NoneSelected_KeepsForeignCanonicalEntries()
         {
-            var table = FolderLayout.Default;
-            var project = Project(table, ".agents/skills=tdd?");
+            var layout = FolderLayout.Default;
+            var project = Project(layout, ".agents/skills=tdd?");
 
-            var plan = InstallPlanner.Plan(Lock("tdd"), project, table, selected: Select(table, ""));
+            var plan = InstallPlanner.Plan(Lock("tdd"), project, layout, selected: Select(layout, ""));
 
             Assert.That(plan.Actions, Is.Empty);
         }
@@ -132,9 +132,9 @@ namespace Hissal.AgentSkillsSync.Tests
         [Test]
         public void Plan_ProjectAuthoredSkill_LinksOnlyIntoSelectedFolders()
         {
-            var project = Project(ExtendedTable, ".agents/skills=house-style?");
+            var project = Project(ExtendedLayout, ".agents/skills=house-style?");
 
-            var plan = InstallPlanner.Plan(Lock(), project, ExtendedTable, selected: Select(ExtendedTable, ".junie/skills"));
+            var plan = InstallPlanner.Plan(Lock(), project, ExtendedLayout, selected: Select(ExtendedLayout, ".junie/skills"));
 
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[] { "Link .junie/skills/house-style -> .agents/skills/house-style" }));
         }
@@ -142,18 +142,18 @@ namespace Hissal.AgentSkillsSync.Tests
         [Test]
         public void Plan_ProjectAuthoredSkillLinkedIntoDeselectedFolder_UnlinksItButNeverTouchesTheSkill()
         {
-            var table = FolderLayout.Default;
-            var project = Project(table, ".agents/skills=house-style?", ".claude/skills=house-style");
+            var layout = FolderLayout.Default;
+            var project = Project(layout, ".agents/skills=house-style?", ".claude/skills=house-style");
 
-            var plan = InstallPlanner.Plan(Lock(), project, table, selected: Select(table, ""));
+            var plan = InstallPlanner.Plan(Lock(), project, layout, selected: Select(layout, ""));
 
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[] { "Unlink .claude/skills/house-style" }));
         }
 
         [Test]
-        public void Plan_NoSelectionGiven_UsesEveryFolderInTheTable()
+        public void Plan_NoSelectionGiven_UsesEveryFolderInTheLayout()
         {
-            var plan = InstallPlanner.Plan(Lock("tdd"), ProjectState.Empty, ExtendedTable);
+            var plan = InstallPlanner.Plan(Lock("tdd"), ProjectState.Empty, ExtendedLayout);
 
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[]
             {

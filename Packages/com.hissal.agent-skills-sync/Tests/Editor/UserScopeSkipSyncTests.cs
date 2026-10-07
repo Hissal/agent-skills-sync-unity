@@ -36,7 +36,7 @@ namespace Hissal.AgentSkillsSync.Tests
         const string Agents = ".agents/skills";
         const string Claude = ".claude/skills";
 
-        static FolderLayout Table => FolderLayout.Default;
+        static FolderLayout Layout => FolderLayout.Default;
 
         string _root;
         string _project;
@@ -58,7 +58,7 @@ namespace Hissal.AgentSkillsSync.Tests
 
         UserEnvironment Environment => new UserEnvironment(_home, _ => null);
 
-        static IReadOnlyList<SkillsFolder> Both => new[] { Table.Find(Agents), Table.Find(Claude) };
+        static IReadOnlyList<SkillsFolder> Both => new[] { Layout.Find(Agents), Layout.Find(Claude) };
 
         void MakeUserScopeSkill(string skillsFolder, string skill)
         {
@@ -70,7 +70,7 @@ namespace Hissal.AgentSkillsSync.Tests
         void SetSkip(string folder, bool skip)
         {
             var prefs = LocalPrefs.Load(_project);
-            SkipChoices.Set(prefs, Table.Find(folder), "tdd", skip);
+            SkipChoices.Set(prefs, Layout.Find(folder), "tdd", skip);
             prefs.Save();
         }
 
@@ -80,7 +80,7 @@ namespace Hissal.AgentSkillsSync.Tests
                 skips: SkipChoices.From(LocalPrefs.Load(_project))).Run();
 
         SyncStatus Status() =>
-            SyncStatus.Read(_project, Table, Both, UserScopeScanner.Scan(Both, Environment), SkipChoices.From(LocalPrefs.Load(_project)));
+            SyncStatus.Read(_project, Layout, Both, UserScopeScanner.Scan(Both, Environment), SkipChoices.From(LocalPrefs.Load(_project)));
 
         string InProject(string relative) => Path.Combine(_project, relative.Replace('/', Path.DirectorySeparatorChar));
 
@@ -113,7 +113,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(IgnoredIn(Claude), Is.EqualTo(new[] { "tdd" }));
             Assert.That(Exists(Agents + "/tdd"), Is.True);
             Assert.That(Exists(Path.Combine(_home, ".claude", "skills", "tdd")), Is.True);
-            Assert.That(Status().MissingSkills, Is.Empty);
+            Assert.That(Status().OutOfSyncSkills, Is.Empty);
 
             SetSkip(Claude, false);
             var unskipped = Sync();
@@ -172,7 +172,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Sync();
             Directory.Delete(Path.Combine(_home, ".claude", "skills", "tdd"), recursive: true);
 
-            Assert.That(Status().MissingSkills, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(Status().OutOfSyncSkills, Is.EqualTo(new[] { "tdd" }));
         }
     }
 }

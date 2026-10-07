@@ -38,7 +38,7 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Who reads this location, for display.</summary>
         public string Agents { get; }
 
-        /// <summary>The agent home as written in the table, e.g. <c>~/.codex</c>.</summary>
+        /// <summary>The agent home as written in the layout, e.g. <c>~/.codex</c>.</summary>
         public string Home { get; }
 
         /// <summary>The skills folder inside <see cref="Home"/>, e.g. <c>skills</c>.</summary>

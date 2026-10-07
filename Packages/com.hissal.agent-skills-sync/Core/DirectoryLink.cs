@@ -73,8 +73,7 @@ namespace Hissal.AgentSkillsSync
             var link = FinalPath(linkPath);
             var target = FinalPath(targetPath);
             if (link == null || target == null) return false;
-            var comparison = Path.DirectorySeparatorChar == '\\' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            return string.Equals(link, target, comparison);
+            return string.Equals(link, target, Paths.Comparison);
         }
 
         /// <summary>The fully resolved path of an existing folder (every link followed), or null when it can't be resolved.</summary>

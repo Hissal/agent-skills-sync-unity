@@ -40,7 +40,7 @@ namespace Hissal.AgentSkillsSync
         public string Path { get; }
 
         /// <summary>
-        /// Where it was found, for display: a table location as written (<c>~/.codex/skills</c>), its resolved folder
+        /// Where it was found, for display: a layout location as written (<c>~/.codex/skills</c>), its resolved folder
         /// when an environment variable moved it, or whatever another <see cref="IUserScopeSource"/> names (a plugin).
         /// </summary>
         public string FoundIn { get; }
@@ -63,7 +63,7 @@ namespace Hissal.AgentSkillsSync
             if (_differsByLockHash.TryGetValue(key, out var differs)) return differs;
             try
             {
-                differs = GitHubSkillFetcher.DiffersFromLock(skill, Path);
+                differs = LockVerification.DiffersFromLock(skill, Path);
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
             {
@@ -94,7 +94,7 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Nothing found at user scope.</summary>
         public static UserScopeState Empty { get; } = new UserScopeState(null);
 
-        /// <summary>Every copy found, in scan order (folders as given, then sources, then locations in table order).</summary>
+        /// <summary>Every copy found, in scan order (folders as given, then sources, then locations in layout order).</summary>
         public IReadOnlyList<UserScopeCopy> Copies { get; }
 
         /// <summary>The copies of <paramref name="skillName"/> the agents reading <paramref name="folder"/> see; empty when none.</summary>

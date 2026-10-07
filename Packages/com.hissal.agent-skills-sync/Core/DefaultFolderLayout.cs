@@ -3,7 +3,7 @@ namespace Hissal.AgentSkillsSync
     public sealed partial class FolderLayout
     {
         /// <summary>
-        /// The folder table: every skills folder a contributor can choose to install into. Data only; supporting another
+        /// The default folder layout: every skills folder a contributor can choose to install into. Data only; supporting another
         /// folder or agent means adding an entry here. User-scope locations come from <c>docs/skills-cli-findings.md</c> §3:
         /// each agent's own home only (cross-reads of another entry's home, such as Cursor reading
         /// <c>~/.claude/skills</c>, are left out so that home does not pre-select this entry).

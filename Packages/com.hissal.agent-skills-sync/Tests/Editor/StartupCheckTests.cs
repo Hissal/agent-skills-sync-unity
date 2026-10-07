@@ -121,7 +121,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Unlink(".claude/skills/tdd");
 
             Assert.That(ShouldNotify(), Is.True);
-            Assert.That(SyncStatus.Read(_project).MissingSkills, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(SyncStatus.Read(_project).OutOfSyncSkills, Is.EqualTo(new[] { "tdd" }));
         }
 
         [Test]
@@ -135,7 +135,7 @@ namespace Hissal.AgentSkillsSync.Tests
             // Hashing would have to read this file; the startup check must only look at names and the lock.
             using (new FileStream(Path.Combine(_project, ".agents/skills/code-review/SKILL.md"), FileMode.Open, FileAccess.Read, FileShare.None))
             {
-                Assert.That(SyncStatus.Read(_project).MissingSkills, Is.EqualTo(new[] { "tdd" }));
+                Assert.That(SyncStatus.Read(_project).OutOfSyncSkills, Is.EqualTo(new[] { "tdd" }));
             }
         }
 
@@ -147,7 +147,7 @@ namespace Hissal.AgentSkillsSync.Tests
 
             File.WriteAllText(Path.Combine(_project, ".agents/skills/tdd/SKILL.md"), "# edited");
 
-            Assert.That(SyncStatus.Read(_project).MissingSkills, Is.Empty);
+            Assert.That(SyncStatus.Read(_project).OutOfSyncSkills, Is.Empty);
             Assert.That(ShouldNotify(), Is.False);
         }
 
@@ -210,7 +210,7 @@ namespace Hissal.AgentSkillsSync.Tests
             foreach (var name in new[] { "tdd", "code-review" })
                 Directory.CreateDirectory(Path.Combine(_project, folder, name));
 
-            Assert.That(SyncStatus.Read(_project).MissingSkills, Is.Empty);
+            Assert.That(SyncStatus.Read(_project).OutOfSyncSkills, Is.Empty);
         }
 
         [Test]
@@ -275,7 +275,7 @@ namespace Hissal.AgentSkillsSync.Tests
 
             var widened = SyncStatus.Read(_project, selected: Only(".agents/skills", ".claude/skills"));
 
-            Assert.That(widened.MissingSkills, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(widened.OutOfSyncSkills, Is.EqualTo(new[] { "tdd" }));
             Assert.That(StartupCheck.ShouldNotify(widened, Prefs), Is.True);
         }
 
@@ -291,8 +291,8 @@ namespace Hissal.AgentSkillsSync.Tests
                 ["code-review"] = Path.Combine(FixturesRoot, "nested"),
             });
 
-            Assert.That(SyncStatus.Read(_project, selected: selected).MissingSkills, Is.Empty);
-            Assert.That(SyncStatus.Read(_project).MissingSkills, Is.EqualTo(new[] { "code-review", "tdd" }));
+            Assert.That(SyncStatus.Read(_project, selected: selected).OutOfSyncSkills, Is.Empty);
+            Assert.That(SyncStatus.Read(_project).OutOfSyncSkills, Is.EqualTo(new[] { "code-review", "tdd" }));
         }
     }
 }

@@ -11,7 +11,7 @@ namespace Hissal.AgentSkillsSync.Tests
         const string AgentsPath = ".agents/skills";
         const string ClaudePath = ".claude/skills";
 
-        static FolderLayout Table => FolderLayout.Default;
+        static FolderLayout Layout => FolderLayout.Default;
 
         static Lockfile Lock(params string[] names) =>
             new Lockfile(names.Select(n => new LockedSkill(n, "owner/repo", "github", $"skills/{n}/SKILL.md", Hash)).ToList());
@@ -39,7 +39,7 @@ namespace Hissal.AgentSkillsSync.Tests
                     managed.Add(name);
                     hashes[name] = Hash;
                 }
-                states.Add(new FolderState(Table.Find(parts[0]), present, managed, hashes));
+                states.Add(new FolderState(Layout.Find(parts[0]), present, managed, hashes));
             }
             return new ProjectState(states);
         }
@@ -47,7 +47,7 @@ namespace Hissal.AgentSkillsSync.Tests
         /// <summary>Folders (comma-separated) whose agents have <c>tdd</c> at user scope; empty = none.</summary>
         static UserScopeState UserScope(string folders) =>
             new UserScopeState(Paths(folders).Select(p =>
-                new UserScopeCopy(Table.Find(p), "tdd", "/home/" + p + "/tdd", p == ClaudePath ? "~/.claude/skills" : "~/.codex/skills")));
+                new UserScopeCopy(Layout.Find(p), "tdd", "/home/" + p + "/tdd", p == ClaudePath ? "~/.claude/skills" : "~/.codex/skills")));
 
         /// <summary>Folders (comma-separated) where the contributor skips <c>tdd</c>; empty = none.</summary>
         static SkipChoices Skips(string folders) =>
@@ -55,7 +55,7 @@ namespace Hissal.AgentSkillsSync.Tests
 
         static IEnumerable<string> Paths(string list) => list.Split(',').Select(p => p.Trim()).Where(p => p.Length > 0);
 
-        static IEnumerable<SkillsFolder> Selected(string list) => Paths(list).Select(Table.Find);
+        static IEnumerable<SkillsFolder> Selected(string list) => Paths(list).Select(Layout.Find);
 
         const string Both = AgentsPath + "," + ClaudePath;
 
@@ -108,7 +108,7 @@ namespace Hissal.AgentSkillsSync.Tests
         [TestCaseSource(nameof(Cases))]
         public void Plan_SkipUserScope(string project, string selected, string found, string skipped, string[] expected)
         {
-            var plan = InstallPlanner.Plan(Lock("tdd"), Project(project.Split(';')), Table, selected: Selected(selected),
+            var plan = InstallPlanner.Plan(Lock("tdd"), Project(project.Split(';')), Layout, selected: Selected(selected),
                 userScope: UserScope(found), skips: Skips(skipped));
 
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(expected));
@@ -117,17 +117,17 @@ namespace Hissal.AgentSkillsSync.Tests
         [Test]
         public void Plan_ClaudeSkipped_DropsTheNameFromClaudesManagedListOnly()
         {
-            var plan = InstallPlanner.Plan(Lock("tdd"), Project(AgentsPath + "=tdd", ClaudePath + "=tdd"), Table,
+            var plan = InstallPlanner.Plan(Lock("tdd"), Project(AgentsPath + "=tdd", ClaudePath + "=tdd"), Layout,
                 userScope: UserScope(ClaudePath), skips: Skips(ClaudePath));
 
-            Assert.That(plan.ManagedNames[Table.Find(ClaudePath)], Is.Empty);
-            Assert.That(plan.ManagedNames[Table.Canonical], Is.EqualTo(new[] { "tdd" }));
+            Assert.That(plan.ManagedNames[Layout.Find(ClaudePath)], Is.Empty);
+            Assert.That(plan.ManagedNames[Layout.Canonical], Is.EqualTo(new[] { "tdd" }));
         }
 
         [Test]
         public void Plan_SkipUserScope_NamesWhereTheCopyWasFoundAndChangesNothing()
         {
-            var plan = InstallPlanner.Plan(Lock("tdd"), ProjectState.Empty, Table,
+            var plan = InstallPlanner.Plan(Lock("tdd"), ProjectState.Empty, Layout,
                 userScope: UserScope(ClaudePath), skips: Skips(ClaudePath));
 
             var skip = plan.Actions.Single(a => a.Kind == PlanActionKind.SkipUserScope);
@@ -140,7 +140,7 @@ namespace Hissal.AgentSkillsSync.Tests
         [Test]
         public void Plan_OnlySkippedSkillIsSkipped()
         {
-            var plan = InstallPlanner.Plan(Lock("other", "tdd"), ProjectState.Empty, Table,
+            var plan = InstallPlanner.Plan(Lock("other", "tdd"), ProjectState.Empty, Layout,
                 userScope: UserScope(ClaudePath), skips: Skips(ClaudePath));
 
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[]
@@ -154,7 +154,7 @@ namespace Hissal.AgentSkillsSync.Tests
         public void Plan_ProjectAuthoredSkillWithTheSkippedName_IsStillLinked()
         {
             // Skips cover locked skills only; a project-authored skill is the project's own.
-            var plan = InstallPlanner.Plan(Lock(), Project(AgentsPath + "=tdd?"), Table,
+            var plan = InstallPlanner.Plan(Lock(), Project(AgentsPath + "=tdd?"), Layout,
                 userScope: UserScope(ClaudePath), skips: Skips(ClaudePath));
 
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[] { "Link .claude/skills/tdd" }));

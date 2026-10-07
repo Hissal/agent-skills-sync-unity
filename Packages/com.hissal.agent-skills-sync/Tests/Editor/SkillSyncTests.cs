@@ -332,7 +332,7 @@ namespace Hissal.AgentSkillsSync.Tests
 
             var status = SyncStatus.Read(_project);
 
-            Assert.That(status.MissingSkills, Is.Empty, "a Latest copy that differs from the lock is not out of sync");
+            Assert.That(status.OutOfSyncSkills, Is.Empty, "a Latest copy that differs from the lock is not out of sync");
             Assert.That(StartupCheck.ShouldNotify(status, LocalPrefs.Load(_project)), Is.False);
         }
 

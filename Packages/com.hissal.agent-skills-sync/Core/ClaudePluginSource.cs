@@ -29,10 +29,6 @@ namespace Hissal.AgentSkillsSync
 
         const string SkillFileName = UserScopeLocationSource.SkillFileName;
 
-        static readonly bool IgnoreCase = Path.DirectorySeparatorChar == '\\';
-        static readonly StringComparer PathComparer = IgnoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        static readonly StringComparison PathComparison = IgnoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-
         readonly string _projectRoot;
 
         /// <param name="projectRoot">
@@ -79,7 +75,7 @@ namespace Hissal.AgentSkillsSync
                 var name = Member(plugin.Manifest, "name") as string ?? plugin.Id.Split('@')[0];
                 foreach (var skill in SkillFolders(plugin.InstallPath, plugin.Manifest))
                 {
-                    var skillName = PathComparer.Equals(skill, plugin.InstallPath) ? name : Path.GetFileName(skill);
+                    var skillName = Paths.Comparer.Equals(skill, plugin.InstallPath) ? name : Path.GetFileName(skill);
                     copies.Add(new UserScopeCopy(folder, skillName, skill, "plugin " + plugin.Id,
                         $"Claude Code, as /{name}:{skillName}", plugin.Id));
                 }
@@ -183,7 +179,7 @@ namespace Hissal.AgentSkillsSync
 
         bool IsThisProject(List<KeyValuePair<string, object>> record) =>
             _projectRoot != null && Member(record, "projectPath") is string path && path.Length > 0 &&
-            PathComparer.Equals(Normalize(path), _projectRoot);
+            Paths.Comparer.Equals(Normalize(path), _projectRoot);
 
         /// <summary>
         /// The marketplaces' plugin entries, read from each marketplace's <c>marketplace.json</c> on disk. Found through
@@ -267,11 +263,11 @@ namespace Hissal.AgentSkillsSync
             foreach (var entry in entries.OfType<string>())
             {
                 var full = Normalize(Path.Combine(installPath, entry.Replace('/', Path.DirectorySeparatorChar)));
-                if (PathComparer.Equals(full, installPath) || full.StartsWith(installPath + Path.DirectorySeparatorChar, PathComparison))
+                if (Paths.Comparer.Equals(full, installPath) || full.StartsWith(installPath + Path.DirectorySeparatorChar, Paths.Comparison))
                     roots.Add(full);
             }
 
-            var seen = new HashSet<string>(PathComparer);
+            var seen = new HashSet<string>(Paths.Comparer);
             foreach (var root in roots)
             {
                 if (!Directory.Exists(root)) continue;

@@ -13,12 +13,12 @@ namespace Hissal.AgentSkillsSync
     {
         /// <param name="noFolderSelected">The contributor selected no skills folder, so the check stays quiet.</param>
         /// <param name="selectedFolders">Relative paths of the skills folders the status was read for.</param>
-        public SyncStatus(string lockHash, IEnumerable<string> missingSkills, bool noFolderSelected = false,
+        public SyncStatus(string lockHash, IEnumerable<string> outOfSyncSkills, bool noFolderSelected = false,
             IEnumerable<string> selectedFolders = null)
         {
             LockHash = lockHash;
             NoFolderSelected = noFolderSelected;
-            MissingSkills = Sorted(missingSkills);
+            OutOfSyncSkills = Sorted(outOfSyncSkills);
             SelectedFolders = Sorted(selectedFolders);
         }
 
@@ -34,7 +34,7 @@ namespace Hissal.AgentSkillsSync
         /// An installed copy is not hashed, so an outdated one is not listed: a lock change surfaces through
         /// <see cref="LockHash"/> instead.
         /// </summary>
-        public IReadOnlyList<string> MissingSkills { get; }
+        public IReadOnlyList<string> OutOfSyncSkills { get; }
 
         /// <summary>True when no skills folder is selected: nothing is installed and the startup check never notifies.</summary>
         public bool NoFolderSelected { get; }
@@ -46,49 +46,44 @@ namespace Hissal.AgentSkillsSync
         /// Identifies this status; a decline holds while the status keeps the same fingerprint. Includes the
         /// selected folders, so changing the selection (such as accepting an offered folder) lifts a decline.
         /// </summary>
-        public string Fingerprint => LockHash + "|" + string.Join(",", MissingSkills) + "|" + string.Join(",", SelectedFolders);
+        public string Fingerprint => LockHash + "|" + string.Join(",", OutOfSyncSkills) + "|" + string.Join(",", SelectedFolders);
+
+        /// <summary>Shorthand for <see cref="Read(string, MachineChoices)"/> with the choices given one by one.</summary>
+        public static SyncStatus Read(string projectRoot, FolderLayout layout = null, IEnumerable<SkillsFolder> selected = null,
+            UserScopeState userScope = null, SkipChoices skips = null) =>
+            Read(projectRoot, new MachineChoices(layout, selected, userScope, skips));
 
         /// <summary>
         /// Reads the project's status; null when there is no lockfile. An unusable lockfile reports
-        /// no missing skills, so only a hash change surfaces it.
+        /// no out-of-sync skills, so only a hash change surfaces it.
         /// </summary>
-        /// <param name="selected">The folders this machine installs into (see <see cref="FolderSelection.Effective"/>); null = every folder in the layout.</param>
-        /// <param name="userScope">The user-scope copies found (see <see cref="UserScopeScanner"/>); null = none.</param>
-        /// <param name="skips">The contributor's per-folder skip choices; null = none. A skipped skill does not count as missing.</param>
-        public static SyncStatus Read(string projectRoot, FolderLayout layout = null, IEnumerable<SkillsFolder> selected = null,
-            UserScopeState userScope = null, SkipChoices skips = null)
+        /// <param name="choices">This machine's layout, folder selection, user-scope copies and skips. A skipped skill does not count as out of sync.</param>
+        public static SyncStatus Read(string projectRoot, MachineChoices choices)
         {
             var lockHash = LockfileHash.Compute(projectRoot);
             if (lockHash == null) return null;
 
-            layout = layout ?? FolderLayout.Default;
-            var selection = selected?.ToList();
+            choices = choices ?? MachineChoices.Default;
+            var layout = choices.Layout;
+            var selection = choices.Selected;
             var noFolderSelected = selection != null && !layout.Folders.Any(f => selection.Any(s => s?.RelativePath == f.RelativePath));
-            IEnumerable<string> missing;
+            IEnumerable<string> outOfSync;
             try
             {
+                // The quick scan has no hashes: any installed copy counts as current.
                 var project = ProjectScanner.Scan(projectRoot, layout, readContents: false);
-                var plan = InstallPlanner.Plan(Lockfile.Load(projectRoot), project, layout, PresentCopyIsCurrent.Instance,
-                    selected: selection, userScope: userScope, skips: skips);
+                var plan = InstallPlanner.Plan(Lockfile.Load(projectRoot), project, choices, FixedCheck.AlwaysCurrent);
                 // A left-alone (foreign) entry is never synced, so it does not count as out of sync.
-                missing = plan.Actions.Where(a => a.ChangesProject).Select(a => a.SkillName);
+                outOfSync = plan.Actions.Where(a => a.ChangesProject).Select(a => a.SkillName);
             }
             catch (LockfileException)
             {
-                missing = null;
+                outOfSync = null;
             }
             var selectedFolders = layout.Folders
                 .Where(f => selection == null || selection.Any(s => s?.RelativePath == f.RelativePath))
                 .Select(f => f.RelativePath);
-            return new SyncStatus(lockHash, missing, noFolderSelected, selectedFolders);
-        }
-
-        /// <summary>The quick scan has no hashes: any installed copy counts as current.</summary>
-        sealed class PresentCopyIsCurrent : IInstalledCopyCheck
-        {
-            public static readonly PresentCopyIsCurrent Instance = new PresentCopyIsCurrent();
-
-            public bool IsCurrent(LockedSkill skill, string installedHash) => true;
+            return new SyncStatus(lockHash, outOfSync, noFolderSelected, selectedFolders);
         }
     }
 }

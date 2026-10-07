@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -42,15 +41,11 @@ namespace Hissal.AgentSkillsSync.Editor
 
         static string ProjectRoot => Path.GetDirectoryName(Application.dataPath);
 
-        static FolderLayout Table => FolderLayout.Default;
+        static FolderLayout Layout => FolderLayout.Default;
 
-        static IReadOnlyList<SkillsFolder> SelectedFolders() =>
-            FolderSelection.Effective(LocalPrefs.Load(ProjectRoot), Table, UserEnvironment.Current);
-
-        static UserScopeState ScanUserScope(IReadOnlyList<SkillsFolder> selected) =>
-            UserScopeScanner.Scan(selected, UserEnvironment.Current, UserScopeScanner.DefaultSourcesFor(ProjectRoot));
-
-        static SkipChoices Skips() => SkipChoices.From(LocalPrefs.Load(ProjectRoot));
+        /// <summary>This machine's folder selection, user-scope copies and skips, as stored now.</summary>
+        static MachineChoices Choices() =>
+            MachineChoices.Read(ProjectRoot, LocalPrefs.Load(ProjectRoot), UserEnvironment.Current, Layout);
 
         [MenuItem("Window/Agent Skills Sync")]
         public static void Open() => GetWindow<SkillsSyncWindow>(Title).Show();
@@ -115,7 +110,8 @@ namespace Hissal.AgentSkillsSync.Editor
             _lockfile = null;
             ShowStatus(null, HelpBoxMessageType.None);
 
-            var selected = SelectedFolders();
+            var choices = Choices();
+            var selected = choices.Selected;
             ShowFolders(selected);
 
             try
@@ -124,10 +120,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 ShowMode();
 
                 var lockfile = Lockfile.Load(ProjectRoot);
-                var userScope = ScanUserScope(selected);
-                var skips = Skips();
-                var sync = new SkillSync(ProjectRoot, fetcher: null, selected: selected, userScope: userScope, skips: skips,
-                    mode: _installMode);
+                var sync = new SkillSync(ProjectRoot, fetcher: null, choices: choices, mode: _installMode);
                 var plan = sync.Plan(lockfile);
                 var differs = _installMode == InstallMode.Latest
                     ? new HashSet<string>(sync.InstalledDiffersFromLock(lockfile))
@@ -136,11 +129,11 @@ namespace Hissal.AgentSkillsSync.Editor
                 var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
                 foreach (var skill in lockfile.Skills)
                 {
-                    _skillList.Add(SkillRow(skill, selected.Count == 0 ? "not installed (no folder selected)" : PendingLabel(plan, skill.Name),
+                    _skillList.Add(SkillRow(skill, selected.Count == 0 ? "not installed (no folder selected)" : SyncText.PendingLabel(plan, skill.Name),
                         _installMode, isNew.Contains(skill.Source), differs.Contains(skill.Name),
                         _failures.TryGetValue(skill.Name, out var failure) ? failure : null));
                     foreach (var folder in selected)
-                        _skillList.Add(FolderRow(skill, folder, plan, userScope, skips));
+                        _skillList.Add(FolderRow(skill, folder, plan, choices));
                 }
                 ShowNewSources(newSources);
 
@@ -199,56 +192,23 @@ namespace Hissal.AgentSkillsSync.Editor
             Refresh();
         }
 
-        /// <summary>What Sync would do to the skill, most significant first.</summary>
-        static string PendingLabel(InstallPlan plan, string skillName)
-        {
-            var kinds = plan.Actions.Where(a => a.SkillName == skillName).Select(a => a.Kind).ToList();
-            if (kinds.Contains(PlanActionKind.Install)) return "to install";
-            if (kinds.Contains(PlanActionKind.Update)) return "to update";
-            if (kinds.Contains(PlanActionKind.Link)) return "to link";
-            if (kinds.Contains(PlanActionKind.LeaveForeign)) return "left alone (not managed)";
-            if (kinds.Contains(PlanActionKind.SkipUserScope))
-                return kinds.Contains(PlanActionKind.WarnUserScopeDiffers)
-                    ? "skipped where you have your own copy (differs from the lock)"
-                    : "skipped where you have your own copy";
-            return "installed";
-        }
-
-        /// <summary>What Sync does to the skill in one folder, from the plan.</summary>
-        static string FolderStatus(InstallPlan plan, LockedSkill skill, SkillsFolder folder, bool skipStored, bool foundAtUserScope)
-        {
-            var kinds = plan.Actions.Where(a => a.SkillName == skill.Name && a.Folder.RelativePath == folder.RelativePath)
-                .Select(a => a.Kind).ToList();
-            if (kinds.Contains(PlanActionKind.SkipUserScope))
-                return kinds.Contains(PlanActionKind.Unlink) || kinds.Contains(PlanActionKind.Remove)
-                    ? "skipped (project copy removed on Sync)"
-                    : "skipped (using your copy)";
-            if (kinds.Contains(PlanActionKind.Install)) return "to install";
-            if (kinds.Contains(PlanActionKind.Update)) return "to update";
-            if (kinds.Contains(PlanActionKind.Link)) return "to link";
-            if (kinds.Contains(PlanActionKind.LeaveForeign)) return "left alone (not managed)";
-            if (skipStored && foundAtUserScope && folder.Role == SkillsFolderRole.Canonical)
-                return "installed (kept: another selected folder links to it)";
-            return "installed";
-        }
-
         /// <summary>
         /// The skill's status in one selected folder, where its agents already have it at user scope, and a toggle to
         /// skip the project copy there. The toggle is shown while a user-scope copy is found or a skip is stored.
         /// </summary>
-        VisualElement FolderRow(LockedSkill skill, SkillsFolder folder, InstallPlan plan, UserScopeState userScope, SkipChoices skips)
+        VisualElement FolderRow(LockedSkill skill, SkillsFolder folder, InstallPlan plan, MachineChoices choices)
         {
-            var copies = userScope.CopiesOf(folder, skill.Name);
-            var skipStored = skips.IsSkipped(folder, skill.Name);
+            var copies = choices.UserScope.CopiesOf(folder, skill.Name);
+            var skipStored = choices.Skips.IsSkipped(folder, skill.Name);
             var container = new VisualElement { style = { marginLeft = 16, marginBottom = 2 } };
             var row = new VisualElement { style = { flexDirection = FlexDirection.Row } };
             row.Add(new Label(folder.RelativePath) { style = { width = 184 } });
-            row.Add(new Label(FolderStatus(plan, skill, folder, skipStored, copies.Count > 0)) { style = { flexGrow = 1 } });
+            row.Add(new Label(SyncText.FolderStatus(plan, skill, folder, skipStored, copies.Count > 0)) { style = { flexGrow = 1 } });
             container.Add(row);
 
             if (copies.Count > 0)
                 container.Add(new Label("The project also provides this skill, and you already have it " +
-                                        string.Join(", ", copies.Select(Where)) + ".")
+                                        string.Join(", ", copies.Select(SyncText.Where)) + ".")
                 {
                     tooltip = string.Join("\n", copies.Select(c => c.Agents == null ? c.Path : $"{c.Path} - read by {c.Agents}")),
                     style = { whiteSpace = WhiteSpace.Normal, color = new Color(0.9f, 0.6f, 0.1f) },
@@ -260,7 +220,7 @@ namespace Hissal.AgentSkillsSync.Editor
             var differs = plan.Actions.FirstOrDefault(a => a.Kind == PlanActionKind.WarnUserScopeDiffers &&
                                                           a.SkillName == skill.Name && a.Folder.RelativePath == folder.RelativePath);
             if (differs != null)
-                container.Add(new HelpBox(DiffersMessage(differs), HelpBoxMessageType.Warning)
+                container.Add(new HelpBox(SyncText.DiffersMessage(differs), HelpBoxMessageType.Warning)
                     { tooltip = string.Join("\n", differs.UserScopeCopies.Select(c => c.Path)) });
 
             if (copies.Count > 0 || skipStored)
@@ -276,14 +236,6 @@ namespace Hissal.AgentSkillsSync.Editor
             }
             return container;
         }
-
-        /// <summary>Where a user-scope copy comes from, as the end of "you already have it ...".</summary>
-        static string Where(UserScopeCopy copy) =>
-            copy.Plugin != null ? $"provided by plugin {copy.Plugin}" : $"at {copy.FoundIn}";
-
-        static string DiffersMessage(PlanAction warning) =>
-            $"Your {warning.SkillName} {string.Join(", ", warning.UserScopeCopies.Select(Where))} differs from the version " +
-            $"locked in {Lockfile.FileName}, so agents reading {warning.Folder.RelativePath} don't run what your teammates run.";
 
         void SaveSkip(SkillsFolder folder, string skillName, bool skip)
         {
@@ -309,7 +261,7 @@ namespace Hissal.AgentSkillsSync.Editor
             row.Add(new Label(skill.Name) { style = { width = 200, unityFontStyleAndWeight = FontStyle.Bold } });
             row.Add(new Label(skill.Source) { style = { flexGrow = 1 } });
             if (newSource) row.Add(new Label("NEW SOURCE") { style = { unityFontStyleAndWeight = FontStyle.Bold, color = new Color(0.9f, 0.6f, 0.1f), marginRight = 8 } });
-            if (failure == null && !GitHubSkillFetcher.CanVerify(skill))
+            if (failure == null && !LockVerification.CanVerify(skill))
                 row.Add(mode == InstallMode.Pinned
                     ? new Label("can't verify lock hash")
                     {
@@ -328,7 +280,7 @@ namespace Hissal.AgentSkillsSync.Editor
                               $"Run `npx skills update` and commit {Lockfile.FileName} to lock it.",
                     style = { marginRight = 8, color = new StyleColor(new Color(0.9f, 0.7f, 0.2f)) },
                 });
-            row.Add(new Label(failure != null ? FailureLabel(failure.Failure) : pending)
+            row.Add(new Label(failure != null ? SyncText.FailureLabel(failure.Failure) : pending)
             {
                 style = { color = failure != null ? new StyleColor(new Color(0.9f, 0.3f, 0.3f)) : new StyleColor(StyleKeyword.Null) },
             });
@@ -339,25 +291,13 @@ namespace Hissal.AgentSkillsSync.Editor
             return container;
         }
 
-        static string FailureLabel(SkillFetchFailure failure)
-        {
-            switch (failure)
-            {
-                case SkillFetchFailure.Download: return "download failed";
-                case SkillFetchFailure.HashMismatch: return "changed since locked";
-                case SkillFetchFailure.Unverifiable: return "can't verify lock hash";
-                case SkillFetchFailure.SourceUnusable: return "not found in source";
-                default: return "fetch failed";
-            }
-        }
-
-        /// <summary>One toggle per folder-table entry; a change is stored at once and re-plans.</summary>
+        /// <summary>One toggle per folder-layout entry; a change is stored at once and re-plans.</summary>
         void ShowFolders(IReadOnlyList<SkillsFolder> selected)
         {
             var environment = UserEnvironment.Current;
             var chosen = new HashSet<string>(selected.Select(f => f.RelativePath), StringComparer.Ordinal);
             var toggles = new List<KeyValuePair<SkillsFolder, Toggle>>();
-            foreach (var folder in Table.Folders)
+            foreach (var folder in Layout.Folders)
             {
                 var toggle = new Toggle($"{folder.RelativePath}  ({folder.Label})")
                 {
@@ -383,7 +323,7 @@ namespace Hissal.AgentSkillsSync.Editor
             try
             {
                 var prefs = LocalPrefs.Load(ProjectRoot);
-                FolderSelection.Save(prefs, Table, selected, environment);
+                FolderSelection.Save(prefs, Layout, selected, environment);
                 prefs.Save();
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
@@ -427,9 +367,7 @@ namespace Hissal.AgentSkillsSync.Editor
 
             SyncSummary summary = null;
             Lockfile lockfile = null;
-            IReadOnlyList<SkillsFolder> selected = null;
-            UserScopeState userScope = null;
-            SkipChoices skips = null;
+            MachineChoices choices = null;
             try
             {
                 // Re-check against the lockfile as it is now: it may have gained a source since the window listed it.
@@ -451,13 +389,10 @@ namespace Hissal.AgentSkillsSync.Editor
                 }
 
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
-                selected = SelectedFolders();
-                userScope = ScanUserScope(selected);
-                skips = Skips();
+                choices = Choices();
                 // Run the very instance that passed the check, never a fresh read of the file.
-                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher(mode: mode), selected: selected, userScope: userScope,
-                    skips: skips, mode: mode).Run(lockfile);
-                ShowSummary(Describe(summary), summary.UserScopeDiffers.Count > 0 ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info);
+                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher(mode: mode), choices, mode: mode).Run(lockfile);
+                ShowSummary(SyncText.Describe(summary), summary.UserScopeDiffers.Count > 0 ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info);
             }
             catch (SyncAbortedException e)
             {
@@ -480,11 +415,11 @@ namespace Hissal.AgentSkillsSync.Editor
             {
                 try
                 {
-                    RecordSynced(lockfile, selected, userScope, skips);
+                    RecordSynced(lockfile, choices);
                 }
                 catch (Exception e) when (e is LockfileException || e is IOException || e is UnauthorizedAccessException)
                 {
-                    ShowSummary(Describe(summary) + "\nWarning: the sync finished, but saving the out-of-sync notification state failed: "
+                    ShowSummary(SyncText.Describe(summary) + "\nWarning: the sync finished, but saving the out-of-sync notification state failed: "
                         + e.Message, HelpBoxMessageType.Warning);
                     Debug.LogException(e);
                 }
@@ -498,49 +433,13 @@ namespace Hissal.AgentSkillsSync.Editor
         /// its sources so they are not flagged as new again, and the folder selection synced into (which
         /// confirms an autofilled one). Only after a successful sync.
         /// </summary>
-        static void RecordSynced(Lockfile lockfile, IReadOnlyList<SkillsFolder> selected, UserScopeState userScope, SkipChoices skips)
+        static void RecordSynced(Lockfile lockfile, MachineChoices choices)
         {
             var prefs = LocalPrefs.Load(ProjectRoot);
-            FolderSelection.Save(prefs, Table, selected, UserEnvironment.Current);
-            StartupCheck.RecordSynced(prefs, SyncStatus.Read(ProjectRoot, Table, selected, userScope, skips));
+            FolderSelection.Save(prefs, Layout, choices.Selected, UserEnvironment.Current);
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(ProjectRoot, choices));
             SourceConsent.RecordSynced(prefs, lockfile);
             prefs.Save();
-        }
-
-        static string Describe(SyncSummary summary)
-        {
-            var text = new StringBuilder();
-            if (summary.NothingChanged) text.AppendLine("Everything is already in sync.");
-            else DescribeChanges(summary, text);
-            if (summary.DiffersFromLock.Count > 0)
-                text.AppendLine($"Differs from lock ({summary.DiffersFromLock.Count}): {string.Join(", ", summary.DiffersFromLock)}. " +
-                                $"Installed from upstream; run `npx skills update` and commit {Lockfile.FileName} to lock them.");
-            foreach (var warning in summary.UserScopeDiffers)
-                text.AppendLine("Warning: " + DiffersMessage(warning));
-            return text.ToString().TrimEnd();
-        }
-
-        static void DescribeChanges(SyncSummary summary, StringBuilder text)
-        {
-            Line(text, "Installed", summary.Installed);
-            Line(text, "Updated", summary.Updated);
-            Line(text, "Removed", summary.Removed);
-            Line(text, "Skipped (not managed by the tool)", summary.Skipped);
-            if (summary.SkippedForUserScope.Count > 0)
-                text.AppendLine($"Skipped in favour of your user-scope copy ({summary.SkippedForUserScope.Count}): {string.Join(", ", summary.SkippedForUserScope)}");
-            if (summary.Linked.Count > 0) text.AppendLine($"Linked ({summary.Linked.Count}): {string.Join(", ", summary.Linked)}");
-            if (summary.Unlinked.Count > 0) text.AppendLine($"Unlinked ({summary.Unlinked.Count}): {string.Join(", ", summary.Unlinked)}");
-            var junctions = summary.LinkedBy(LinkMethod.Junction);
-            if (junctions.Count > 0) text.AppendLine($"Linked as junctions (symlinks unavailable): {string.Join(", ", junctions)}");
-            var copies = summary.LinkedBy(LinkMethod.Copy);
-            if (copies.Count > 0) text.AppendLine($"Linked as plain copies (symlinks and junctions unavailable; re-sync after edits): {string.Join(", ", copies)}");
-        }
-
-        static void Line(StringBuilder text, string label, IReadOnlyList<string> names)
-        {
-            text.Append($"{label}: {names.Count}");
-            if (names.Count > 0) text.Append(" (").Append(string.Join(", ", names)).Append(')');
-            text.AppendLine();
         }
 
         void ShowStatus(string message, HelpBoxMessageType type)
