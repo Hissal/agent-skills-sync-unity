@@ -107,8 +107,8 @@ Teammates install the package with the project, and the startup check offers the
 ### The generated `.gitignore` files
 
 The tool writes a `.gitignore` in each skills folder it installs into, and keeps it current in any skills folder that
-already has one. Its marked block lists every locked skill, and in `.claude/skills` also the project-authored skills
-it links there:
+already has one. Its marked block lists every locked `github` skill, and in `.claude/skills` also the project-authored
+skills it links there:
 
 ```gitignore
 # >>> Agent Skills Sync: managed from skills-lock.json; do not edit this block.
@@ -118,6 +118,8 @@ it links there:
 ```
 
 - Installed skills stay out of git, and project-authored skills beside them stay tracked.
+- A lock entry with another source type (such as a `unity-package` skill) is not listed, since the tool neither
+  installs nor links it. Whatever places it (a commit, the package itself) decides whether git tracks it.
 - The block depends only on `skills-lock.json` and the committed project-authored skills, never on one machine's
   folder selection or skips. Every teammate's sync writes the same block, so it never shows up as a local change.
 - What the tool installed **on this machine**, and therefore owns, is recorded in `UserSettings/AgentSkillsSync.json`.

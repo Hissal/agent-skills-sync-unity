@@ -175,12 +175,13 @@ namespace Hissal.AgentSkillsSync
                 }
             }
 
-            // The committed .gitignore blocks: the same on every machine, whatever it selected or manages.
+            // The committed .gitignore blocks: the same on every machine, whatever it selected or manages. They list
+            // only what the tool may install or link; an unsupported entry's placer decides whether git tracks it.
             var ignored = new Dictionary<SkillsFolder, IReadOnlyList<string>>();
             foreach (var folder in layout.Folders)
             {
                 if (!Needed(folder) && project.For(folder).Ignored.Count == 0) continue;
-                var names = new SortedSet<string>(locked, StringComparer.Ordinal);
+                var names = new SortedSet<string>(lockfile.Skills.Select(s => s.Name), StringComparer.Ordinal);
                 if (folder.Role == SkillsFolderRole.Link) names.UnionWith(projectAuthored);
                 ignored[folder] = names.ToList();
             }

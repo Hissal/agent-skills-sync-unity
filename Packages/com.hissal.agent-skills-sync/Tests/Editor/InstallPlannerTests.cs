@@ -260,6 +260,38 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(plan.Actions, Is.Empty);
             Assert.That(ManagedIn(plan, Claude), Is.Empty);
+            Assert.That(plan.IgnoredNames.Values, Has.All.Empty);
+        }
+
+        [Test]
+        public void Plan_GithubAndUnsupportedLockEntries_IgnoresOnlyTheGithubSkill()
+        {
+            var project = Project(
+                new FolderState(Agents, entries: new[] { "unity-pipeline" }, managed: null),
+                new FolderState(Claude, entries: null, managed: null));
+            var lockfile = new Lockfile(new[] { Skill("tdd") }, new[] { new UnsupportedSkill("unity-pipeline", "unity-package") });
+
+            var plan = InstallPlanner.Plan(lockfile, project, FolderLayout.Default);
+
+            Assert.That(plan.IgnoredNames.Keys, Is.EquivalentTo(new[] { Agents, Claude }));
+            Assert.That(plan.IgnoredNames.Values, Has.All.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
+        public void Plan_GitignoreBlockListingAnUnsupportedEntry_DropsItAndHasChanges()
+        {
+            var layout = FolderLayout.Default;
+            var tdd = new[] { "tdd" };
+            var project = new ProjectState(layout.Folders.Select(f =>
+                new FolderState(f, tdd, tdd, installedHashes: new Dictionary<string, string> { ["tdd"] = LockedHash },
+                    ignored: new[] { "tdd", "unity-pipeline" })));
+            var lockfile = new Lockfile(new[] { Skill("tdd") }, new[] { new UnsupportedSkill("unity-pipeline", "unity-package") });
+
+            var plan = InstallPlanner.Plan(lockfile, project, layout);
+
+            Assert.That(plan.Actions, Is.Empty);
+            Assert.That(plan.HasChanges, Is.True);
+            Assert.That(plan.IgnoredNames.Values, Has.All.EqualTo(tdd));
         }
 
         [Test]
