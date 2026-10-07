@@ -35,16 +35,21 @@ namespace Hissal.AgentSkillsSync
     /// </remarks>
     public static class InstallPlanner
     {
+        /// <summary>Shorthand for <see cref="Plan(Lockfile, ProjectState, MachineChoices, IInstalledCopyCheck)"/> with the choices given one by one.</summary>
         /// <param name="installedCopyCheck">Whether a managed canonical copy is current; defaults to <see cref="LockedHashCheck"/>.</param>
-        /// <param name="selected">The folders this machine installs into (see <see cref="FolderSelection"/>); null = every folder in the layout.</param>
-        /// <param name="userScope">The user-scope copies found (see <see cref="UserScopeScanner"/>); null = none.</param>
-        /// <param name="skips">The contributor's per-folder skip choices; null = none.</param>
         public static InstallPlan Plan(Lockfile lockfile, ProjectState project, FolderLayout layout,
             IInstalledCopyCheck installedCopyCheck = null, IEnumerable<SkillsFolder> selected = null,
-            UserScopeState userScope = null, SkipChoices skips = null)
+            UserScopeState userScope = null, SkipChoices skips = null) =>
+            Plan(lockfile, project, new MachineChoices(layout, selected, userScope, skips), installedCopyCheck);
+
+        /// <param name="choices">This machine's layout, folder selection, user-scope copies and skips.</param>
+        /// <param name="installedCopyCheck">Whether a managed canonical copy is current; defaults to <see cref="LockedHashCheck"/>.</param>
+        public static InstallPlan Plan(Lockfile lockfile, ProjectState project, MachineChoices choices,
+            IInstalledCopyCheck installedCopyCheck = null)
         {
-            userScope = userScope ?? UserScopeState.Empty;
-            skips = skips ?? SkipChoices.None;
+            var layout = choices.Layout;
+            var userScope = choices.UserScope;
+            var skips = choices.Skips;
             var check = installedCopyCheck ?? LockedHashCheck.Instance;
             var actions = new List<PlanAction>();
             var managed = layout.Folders.ToDictionary(f => f, f => new SortedSet<string>(StringComparer.Ordinal));
@@ -53,7 +58,7 @@ namespace Hissal.AgentSkillsSync
             var removalOrder = layout.Folders.OrderBy(f => f.Role == SkillsFolderRole.Canonical ? 1 : 0).ToList();
 
             var selectedPaths = new HashSet<string>(
-                (selected ?? layout.Folders).Where(f => f != null).Select(f => f.RelativePath), StringComparer.Ordinal);
+                (choices.Selected ?? layout.Folders).Where(f => f != null).Select(f => f.RelativePath), StringComparer.Ordinal);
             var anySelected = layout.Folders.Any(f => selectedPaths.Contains(f.RelativePath));
             // Whether the tool keeps entries in the folder: a selected link folder, or the canonical folder while any
             // selected folder needs the project copy.

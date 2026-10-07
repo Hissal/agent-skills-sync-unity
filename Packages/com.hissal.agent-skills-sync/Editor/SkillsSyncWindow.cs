@@ -44,13 +44,9 @@ namespace Hissal.AgentSkillsSync.Editor
 
         static FolderLayout Table => FolderLayout.Default;
 
-        static IReadOnlyList<SkillsFolder> SelectedFolders() =>
-            FolderSelection.Effective(LocalPrefs.Load(ProjectRoot), Table, UserEnvironment.Current);
-
-        static UserScopeState ScanUserScope(IReadOnlyList<SkillsFolder> selected) =>
-            UserScopeScanner.Scan(selected, UserEnvironment.Current, UserScopeScanner.DefaultSourcesFor(ProjectRoot));
-
-        static SkipChoices Skips() => SkipChoices.From(LocalPrefs.Load(ProjectRoot));
+        /// <summary>This machine's folder selection, user-scope copies and skips, as stored now.</summary>
+        static MachineChoices Choices() =>
+            MachineChoices.Read(ProjectRoot, LocalPrefs.Load(ProjectRoot), UserEnvironment.Current, Table);
 
         [MenuItem("Window/Agent Skills Sync")]
         public static void Open() => GetWindow<SkillsSyncWindow>(Title).Show();
@@ -115,7 +111,8 @@ namespace Hissal.AgentSkillsSync.Editor
             _lockfile = null;
             ShowStatus(null, HelpBoxMessageType.None);
 
-            var selected = SelectedFolders();
+            var choices = Choices();
+            var selected = choices.Selected;
             ShowFolders(selected);
 
             try
@@ -124,10 +121,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 ShowMode();
 
                 var lockfile = Lockfile.Load(ProjectRoot);
-                var userScope = ScanUserScope(selected);
-                var skips = Skips();
-                var sync = new SkillSync(ProjectRoot, fetcher: null, selected: selected, userScope: userScope, skips: skips,
-                    mode: _installMode);
+                var sync = new SkillSync(ProjectRoot, fetcher: null, choices: choices, mode: _installMode);
                 var plan = sync.Plan(lockfile);
                 var differs = _installMode == InstallMode.Latest
                     ? new HashSet<string>(sync.InstalledDiffersFromLock(lockfile))
@@ -140,7 +134,7 @@ namespace Hissal.AgentSkillsSync.Editor
                         _installMode, isNew.Contains(skill.Source), differs.Contains(skill.Name),
                         _failures.TryGetValue(skill.Name, out var failure) ? failure : null));
                     foreach (var folder in selected)
-                        _skillList.Add(FolderRow(skill, folder, plan, userScope, skips));
+                        _skillList.Add(FolderRow(skill, folder, plan, choices));
                 }
                 ShowNewSources(newSources);
 
@@ -236,10 +230,10 @@ namespace Hissal.AgentSkillsSync.Editor
         /// The skill's status in one selected folder, where its agents already have it at user scope, and a toggle to
         /// skip the project copy there. The toggle is shown while a user-scope copy is found or a skip is stored.
         /// </summary>
-        VisualElement FolderRow(LockedSkill skill, SkillsFolder folder, InstallPlan plan, UserScopeState userScope, SkipChoices skips)
+        VisualElement FolderRow(LockedSkill skill, SkillsFolder folder, InstallPlan plan, MachineChoices choices)
         {
-            var copies = userScope.CopiesOf(folder, skill.Name);
-            var skipStored = skips.IsSkipped(folder, skill.Name);
+            var copies = choices.UserScope.CopiesOf(folder, skill.Name);
+            var skipStored = choices.Skips.IsSkipped(folder, skill.Name);
             var container = new VisualElement { style = { marginLeft = 16, marginBottom = 2 } };
             var row = new VisualElement { style = { flexDirection = FlexDirection.Row } };
             row.Add(new Label(folder.RelativePath) { style = { width = 184 } });
@@ -427,9 +421,7 @@ namespace Hissal.AgentSkillsSync.Editor
 
             SyncSummary summary = null;
             Lockfile lockfile = null;
-            IReadOnlyList<SkillsFolder> selected = null;
-            UserScopeState userScope = null;
-            SkipChoices skips = null;
+            MachineChoices choices = null;
             try
             {
                 // Re-check against the lockfile as it is now: it may have gained a source since the window listed it.
@@ -451,12 +443,9 @@ namespace Hissal.AgentSkillsSync.Editor
                 }
 
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
-                selected = SelectedFolders();
-                userScope = ScanUserScope(selected);
-                skips = Skips();
+                choices = Choices();
                 // Run the very instance that passed the check, never a fresh read of the file.
-                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher(mode: mode), selected: selected, userScope: userScope,
-                    skips: skips, mode: mode).Run(lockfile);
+                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher(mode: mode), choices, mode: mode).Run(lockfile);
                 ShowSummary(Describe(summary), summary.UserScopeDiffers.Count > 0 ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info);
             }
             catch (SyncAbortedException e)
@@ -480,7 +469,7 @@ namespace Hissal.AgentSkillsSync.Editor
             {
                 try
                 {
-                    RecordSynced(lockfile, selected, userScope, skips);
+                    RecordSynced(lockfile, choices);
                 }
                 catch (Exception e) when (e is LockfileException || e is IOException || e is UnauthorizedAccessException)
                 {
@@ -498,11 +487,11 @@ namespace Hissal.AgentSkillsSync.Editor
         /// its sources so they are not flagged as new again, and the folder selection synced into (which
         /// confirms an autofilled one). Only after a successful sync.
         /// </summary>
-        static void RecordSynced(Lockfile lockfile, IReadOnlyList<SkillsFolder> selected, UserScopeState userScope, SkipChoices skips)
+        static void RecordSynced(Lockfile lockfile, MachineChoices choices)
         {
             var prefs = LocalPrefs.Load(ProjectRoot);
-            FolderSelection.Save(prefs, Table, selected, UserEnvironment.Current);
-            StartupCheck.RecordSynced(prefs, SyncStatus.Read(ProjectRoot, Table, selected, userScope, skips));
+            FolderSelection.Save(prefs, Table, choices.Selected, UserEnvironment.Current);
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(ProjectRoot, choices));
             SourceConsent.RecordSynced(prefs, lockfile);
             prefs.Save();
         }
