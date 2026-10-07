@@ -181,3 +181,7 @@ Packages/packages-lock.json linguist-generated
 # FMOD plugin files
 **/Assets/Plugins/FMOD/**/*.bundle text eol=lf
 **/Assets/Plugins/FMOD/**/Info.plist text eol=lf
+
+# Hash fixtures: byte-exact skill folders whose hashes come from the skills CLI.
+# Never convert line endings, or the committed hashes stop matching.
+Packages/com.hissal.agent-skills-sync/Tests/Editor/Fixtures~/** -text
