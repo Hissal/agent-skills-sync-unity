@@ -24,6 +24,7 @@ namespace Hissal.AgentSkillsSync.Editor
         const string Title = "Agent Skills Sync";
 
         HelpBox _status;
+        Label _lockPath;
         VisualElement _folders;
         VisualElement _newSources;
         EnumField _mode;
@@ -39,13 +40,32 @@ namespace Hissal.AgentSkillsSync.Editor
         Lockfile _lockfile;
         readonly HashSet<string> _confirmedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        static string ProjectRoot => Path.GetDirectoryName(Application.dataPath);
+        /// <summary>The Unity project folder: holds this machine's local prefs and the committed project settings.</summary>
+        internal static string UnityProjectRoot => Path.GetDirectoryName(Application.dataPath);
+
+        /// <summary>
+        /// The folder holding <c>skills-lock.json</c> (see <see cref="Lockfile.FindRoot"/>), where the skills folders are
+        /// installed; the Unity project folder when no lock is found.
+        /// </summary>
+        internal static string SkillsRoot => Lockfile.FindRoot(UnityProjectRoot) ?? UnityProjectRoot;
+
+        /// <summary>Reads the lockfile <see cref="Lockfile.FindRoot"/> finds.</summary>
+        /// <exception cref="LockfileException">There is none, or it is unusable.</exception>
+        static Lockfile LoadLockfile()
+        {
+            var unityRoot = UnityProjectRoot;
+            if (Lockfile.FindRoot(unityRoot) == null)
+                throw new LockfileException(
+                    $"No {Lockfile.FileName} found in the Unity project folder ({unityRoot}) or the folder above it " +
+                    $"({Path.GetDirectoryName(unityRoot)}).");
+            return Lockfile.Load(SkillsRoot);
+        }
 
         static FolderLayout Layout => FolderLayout.Default;
 
         /// <summary>This machine's folder selection, user-scope copies and skips, as stored now.</summary>
         static MachineChoices Choices() =>
-            MachineChoices.Read(ProjectRoot, LocalPrefs.Load(ProjectRoot), UserEnvironment.Current, Layout);
+            MachineChoices.Read(SkillsRoot, LocalPrefs.Load(UnityProjectRoot), UserEnvironment.Current, Layout);
 
         [MenuItem("Window/Agent Skills Sync")]
         public static void Open() => GetWindow<SkillsSyncWindow>(Title).Show();
@@ -62,6 +82,8 @@ namespace Hissal.AgentSkillsSync.Editor
             _folders = new VisualElement { style = { marginTop = 2, marginBottom = 8 } };
             scroll.Add(_folders);
             scroll.Add(new Label($"Skills locked in {Lockfile.FileName}") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
+            _lockPath = new Label { selection = { isSelectable = true }, style = { whiteSpace = WhiteSpace.Normal, marginLeft = 4 } };
+            scroll.Add(_lockPath);
             _status = new HelpBox("", HelpBoxMessageType.None) { style = { display = DisplayStyle.None } };
             scroll.Add(_status);
 
@@ -109,6 +131,7 @@ namespace Hissal.AgentSkillsSync.Editor
             _canSync = false;
             _lockfile = null;
             ShowStatus(null, HelpBoxMessageType.None);
+            ShowLockPath();
 
             var choices = Choices();
             var selected = choices.Selected;
@@ -116,16 +139,16 @@ namespace Hissal.AgentSkillsSync.Editor
 
             try
             {
-                _installMode = ProjectSyncSettings.Load(ProjectRoot).InstallMode;
+                _installMode = ProjectSyncSettings.Load(UnityProjectRoot).InstallMode;
                 ShowMode();
 
-                var lockfile = Lockfile.Load(ProjectRoot);
-                var sync = new SkillSync(ProjectRoot, fetcher: null, choices: choices, mode: _installMode);
+                var lockfile = LoadLockfile();
+                var sync = new SkillSync(SkillsRoot, fetcher: null, choices: choices, mode: _installMode, prefsRoot: UnityProjectRoot);
                 var plan = sync.Plan(lockfile);
                 var differs = _installMode == InstallMode.Latest
                     ? new HashSet<string>(sync.InstalledDiffersFromLock(lockfile))
                     : new HashSet<string>();
-                var newSources = SourceConsent.NewSources(lockfile, LocalPrefs.Load(ProjectRoot));
+                var newSources = SourceConsent.NewSources(lockfile, LocalPrefs.Load(UnityProjectRoot));
                 var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
                 foreach (var skill in lockfile.Skills)
                 {
@@ -156,6 +179,14 @@ namespace Hissal.AgentSkillsSync.Editor
             UpdateSyncButton();
         }
 
+        /// <summary>Names the lockfile in use, since it may be the one above the Unity project folder.</summary>
+        void ShowLockPath()
+        {
+            var root = Lockfile.FindRoot(UnityProjectRoot);
+            _lockPath.text = root == null ? "" : "Using " + Path.GetFullPath(Path.Combine(root, Lockfile.FileName));
+            _lockPath.style.display = root == null ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
         void ShowMode()
         {
             _mode.SetValueWithoutNotify(_installMode);
@@ -180,7 +211,7 @@ namespace Hissal.AgentSkillsSync.Editor
             if (mode == _installMode) return;
             try
             {
-                new ProjectSyncSettings(mode).Save(ProjectRoot);
+                new ProjectSyncSettings(mode).Save(UnityProjectRoot);
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
             {
@@ -241,7 +272,7 @@ namespace Hissal.AgentSkillsSync.Editor
         {
             try
             {
-                var prefs = LocalPrefs.Load(ProjectRoot);
+                var prefs = LocalPrefs.Load(UnityProjectRoot);
                 SkipChoices.Set(prefs, folder, skillName, skip);
                 prefs.Save();
             }
@@ -312,7 +343,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 pair.Value.RegisterValueChangedCallback(_ =>
                     SaveFolders(toggles.Where(t => t.Value.value).Select(t => t.Key), environment));
 
-            if (!FolderSelection.IsChosen(LocalPrefs.Load(ProjectRoot)))
+            if (!FolderSelection.IsChosen(LocalPrefs.Load(UnityProjectRoot)))
                 _folders.Add(new HelpBox(selected.Count > 0
                     ? "Pre-selected because these agents' user folders exist on this machine. Nothing is installed until you Sync."
                     : "No agent user folders found on this machine, so nothing is pre-selected.", HelpBoxMessageType.Info));
@@ -322,7 +353,7 @@ namespace Hissal.AgentSkillsSync.Editor
         {
             try
             {
-                var prefs = LocalPrefs.Load(ProjectRoot);
+                var prefs = LocalPrefs.Load(UnityProjectRoot);
                 FolderSelection.Save(prefs, Layout, selected, environment);
                 prefs.Save();
             }
@@ -355,7 +386,7 @@ namespace Hissal.AgentSkillsSync.Editor
         }
 
         bool HasUnconfirmedSources(Lockfile lockfile) =>
-            SourceConsent.Unconfirmed(lockfile, LocalPrefs.Load(ProjectRoot), _confirmedSources).Count > 0;
+            SourceConsent.Unconfirmed(lockfile, LocalPrefs.Load(UnityProjectRoot), _confirmedSources).Count > 0;
 
         void UpdateSyncButton() =>
             _syncButton.SetEnabled(_canSync && _consent.value && _lockfile != null && !HasUnconfirmedSources(_lockfile));
@@ -371,7 +402,7 @@ namespace Hissal.AgentSkillsSync.Editor
             try
             {
                 // Re-check against the lockfile as it is now: it may have gained a source since the window listed it.
-                lockfile = Lockfile.Load(ProjectRoot);
+                lockfile = LoadLockfile();
                 if (HasUnconfirmedSources(lockfile))
                 {
                     ShowSummary("The lockfile has a new source you have not confirmed. Review it and sync again.", HelpBoxMessageType.Warning);
@@ -380,7 +411,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 }
 
                 // The consent note described the mode the window listed; a mode changed since (a pull) needs a fresh look.
-                var mode = ProjectSyncSettings.Load(ProjectRoot).InstallMode;
+                var mode = ProjectSyncSettings.Load(UnityProjectRoot).InstallMode;
                 if (mode != _installMode)
                 {
                     ShowSummary($"The install mode changed to {mode} since the window listed the skills. Review it and sync again.", HelpBoxMessageType.Warning);
@@ -391,7 +422,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
                 choices = Choices();
                 // Run the very instance that passed the check, never a fresh read of the file.
-                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher(mode: mode), choices, mode: mode).Run(lockfile);
+                summary = new SkillSync(SkillsRoot, new GitHubSkillFetcher(mode: mode), choices, mode: mode, prefsRoot: UnityProjectRoot).Run(lockfile);
                 ShowSummary(SyncText.Describe(summary), summary.UserScopeDiffers.Count > 0 ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info);
             }
             catch (SyncAbortedException e)
@@ -435,9 +466,9 @@ namespace Hissal.AgentSkillsSync.Editor
         /// </summary>
         static void RecordSynced(Lockfile lockfile, MachineChoices choices)
         {
-            var prefs = LocalPrefs.Load(ProjectRoot);
+            var prefs = LocalPrefs.Load(UnityProjectRoot);
             FolderSelection.Save(prefs, Layout, choices.Selected, UserEnvironment.Current);
-            StartupCheck.RecordSynced(prefs, SyncStatus.Read(ProjectRoot, choices));
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(SkillsRoot, choices, UnityProjectRoot));
             SourceConsent.RecordSynced(prefs, lockfile);
             prefs.Save();
         }

@@ -589,5 +589,37 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(summary.SkippedForUserScope, Is.EqualTo(new[] { "tdd" }));
             Assert.That(Directory.Exists(Path.Combine(_project, ".claude/skills/tdd")), Is.False);
         }
+
+        [Test]
+        public void Run_WithPrefsRoot_RecordsManagedSkillsThereAndNotBesideTheLock()
+        {
+            var unityProject = Path.Combine(_project, "UnityProject");
+
+            new SkillSync(_project, _fetcher, MachineChoices.Default, prefsRoot: unityProject).Run();
+
+            Assert.That(LocalPrefs.Load(unityProject).ManagedSkills[".agents/skills"], Is.EquivalentTo(new[] { "tdd", "code-review" }));
+            Assert.That(File.Exists(LocalPrefs.PathFor(_project)), Is.False);
+        }
+
+        [Test]
+        public void Plan_WithPrefsRoot_ReadsManagedSkillsFromThere()
+        {
+            var unityProject = Path.Combine(_project, "UnityProject");
+            new SkillSync(_project, _fetcher, MachineChoices.Default, prefsRoot: unityProject).Run();
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), PulledLock);
+            // Prefs there say this machine manages nothing, so code-review is left alone; the .gitignore blocks beside
+            // the lock (the fallback without recorded prefs) would have it removed.
+            var prefs = LocalPrefs.Load(unityProject);
+            prefs.ManagedSkills = new Dictionary<string, IReadOnlyList<string>>
+            {
+                [".agents/skills"] = new string[0],
+                [".claude/skills"] = new string[0],
+            };
+            prefs.Save();
+
+            var plan = new SkillSync(_project, _fetcher, MachineChoices.Default, prefsRoot: unityProject).Plan();
+
+            Assert.That(plan.Actions.Where(a => a.Kind == PlanActionKind.Remove), Is.Empty);
+        }
     }
 }

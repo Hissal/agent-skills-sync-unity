@@ -26,15 +26,16 @@ namespace Hissal.AgentSkillsSync.Editor
 
         static void Check()
         {
-            var projectRoot = Path.GetDirectoryName(Application.dataPath);
+            var unityRoot = SkillsSyncWindow.UnityProjectRoot;
+            var skillsRoot = SkillsSyncWindow.SkillsRoot;
             try
             {
                 var layout = FolderLayout.Default;
                 var environment = UserEnvironment.Current;
-                var prefs = LocalPrefs.Load(projectRoot);
+                var prefs = LocalPrefs.Load(unityRoot);
                 OfferNewFolders(prefs, layout, environment);
 
-                var status = SyncStatus.Read(projectRoot, MachineChoices.Read(projectRoot, prefs, environment, layout));
+                var status = SyncStatus.Read(skillsRoot, MachineChoices.Read(skillsRoot, prefs, environment, layout), unityRoot);
                 if (!StartupCheck.ShouldNotify(status, prefs)) return;
 
                 if (EditorUtility.DisplayDialog(

@@ -23,5 +23,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   skips and a warning when a kept user-scope copy differs from the lock.
 - Project install mode (`ProjectSettings/AgentSkillsSync.json`): Latest (default) installs current upstream and
   reports skills that differ from the lock; Pinned refuses them. The lockfile is never rewritten.
+- The lockfile is also found in the folder above the Unity project (a repo with the Unity project in a subfolder);
+  skills are installed next to it, local prefs and project settings stay in the Unity project, and the sync window
+  shows the lock in use.
 - README: install, project setup, folder selection and skips, install mode, migration from vendored skills, and
   scoping the official Unity Claude plugin per project.

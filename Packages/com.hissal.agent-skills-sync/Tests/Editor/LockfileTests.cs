@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using NUnit.Framework;
 
 namespace Hissal.AgentSkillsSync.Tests
@@ -163,6 +165,65 @@ namespace Hissal.AgentSkillsSync.Tests
         public void Parse_NonStringRef_Rejects()
         {
             Assert.Throws<LockfileException>(() => Lockfile.Parse(LockWithRef(@", ""ref"": 3")));
+        }
+
+        [Test]
+        public void FindRoot_LockInUnityProject_ReturnsTheUnityProject()
+        {
+            WithRepo((repo, unityProject) =>
+            {
+                File.WriteAllText(Path.Combine(unityProject, Lockfile.FileName), ValidLock);
+                File.WriteAllText(Path.Combine(repo, Lockfile.FileName), ValidLock);
+
+                Assert.That(Lockfile.FindRoot(unityProject), Is.EqualTo(unityProject));
+            });
+        }
+
+        [Test]
+        public void FindRoot_LockOnlyInTheFolderAbove_ReturnsThatFolder()
+        {
+            WithRepo((repo, unityProject) =>
+            {
+                File.WriteAllText(Path.Combine(repo, Lockfile.FileName), ValidLock);
+
+                Assert.That(Lockfile.FindRoot(unityProject), Is.EqualTo(repo));
+                Assert.That(Lockfile.FindRoot(unityProject + Path.DirectorySeparatorChar), Is.EqualTo(repo));
+            });
+        }
+
+        [Test]
+        public void FindRoot_LockTwoFoldersAbove_ReturnsNull()
+        {
+            WithRepo((repo, unityProject) =>
+            {
+                var nested = Path.Combine(unityProject, "Nested");
+                Directory.CreateDirectory(nested);
+                File.WriteAllText(Path.Combine(repo, Lockfile.FileName), ValidLock);
+
+                Assert.That(Lockfile.FindRoot(nested), Is.Null);
+            });
+        }
+
+        [Test]
+        public void FindRoot_NoLock_ReturnsNull()
+        {
+            WithRepo((_, unityProject) => Assert.That(Lockfile.FindRoot(unityProject), Is.Null));
+        }
+
+        /// <summary>Runs <paramref name="test"/> on a temp repo folder with a Unity project folder inside it.</summary>
+        static void WithRepo(Action<string, string> test)
+        {
+            var repo = Path.Combine(Path.GetTempPath(), "AgentSkillsSyncTests", Guid.NewGuid().ToString("N"));
+            var unityProject = Path.Combine(repo, "UnityProject");
+            Directory.CreateDirectory(unityProject);
+            try
+            {
+                test(repo, unityProject);
+            }
+            finally
+            {
+                TempDirectory.Delete(repo);
+            }
         }
     }
 }

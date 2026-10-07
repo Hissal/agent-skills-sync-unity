@@ -23,8 +23,10 @@ namespace Hissal.AgentSkillsSync
         /// <param name="projectRoot">The folder holding <c>skills-lock.json</c>.</param>
         /// <param name="plan">The plan to apply.</param>
         /// <param name="fetchedFolders">Skill name to a local folder with the skill's contents, for every Install and Update action.</param>
+        /// <param name="prefsRoot">The folder holding this machine's <see cref="LocalPrefs"/>; null = <paramref name="projectRoot"/>.</param>
         /// <returns>What was done, for the summary.</returns>
-        public SyncSummary Execute(string projectRoot, InstallPlan plan, IReadOnlyDictionary<string, string> fetchedFolders)
+        public SyncSummary Execute(string projectRoot, InstallPlan plan, IReadOnlyDictionary<string, string> fetchedFolders,
+            string prefsRoot = null)
         {
             var applied = new List<PlanAction>();
             var linkMethods = new Dictionary<PlanAction, LinkMethod>();
@@ -72,16 +74,16 @@ namespace Hissal.AgentSkillsSync
                 if (ignored.Value.Count > 0 || Directory.Exists(folder))
                     ManagedStateFile.Write(folder, ignored.Value);
             }
-            RecordManaged(projectRoot, plan);
+            RecordManaged(prefsRoot ?? projectRoot, plan);
 
             return new SyncSummary(applied, linkMethods);
         }
 
         /// <summary>Records what this machine now manages in its local prefs; the committed .gitignore does not say.</summary>
-        static void RecordManaged(string projectRoot, InstallPlan plan)
+        static void RecordManaged(string prefsRoot, InstallPlan plan)
         {
             var managed = plan.ManagedNames.ToDictionary(m => m.Key.RelativePath, m => m.Value, StringComparer.Ordinal);
-            var prefs = LocalPrefs.Load(projectRoot);
+            var prefs = LocalPrefs.Load(prefsRoot);
             var recorded = prefs.ManagedSkills;
             if (recorded != null && Flatten(recorded).SequenceEqual(Flatten(managed))) return;
             prefs.ManagedSkills = managed;

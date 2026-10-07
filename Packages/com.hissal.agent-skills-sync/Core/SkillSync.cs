@@ -18,6 +18,7 @@ namespace Hissal.AgentSkillsSync
     public sealed class SkillSync
     {
         readonly string _projectRoot;
+        readonly string _prefsRoot;
         readonly ISkillFetcher _fetcher;
         readonly MachineChoices _choices;
         readonly PlanExecutor _executor;
@@ -36,10 +37,15 @@ namespace Hissal.AgentSkillsSync
         /// Defaults to <see cref="InstallMode.Pinned"/>, the behaviour without install modes. The project's own choice
         /// (default Latest) is in <see cref="ProjectSyncSettings"/>; callers pass it here and to the fetcher.
         /// </param>
+        /// <param name="prefsRoot">
+        /// The folder holding this machine's <see cref="LocalPrefs"/> (the Unity project); null = <paramref name="projectRoot"/>,
+        /// the folder holding <c>skills-lock.json</c>.
+        /// </param>
         public SkillSync(string projectRoot, ISkillFetcher fetcher, MachineChoices choices, ILinkCreator linker = null,
-            InstallMode mode = InstallMode.Pinned)
+            InstallMode mode = InstallMode.Pinned, string prefsRoot = null)
         {
             _projectRoot = projectRoot;
+            _prefsRoot = prefsRoot;
             _fetcher = fetcher;
             _choices = choices ?? MachineChoices.Default;
             _executor = new PlanExecutor(linker);
@@ -68,7 +74,7 @@ namespace Hissal.AgentSkillsSync
         public IReadOnlyList<string> InstalledDiffersFromLock(Lockfile lockfile)
         {
             var layout = _choices.Layout;
-            var canonical = ProjectScanner.Scan(_projectRoot, layout).For(layout.Canonical);
+            var canonical = ProjectScanner.Scan(_projectRoot, layout, prefsRoot: _prefsRoot).For(layout.Canonical);
             var canonicalPath = Paths.InProject(_projectRoot, layout.Canonical.RelativePath);
             return lockfile.Skills
                 .Where(s => canonical.InstalledHash(s.Name) != null // a managed copy
@@ -79,7 +85,7 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>What syncing <paramref name="lockfile"/> would do now, without doing it (see <see cref="Plan()"/>).</summary>
         public InstallPlan Plan(Lockfile lockfile) =>
-            PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout), _strategy.PreviewCheck);
+            PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout, prefsRoot: _prefsRoot), _strategy.PreviewCheck);
 
         /// <summary>Plans with this sync's folder selection, user-scope copies and skips.</summary>
         InstallPlan PlanWith(Lockfile lockfile, ProjectState project, IInstalledCopyCheck check) =>
@@ -97,7 +103,7 @@ namespace Hissal.AgentSkillsSync
         /// <exception cref="SyncAbortedException">One or more skills could not be fetched or verified; nothing was changed.</exception>
         public SyncSummary Run(Lockfile lockfile)
         {
-            var project = ProjectScanner.Scan(_projectRoot, _choices.Layout);
+            var project = ProjectScanner.Scan(_projectRoot, _choices.Layout, prefsRoot: _prefsRoot);
 
             // Latest compares every managed copy with upstream, so it fetches them all; Pinned only what the lock says is stale.
             var toFetch = PlanWith(lockfile, project, _strategy.FetchCheck);
@@ -126,7 +132,7 @@ namespace Hissal.AgentSkillsSync
             var differs = _strategy.DiffersFromLock(lockfile, fetched);
             var applyCheck = _strategy.ApplyCheck(upstreamHashes);
             var plan = applyCheck == null ? toFetch : PlanWith(lockfile, project, applyCheck);
-            var summary = _executor.Execute(_projectRoot, plan, fetched);
+            var summary = _executor.Execute(_projectRoot, plan, fetched, _prefsRoot);
             return differs == null ? summary : new SyncSummary(summary.Applied, summary.LinkMethods, differs);
         }
     }
