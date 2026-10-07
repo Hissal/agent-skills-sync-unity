@@ -74,19 +74,19 @@ namespace Hissal.AgentSkillsSync
                 if (ignored.Value.Count > 0 || Directory.Exists(folder))
                     ManagedStateFile.Write(folder, ignored.Value);
             }
-            RecordManaged(prefsRoot ?? projectRoot, plan);
+            RecordManaged(projectRoot, prefsRoot ?? projectRoot, plan);
 
             return new SyncSummary(applied, linkMethods);
         }
 
         /// <summary>Records what this machine now manages in its local prefs; the committed .gitignore does not say.</summary>
-        static void RecordManaged(string prefsRoot, InstallPlan plan)
+        static void RecordManaged(string projectRoot, string prefsRoot, InstallPlan plan)
         {
             var managed = plan.ManagedNames.ToDictionary(m => m.Key.RelativePath, m => m.Value, StringComparer.Ordinal);
             var prefs = LocalPrefs.Load(prefsRoot);
-            var recorded = prefs.ManagedSkills;
-            if (recorded != null && Flatten(recorded).SequenceEqual(Flatten(managed))) return;
-            prefs.ManagedSkills = managed;
+            var recorded = prefs.ManagedSkillsFor(projectRoot);
+            if (recorded != null && prefs.ManagedSkillsRoot != null && Flatten(recorded).SequenceEqual(Flatten(managed))) return;
+            prefs.RecordManagedSkills(projectRoot, managed);
             prefs.Save();
         }
 

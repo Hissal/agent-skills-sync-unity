@@ -103,5 +103,16 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(prefs.LastSyncedLockHash, Is.Null);
         }
+
+        [Test]
+        public void ManagedSkillsFor_PrefsWithoutARecordedRoot_DescribeTheProjectFolder()
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(PrefsPath));
+            File.WriteAllText(PrefsPath, @"{ ""version"": 1, ""managedSkills"": { "".agents/skills"": [""tdd""] } }");
+            var prefs = LocalPrefs.Load(_project);
+
+            Assert.That(prefs.ManagedSkillsFor(_project)[".agents/skills"], Is.EqualTo(new[] { "tdd" }));
+            Assert.That(prefs.ManagedSkillsFor(Path.GetDirectoryName(_project)), Is.Null);
+        }
     }
 }

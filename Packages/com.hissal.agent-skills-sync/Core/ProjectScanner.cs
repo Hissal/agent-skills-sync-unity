@@ -18,7 +18,8 @@ namespace Hissal.AgentSkillsSync
         {
             // What this machine manages lives in its local prefs. Until a sync first records it, the names in the
             // committed .gitignore blocks count as managed (before, the block listed exactly this machine's entries).
-            var recorded = LocalPrefs.Load(prefsRoot ?? projectRoot).ManagedSkills;
+            // So do they when the record is for another skills root, as after the lock moved.
+            var recorded = LocalPrefs.Load(prefsRoot ?? projectRoot).ManagedSkillsFor(projectRoot);
             return new ProjectState(layout.Folders.Select(folder =>
                 ScanFolder(projectRoot, folder, layout.Canonical, readContents, recorded)));
         }

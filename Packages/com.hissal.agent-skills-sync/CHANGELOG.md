@@ -25,6 +25,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reports skills that differ from the lock; Pinned refuses them. The lockfile is never rewritten.
 - The lockfile is also found in the folder above the Unity project (a repo with the Unity project in a subfolder);
   skills are installed next to it, local prefs and project settings stay in the Unity project, and the sync window
-  shows the lock in use.
+  shows the lock in use. What this machine manages is recorded per skills root, so moving the lock never claims
+  same-named skills at the new location.
 - README: install, project setup, folder selection and skips, install mode, migration from vendored skills, and
   scoping the official Unity Claude plugin per project.

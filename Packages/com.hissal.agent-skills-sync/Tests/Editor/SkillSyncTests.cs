@@ -621,5 +621,36 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(plan.Actions.Where(a => a.Kind == PlanActionKind.Remove), Is.Empty);
         }
+
+        [Test]
+        public void Plan_LockMovedAboveTheUnityProject_LeavesSameNamedSkillsThereAlone()
+        {
+            // Synced while the lock sat in the Unity project, so the prefs record tdd and code-review as managed there.
+            var unityProject = Path.Combine(_project, "UnityProject");
+            Directory.CreateDirectory(unityProject);
+            File.Move(Path.Combine(_project, Lockfile.FileName), Path.Combine(unityProject, Lockfile.FileName));
+            new SkillSync(unityProject, _fetcher, MachineChoices.Default).Run();
+            // The lock moves up a folder, where someone's own tdd skill already lives.
+            File.Move(Path.Combine(unityProject, Lockfile.FileName), Path.Combine(_project, Lockfile.FileName));
+            Directory.CreateDirectory(Path.Combine(_project, ".agents/skills/tdd"));
+            File.WriteAllText(Path.Combine(_project, ".agents/skills/tdd/SKILL.md"), "# someone else's tdd");
+
+            var plan = new SkillSync(_project, _fetcher, MachineChoices.Default, prefsRoot: unityProject).Plan();
+
+            var tdd = plan.Actions.Where(a => a.SkillName == "tdd" && a.Folder.RelativePath == ".agents/skills").ToList();
+            Assert.That(tdd.Select(a => a.Kind), Is.EqualTo(new[] { PlanActionKind.LeaveForeign }));
+        }
+
+        [Test]
+        public void Run_RecordsTheSkillsRootRelativeToThePrefs()
+        {
+            var unityProject = Path.Combine(_project, "UnityProject");
+
+            new SkillSync(_project, _fetcher, MachineChoices.Default, prefsRoot: unityProject).Run();
+
+            Assert.That(LocalPrefs.Load(unityProject).ManagedSkillsRoot, Is.EqualTo(".."));
+            Assert.That(LocalPrefs.Load(unityProject).ManagedSkillsFor(_project), Is.Not.Null);
+            Assert.That(LocalPrefs.Load(unityProject).ManagedSkillsFor(unityProject), Is.Null);
+        }
     }
 }
