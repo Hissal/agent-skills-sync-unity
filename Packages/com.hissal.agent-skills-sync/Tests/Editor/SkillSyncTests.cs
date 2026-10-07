@@ -589,5 +589,68 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(summary.SkippedForUserScope, Is.EqualTo(new[] { "tdd" }));
             Assert.That(Directory.Exists(Path.Combine(_project, ".claude/skills/tdd")), Is.False);
         }
+
+        [Test]
+        public void Run_WithPrefsRoot_RecordsManagedSkillsThereAndNotBesideTheLock()
+        {
+            var unityProject = Path.Combine(_project, "UnityProject");
+
+            new SkillSync(_project, _fetcher, MachineChoices.Default, prefsRoot: unityProject).Run();
+
+            Assert.That(LocalPrefs.Load(unityProject).ManagedSkills[".agents/skills"], Is.EquivalentTo(new[] { "tdd", "code-review" }));
+            Assert.That(File.Exists(LocalPrefs.PathFor(_project)), Is.False);
+        }
+
+        [Test]
+        public void Plan_WithPrefsRoot_ReadsManagedSkillsFromThere()
+        {
+            var unityProject = Path.Combine(_project, "UnityProject");
+            new SkillSync(_project, _fetcher, MachineChoices.Default, prefsRoot: unityProject).Run();
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), PulledLock);
+            // Prefs there say this machine manages nothing, so code-review is left alone; the .gitignore blocks beside
+            // the lock (the fallback without recorded prefs) would have it removed.
+            var prefs = LocalPrefs.Load(unityProject);
+            prefs.ManagedSkills = new Dictionary<string, IReadOnlyList<string>>
+            {
+                [".agents/skills"] = new string[0],
+                [".claude/skills"] = new string[0],
+            };
+            prefs.Save();
+
+            var plan = new SkillSync(_project, _fetcher, MachineChoices.Default, prefsRoot: unityProject).Plan();
+
+            Assert.That(plan.Actions.Where(a => a.Kind == PlanActionKind.Remove), Is.Empty);
+        }
+
+        [Test]
+        public void Plan_LockMovedAboveTheUnityProject_LeavesSameNamedSkillsThereAlone()
+        {
+            // Synced while the lock sat in the Unity project, so the prefs record tdd and code-review as managed there.
+            var unityProject = Path.Combine(_project, "UnityProject");
+            Directory.CreateDirectory(unityProject);
+            File.Move(Path.Combine(_project, Lockfile.FileName), Path.Combine(unityProject, Lockfile.FileName));
+            new SkillSync(unityProject, _fetcher, MachineChoices.Default).Run();
+            // The lock moves up a folder, where someone's own tdd skill already lives.
+            File.Move(Path.Combine(unityProject, Lockfile.FileName), Path.Combine(_project, Lockfile.FileName));
+            Directory.CreateDirectory(Path.Combine(_project, ".agents/skills/tdd"));
+            File.WriteAllText(Path.Combine(_project, ".agents/skills/tdd/SKILL.md"), "# someone else's tdd");
+
+            var plan = new SkillSync(_project, _fetcher, MachineChoices.Default, prefsRoot: unityProject).Plan();
+
+            var tdd = plan.Actions.Where(a => a.SkillName == "tdd" && a.Folder.RelativePath == ".agents/skills").ToList();
+            Assert.That(tdd.Select(a => a.Kind), Is.EqualTo(new[] { PlanActionKind.LeaveForeign }));
+        }
+
+        [Test]
+        public void Run_RecordsTheSkillsRootRelativeToThePrefs()
+        {
+            var unityProject = Path.Combine(_project, "UnityProject");
+
+            new SkillSync(_project, _fetcher, MachineChoices.Default, prefsRoot: unityProject).Run();
+
+            Assert.That(LocalPrefs.Load(unityProject).ManagedSkillsRoot, Is.EqualTo(".."));
+            Assert.That(LocalPrefs.Load(unityProject).ManagedSkillsFor(_project), Is.Not.Null);
+            Assert.That(LocalPrefs.Load(unityProject).ManagedSkillsFor(unityProject), Is.Null);
+        }
     }
 }

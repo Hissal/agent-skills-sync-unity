@@ -9,8 +9,10 @@ Status: in development (0.1.0). See the [spec](https://github.com/Hissal/agent-s
 ## Requirements
 
 - Unity 6000.3 or later. The package is Editor-only.
-- A `skills-lock.json` at the project root, written by the [`skills` CLI](https://github.com/vercel-labs/skills)
-  (lockfile `version` 1). Every skill must come from a public GitHub repo (`sourceType` `github`).
+- A `skills-lock.json` written by the [`skills` CLI](https://github.com/vercel-labs/skills) (lockfile `version` 1),
+  in the Unity project folder or the folder directly above it (a repo that keeps its Unity project in a subfolder).
+  The skills folders are installed next to the lock; the sync window shows which lock it uses. Every skill must come
+  from a public GitHub repo (`sourceType` `github`).
 - Network access to github.com when you sync. Node is **not** needed to sync; only maintainers who edit the lockfile
   need it.
 - [Git](https://git-scm.com/) 2.14 or later on your `PATH`, to install the package from its git URL. Unity's Package

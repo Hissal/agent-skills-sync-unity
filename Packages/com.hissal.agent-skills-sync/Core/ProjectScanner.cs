@@ -13,11 +13,13 @@ namespace Hissal.AgentSkillsSync
         /// False for a quick scan that reads names and links only: no installed hashes and no check of copied links'
         /// content, so the planner can't see outdated copies (see <see cref="SyncStatus.Read"/>).
         /// </param>
-        public static ProjectState Scan(string projectRoot, FolderLayout layout, bool readContents = true)
+        /// <param name="prefsRoot">The folder holding this machine's <see cref="LocalPrefs"/>; null = <paramref name="projectRoot"/>.</param>
+        public static ProjectState Scan(string projectRoot, FolderLayout layout, bool readContents = true, string prefsRoot = null)
         {
             // What this machine manages lives in its local prefs. Until a sync first records it, the names in the
             // committed .gitignore blocks count as managed (before, the block listed exactly this machine's entries).
-            var recorded = LocalPrefs.Load(projectRoot).ManagedSkills;
+            // So do they when the record is for another skills root, as after the lock moved.
+            var recorded = LocalPrefs.Load(prefsRoot ?? projectRoot).ManagedSkillsFor(projectRoot);
             return new ProjectState(layout.Folders.Select(folder =>
                 ScanFolder(projectRoot, folder, layout.Canonical, readContents, recorded)));
         }

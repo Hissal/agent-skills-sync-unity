@@ -28,6 +28,7 @@ namespace Hissal.AgentSkillsSync
         const string SelectedFoldersKey = "selectedFolders";
         const string DeclinedFoldersKey = "declinedFolders";
         const string ManagedSkillsKey = "managedSkills";
+        const string ManagedSkillsRootKey = "managedSkillsRoot";
         const string SkippedSkillsKey = "skippedSkills";
 
         readonly string _path;
@@ -38,6 +39,9 @@ namespace Hissal.AgentSkillsSync
             _path = path;
             _members = members;
         }
+
+        /// <summary>The project folder these prefs belong to (the one holding <c>UserSettings/</c>).</summary>
+        string ProjectRoot => Path.GetDirectoryName(Path.GetDirectoryName(_path));
 
         /// <summary>The prefs file of the project at <paramref name="projectRoot"/>.</summary>
         public static string PathFor(string projectRoot) => Path.Combine(projectRoot, FolderName, FileName);
@@ -151,6 +155,7 @@ namespace Hissal.AgentSkillsSync
         /// created there and still manage; null until the first sync records it (the scanner then falls back to the
         /// names in each folder's <c>.gitignore</c> block). Written by <see cref="PlanExecutor"/>.
         /// </summary>
+        /// <remarks>The names are relative to <see cref="ManagedSkillsRoot"/>; read them through <see cref="ManagedSkillsFor"/>.</remarks>
         public IReadOnlyDictionary<string, IReadOnlyList<string>> ManagedSkills
         {
             get
@@ -182,6 +187,37 @@ namespace Hissal.AgentSkillsSync
                 Set(ManagedSkillsKey, folders);
             }
         }
+
+        /// <summary>
+        /// The skills root (the folder holding <c>skills-lock.json</c>) <see cref="ManagedSkills"/> was recorded under,
+        /// relative to the project folder (<c>.</c> for itself, <c>..</c> for the folder above). Null in prefs written
+        /// before it was recorded, which always describe the project folder itself.
+        /// </summary>
+        public string ManagedSkillsRoot
+        {
+            get => GetString(ManagedSkillsRootKey);
+            set => Set(ManagedSkillsRootKey, value);
+        }
+
+        /// <summary>
+        /// <see cref="ManagedSkills"/> when it was recorded under <paramref name="skillsRoot"/>, else null: names recorded
+        /// under another root (the lock moved) say nothing about what this machine created under this one.
+        /// </summary>
+        public IReadOnlyDictionary<string, IReadOnlyList<string>> ManagedSkillsFor(string skillsRoot)
+        {
+            var recordedRoot = Paths.InProject(ProjectRoot, ManagedSkillsRoot ?? ".");
+            return Paths.Comparer.Equals(TrimEnd(recordedRoot), TrimEnd(Path.GetFullPath(skillsRoot))) ? ManagedSkills : null;
+        }
+
+        /// <summary>Records <paramref name="managed"/> as what this machine manages under <paramref name="skillsRoot"/>.</summary>
+        public void RecordManagedSkills(string skillsRoot, IReadOnlyDictionary<string, IReadOnlyList<string>> managed)
+        {
+            var relative = Paths.Relative(ProjectRoot, skillsRoot);
+            ManagedSkillsRoot = relative.Length == 0 ? "." : relative.Replace(Path.DirectorySeparatorChar, '/');
+            ManagedSkills = managed;
+        }
+
+        static string TrimEnd(string path) => path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
         string GetString(string key) => Get(key) as string;
 

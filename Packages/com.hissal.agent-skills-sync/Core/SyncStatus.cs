@@ -58,7 +58,8 @@ namespace Hissal.AgentSkillsSync
         /// no out-of-sync skills, so only a hash change surfaces it.
         /// </summary>
         /// <param name="choices">This machine's layout, folder selection, user-scope copies and skips. A skipped skill does not count as out of sync.</param>
-        public static SyncStatus Read(string projectRoot, MachineChoices choices)
+        /// <param name="prefsRoot">The folder holding this machine's <see cref="LocalPrefs"/>; null = <paramref name="projectRoot"/>.</param>
+        public static SyncStatus Read(string projectRoot, MachineChoices choices, string prefsRoot = null)
         {
             var lockHash = LockfileHash.Compute(projectRoot);
             if (lockHash == null) return null;
@@ -71,7 +72,7 @@ namespace Hissal.AgentSkillsSync
             try
             {
                 // The quick scan has no hashes: any installed copy counts as current.
-                var project = ProjectScanner.Scan(projectRoot, layout, readContents: false);
+                var project = ProjectScanner.Scan(projectRoot, layout, readContents: false, prefsRoot: prefsRoot);
                 var plan = InstallPlanner.Plan(Lockfile.Load(projectRoot), project, choices, FixedCheck.AlwaysCurrent);
                 // A left-alone (foreign) entry is never synced, so it does not count as out of sync.
                 outOfSync = plan.Actions.Where(a => a.ChangesProject).Select(a => a.SkillName);

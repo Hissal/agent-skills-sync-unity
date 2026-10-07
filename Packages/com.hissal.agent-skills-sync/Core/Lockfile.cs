@@ -20,6 +20,17 @@ namespace Hissal.AgentSkillsSync
         /// <summary>The locked skills, in lockfile order.</summary>
         public IReadOnlyList<LockedSkill> Skills { get; }
 
+        /// <summary>
+        /// The folder holding the <c>skills-lock.json</c> a Unity project syncs: the Unity project folder itself, else
+        /// the folder above it (a repo that keeps its Unity project in a subfolder). Null when neither holds one.
+        /// </summary>
+        public static string FindRoot(string unityProjectRoot)
+        {
+            if (File.Exists(Path.Combine(unityProjectRoot, FileName))) return unityProjectRoot;
+            var parent = Path.GetDirectoryName(Path.GetFullPath(unityProjectRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            return parent != null && File.Exists(Path.Combine(parent, FileName)) ? parent : null;
+        }
+
         /// <summary>Reads <c>skills-lock.json</c> at the project root.</summary>
         /// <exception cref="LockfileException">The file is missing or unusable.</exception>
         public static Lockfile Load(string projectRoot)
