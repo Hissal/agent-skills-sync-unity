@@ -18,13 +18,17 @@ namespace Hissal.AgentSkillsSync.Tests
             public readonly HashSet<string> Failing = new HashSet<string>();
             public readonly List<string> Fetched = new List<string>();
 
+            /// <summary>Skill name to the fixture upstream serves now, overriding the one its locked hash names.</summary>
+            public readonly Dictionary<string, string> Upstream = new Dictionary<string, string>();
+
             public FakeFetcher(string root) => _root = root;
 
             public string Fetch(LockedSkill skill)
             {
                 Fetched.Add(skill.Name);
                 if (Failing.Contains(skill.Name)) throw new SkillFetchException($"Could not download {skill.Source}.");
-                var fixture = skill.ComputedHash == FakeGitHub.NestedHash ? "nested" : "minimal";
+                if (!Upstream.TryGetValue(skill.Name, out var fixture))
+                    fixture = skill.ComputedHash == FakeGitHub.NestedHash ? "nested" : "minimal";
                 var folder = Path.Combine(_root, "fetched", skill.Name, Guid.NewGuid().ToString("N"));
                 Paths.CopyDirectory(Path.Combine(FixturesRoot, fixture), folder);
                 return folder;
@@ -299,6 +303,291 @@ namespace Hissal.AgentSkillsSync.Tests
             sync.Run();
 
             Assert.That(ManagedStateFile.Read(canonical), Is.Empty);
+        }
+
+        // Install modes.
+
+        SkillSync Sync(InstallMode mode) => new SkillSync(_project, _fetcher, mode: mode);
+
+        [Test]
+        public void Run_Latest_UpstreamDiffersFromLock_InstallsUpstreamAndReportsIt()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+
+            var summary = Sync(InstallMode.Latest).Run();
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd", "code-review" }));
+            Assert.That(summary.DiffersFromLock, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(SkillFolderHash.Compute(Path.Combine(_project, ".agents/skills/tdd")), Is.EqualTo(FakeGitHub.NestedHash));
+        }
+
+        [Test]
+        public void StartupCheck_AfterLatestSyncOfUpstreamThatDiffersFromLock_StaysQuiet()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+            Sync(InstallMode.Latest).Run();
+            var prefs = LocalPrefs.Load(_project);
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(_project));
+            prefs.Save();
+
+            var status = SyncStatus.Read(_project);
+
+            Assert.That(status.MissingSkills, Is.Empty, "a Latest copy that differs from the lock is not out of sync");
+            Assert.That(StartupCheck.ShouldNotify(status, LocalPrefs.Load(_project)), Is.False);
+        }
+
+        [Test]
+        public void Run_Pinned_UpstreamDiffersFromLock_RefusesAndChangesNothing()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+
+            var error = Assert.Throws<SyncAbortedException>(() => Sync(InstallMode.Pinned).Run());
+
+            Assert.That(error.Failures.Keys, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(error.Failures["tdd"].Failure, Is.EqualTo(SkillFetchFailure.HashMismatch));
+            Assert.That(error.Message, Does.Contain("npx skills update"));
+            Assert.That(Directory.Exists(Path.Combine(_project, ".agents")), Is.False);
+            Assert.That(Directory.Exists(Path.Combine(_project, ".claude")), Is.False);
+        }
+
+        [Test]
+        public void Run_Latest_NeverModifiesTheLockfile()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+            var lockPath = Path.Combine(_project, Lockfile.FileName);
+            var before = File.ReadAllBytes(lockPath);
+            var written = File.GetLastWriteTimeUtc(lockPath);
+
+            Sync(InstallMode.Latest).Run();
+            Sync(InstallMode.Latest).Run();
+
+            Assert.That(File.ReadAllBytes(lockPath), Is.EqualTo(before));
+            Assert.That(File.GetLastWriteTimeUtc(lockPath), Is.EqualTo(written));
+        }
+
+        [Test]
+        public void Run_Latest_TwiceWithUnchangedUpstream_SecondRunChangesNothing()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+            Sync(InstallMode.Latest).Run();
+
+            var summary = Sync(InstallMode.Latest).Run();
+
+            Assert.That(summary.NothingChanged, Is.True);
+            Assert.That(summary.DiffersFromLock, Is.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
+        public void Run_Latest_UpstreamMovedSinceTheLastSync_UpdatesToTheNewUpstream()
+        {
+            Sync(InstallMode.Latest).Run();
+            _fetcher.Upstream["code-review"] = "nested";
+
+            var summary = Sync(InstallMode.Latest).Run();
+
+            Assert.That(summary.Updated, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(SkillFolderHash.Compute(Path.Combine(_project, ".agents/skills/code-review")), Is.EqualTo(FakeGitHub.NestedHash));
+        }
+
+        [Test]
+        public void Run_Latest_FetchFails_ChangesNothingInTheProject()
+        {
+            Sync(InstallMode.Latest).Run();
+            _fetcher.Upstream["tdd"] = "nested";
+            _fetcher.Failing.Add("code-review");
+            var before = Tree(_project).ToList();
+
+            var error = Assert.Throws<SyncAbortedException>(() => Sync(InstallMode.Latest).Run());
+
+            Assert.That(error.Failures.Keys, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(Tree(_project), Is.EqualTo(before));
+        }
+
+        [Test]
+        public void Run_Latest_RealFetcherOverChangedSource_InstallsUpstream()
+        {
+            var github = VerifiedProject().File("other/skills", "skills/code-review/SKILL.md", "# changed upstream");
+            var fetcher = new GitHubSkillFetcher(Path.Combine(_root, "cache"), github, InstallMode.Latest);
+
+            var summary = new SkillSync(_project, fetcher, mode: InstallMode.Latest).Run();
+
+            Assert.That(summary.Installed, Is.EquivalentTo(new[] { "tdd", "code-review" }));
+            Assert.That(summary.DiffersFromLock, Does.Contain("code-review"));
+        }
+
+        [Test]
+        public void InstalledDiffersFromLock_ListsManagedCopiesWhoseHashIsNotTheLocked()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+            Sync(InstallMode.Latest).Run();
+
+            Assert.That(Sync(InstallMode.Latest).InstalledDiffersFromLock(), Is.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
+        public void Plan_Latest_InstalledCopyDiffersFromLock_PlansNoUpdateWithoutFetching()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+            Sync(InstallMode.Latest).Run();
+            _fetcher.Fetched.Clear();
+
+            var plan = Sync(InstallMode.Latest).Plan();
+
+            Assert.That(plan.HasChanges, Is.False);
+            Assert.That(_fetcher.Fetched, Is.Empty);
+        }
+    
+
+        // Latest installs current upstream, so Pinned's lock-verification refusals and CRLF rewrite do not apply.
+
+        /// <summary>The lock with one skill, served by the real fetcher over a faked GitHub repo.</summary>
+        (SkillSync Sync, FakeGitHub GitHub) OneSkill(InstallMode mode, string name, string source, string hash)
+        {
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), @"{
+  ""version"": 1,
+  ""skills"": {
+    """ + name + @""": { ""source"": """ + source + @""", ""sourceType"": ""github"", ""skillPath"": ""skills/" + name + @"/SKILL.md"", ""computedHash"": """ + hash + @""" }
+  }
+}");
+            var github = new FakeGitHub();
+            return (new SkillSync(_project, new GitHubSkillFetcher(Path.Combine(_root, "cache"), github, mode), mode: mode), github);
+        }
+
+        const string ByteExactCrlfCheckoutHash = "1ef11b466bb0ad8cb6eec71a1a735f1851045762121f50f124f21d66c7ceee8f";
+
+        [Test]
+        public void Run_Latest_SkillsShHashedSource_InstallsWithoutReportingItAsDiffering()
+        {
+            var (sync, github) = OneSkill(InstallMode.Latest, "tdd", "vercel-labs/agent-skills", "server-hash-of-another-algorithm");
+            github.Fixture("vercel-labs/agent-skills", "skills/tdd", "minimal");
+
+            var summary = sync.Run();
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(summary.DiffersFromLock, Is.Empty, "a skills.sh hash can't show whether upstream differs");
+            Assert.That(SkillFolderHash.Compute(Path.Combine(_project, ".agents/skills/tdd")), Is.EqualTo(FakeGitHub.MinimalHash));
+        }
+
+        [Test]
+        public void Run_Pinned_SkillsShHashedSource_RefusesAsUnverifiable()
+        {
+            var (sync, github) = OneSkill(InstallMode.Pinned, "tdd", "vercel-labs/agent-skills", "server-hash-of-another-algorithm");
+            github.Fixture("vercel-labs/agent-skills", "skills/tdd", "minimal");
+
+            var error = Assert.Throws<SyncAbortedException>(() => sync.Run());
+
+            Assert.That(error.Failures["tdd"].Failure, Is.EqualTo(SkillFetchFailure.Unverifiable));
+            Assert.That(Directory.Exists(Path.Combine(_project, ".agents")), Is.False);
+        }
+
+        [Test]
+        public void Run_Latest_NonAsciiSkillWhoseHashDiffers_InstallsWithoutReportingItAsDiffering()
+        {
+            var (sync, github) = OneSkill(InstallMode.Latest, "intl", "owner/skills", FakeGitHub.MinimalHash);
+            github.File("owner/skills", "skills/intl/SKILL.md", "# intl").File("owner/skills", "skills/intl/résumé.md", "cv");
+
+            var summary = sync.Run();
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "intl" }));
+            Assert.That(summary.DiffersFromLock, Is.Empty, "with non-ASCII names a mismatch can't show whether upstream differs");
+            Assert.That(File.ReadAllText(Path.Combine(_project, ".agents/skills/intl/résumé.md")), Is.EqualTo("cv"));
+        }
+
+        [Test]
+        public void Run_Pinned_NonAsciiSkillWhoseHashDiffers_RefusesAsUnverifiable()
+        {
+            var (sync, github) = OneSkill(InstallMode.Pinned, "intl", "owner/skills", FakeGitHub.MinimalHash);
+            github.File("owner/skills", "skills/intl/SKILL.md", "# intl").File("owner/skills", "skills/intl/résumé.md", "cv");
+
+            var error = Assert.Throws<SyncAbortedException>(() => sync.Run());
+
+            Assert.That(error.Failures["intl"].Failure, Is.EqualTo(SkillFetchFailure.Unverifiable));
+        }
+
+        [Test]
+        public void Run_Pinned_CrlfLockedSkill_InstallsTheLockedCheckoutAndReRunsAsNoOp()
+        {
+            var (sync, github) = OneSkill(InstallMode.Pinned, "byte-exact", "owner/skills", ByteExactCrlfCheckoutHash);
+            github.Fixture("owner/skills", "skills/byte-exact", "byte-exact");
+
+            sync.Run();
+            var second = sync.Run();
+
+            Assert.That(SkillFolderHash.Compute(Path.Combine(_project, ".agents/skills/byte-exact")), Is.EqualTo(ByteExactCrlfCheckoutHash));
+            Assert.That(second.NothingChanged, Is.True);
+        }
+
+        [Test]
+        public void Run_Latest_CrlfLockedSkill_InstallsUpstreamBytesWithoutReportingItAsDiffering()
+        {
+            var (sync, github) = OneSkill(InstallMode.Latest, "byte-exact", "owner/skills", ByteExactCrlfCheckoutHash);
+            github.Fixture("owner/skills", "skills/byte-exact", "byte-exact");
+
+            var summary = sync.Run();
+            var second = sync.Run();
+
+            var installed = Path.Combine(_project, ".agents/skills/byte-exact");
+            Assert.That(File.ReadAllBytes(Path.Combine(installed, "SKILL.md")), Has.No.Member((byte)'\r'));
+            Assert.That(summary.DiffersFromLock, Is.Empty, "the lock is this upstream's CRLF checkout");
+            Assert.That(second.NothingChanged, Is.True);
+            Assert.That(sync.InstalledDiffersFromLock(), Is.Empty);
+        }
+
+        [Test]
+        public void Run_Latest_CheckedLockfile_LockChangedOnDiskAfterTheCheck_RunsTheCheckedLock()
+        {
+            var checkedLock = Lockfile.Load(_project);
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), @"{
+  ""version"": 1,
+  ""skills"": {
+    ""unconfirmed"": { ""source"": ""stranger/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/unconfirmed/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" }
+  }
+}");
+
+            var summary = Sync(InstallMode.Latest).Run(checkedLock);
+
+            Assert.That(summary.Installed, Is.EquivalentTo(new[] { "tdd", "code-review" }));
+            Assert.That(_fetcher.Fetched, Has.No.Member("unconfirmed"));
+        }
+
+        [Test]
+        public void InstalledDiffersFromLock_CheckedLockfile_ComparesWithTheGivenLock()
+        {
+            _fetcher.Upstream["tdd"] = "nested";
+            var checkedLock = Lockfile.Load(_project);
+            Sync(InstallMode.Latest).Run(checkedLock);
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), PulledLock); // locks tdd at the nested hash
+
+            Assert.That(Sync(InstallMode.Latest).InstalledDiffersFromLock(checkedLock), Is.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
+        public void Run_Latest_OnlyTheCanonicalFolderSelected_LinksNothing()
+        {
+            var agents = FolderLayout.Default.Find(".agents/skills");
+
+            var summary = new SkillSync(_project, _fetcher, selected: new[] { agents }, mode: InstallMode.Latest).Run();
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd", "code-review" }));
+            Assert.That(summary.Linked, Is.Empty);
+            Assert.That(Directory.Exists(Path.Combine(_project, ".claude")), Is.False);
+        }
+
+        [Test]
+        public void Run_Latest_SkipStoredWithAUserScopeCopy_LeavesThatFolderOut()
+        {
+            var agents = FolderLayout.Default.Find(".agents/skills");
+            var claude = FolderLayout.Default.Find(".claude/skills");
+            var userScope = new UserScopeState(new[] { new UserScopeCopy(claude, "tdd", Path.Combine(_root, "home", "tdd"), "~/.claude/skills") });
+            var skips = new SkipChoices(new Dictionary<string, IReadOnlyList<string>> { [claude.RelativePath] = new[] { "tdd" } });
+
+            var summary = new SkillSync(_project, _fetcher, selected: new[] { agents, claude }, userScope: userScope, skips: skips,
+                mode: InstallMode.Latest).Run();
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd", "code-review" }));
+            Assert.That(summary.Linked, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(summary.SkippedForUserScope, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(Directory.Exists(Path.Combine(_project, ".claude/skills/tdd")), Is.False);
         }
     }
 }

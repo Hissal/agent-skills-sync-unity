@@ -18,6 +18,7 @@ namespace Hissal.AgentSkillsSync.Editor
     /// until then they are pre-selected by autofill, and nothing is installed before Sync.
     /// Each skill lists its status per selected folder; where that folder's agents already have the skill at user scope,
     /// the row names where it was found and offers a skip toggle (stored in local prefs at once, applied on Sync).
+    /// The project's install mode (Latest or Pinned) is shown and edited here, and saved to the committed project settings.
     /// </summary>
     public sealed class SkillsSyncWindow : EditorWindow
     {
@@ -26,11 +27,15 @@ namespace Hissal.AgentSkillsSync.Editor
         HelpBox _status;
         VisualElement _folders;
         VisualElement _newSources;
+        EnumField _mode;
+        HelpBox _modeHelp;
+        Label _consentNote;
         VisualElement _skillList;
         Toggle _consent;
         Button _syncButton;
         HelpBox _summary;
         bool _canSync;
+        InstallMode _installMode;
         IReadOnlyDictionary<string, SkillFetchException> _failures = new Dictionary<string, SkillFetchException>();
         Lockfile _lockfile;
         readonly HashSet<string> _confirmedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -64,6 +69,17 @@ namespace Hissal.AgentSkillsSync.Editor
             scroll.Add(new Label($"Skills locked in {Lockfile.FileName}") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
             _status = new HelpBox("", HelpBoxMessageType.None) { style = { display = DisplayStyle.None } };
             scroll.Add(_status);
+
+            _mode = new EnumField("Install mode", InstallMode.Latest)
+            {
+                tooltip = $"Saved to {ProjectSyncSettings.RelativePath} and committed with the project.",
+                style = { marginTop = 4 },
+            };
+            _mode.RegisterValueChangedCallback(e => ChangeMode((InstallMode)e.newValue));
+            scroll.Add(_mode);
+            _modeHelp = new HelpBox("", HelpBoxMessageType.Info);
+            scroll.Add(_modeHelp);
+
             _newSources = new VisualElement { style = { marginTop = 4 } };
             scroll.Add(_newSources);
             _skillList = new VisualElement { style = { marginTop = 4 } };
@@ -73,6 +89,8 @@ namespace Hissal.AgentSkillsSync.Editor
             _consent = new Toggle("I trust these sources. Skills run with my agent's permissions.");
             _consent.RegisterValueChangedCallback(_ => UpdateSyncButton());
             root.Add(_consent);
+            _consentNote = new Label { style = { whiteSpace = WhiteSpace.Normal, marginLeft = 4 } };
+            root.Add(_consentNote);
 
             var buttons = new VisualElement { style = { flexDirection = FlexDirection.Row, marginTop = 4 } };
             _syncButton = new Button(Sync) { text = "Sync" };
@@ -102,15 +120,24 @@ namespace Hissal.AgentSkillsSync.Editor
 
             try
             {
+                _installMode = ProjectSyncSettings.Load(ProjectRoot).InstallMode;
+                ShowMode();
+
                 var lockfile = Lockfile.Load(ProjectRoot);
                 var userScope = ScanUserScope(selected);
                 var skips = Skips();
-                var plan = new SkillSync(ProjectRoot, fetcher: null, selected: selected, userScope: userScope, skips: skips).Plan(lockfile);
+                var sync = new SkillSync(ProjectRoot, fetcher: null, selected: selected, userScope: userScope, skips: skips,
+                    mode: _installMode);
+                var plan = sync.Plan(lockfile);
+                var differs = _installMode == InstallMode.Latest
+                    ? new HashSet<string>(sync.InstalledDiffersFromLock(lockfile))
+                    : new HashSet<string>();
                 var newSources = SourceConsent.NewSources(lockfile, LocalPrefs.Load(ProjectRoot));
                 var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
                 foreach (var skill in lockfile.Skills)
                 {
-                    _skillList.Add(SkillRow(skill, selected.Count == 0 ? "not installed (no folder selected)" : PendingLabel(plan, skill.Name), isNew.Contains(skill.Source),
+                    _skillList.Add(SkillRow(skill, selected.Count == 0 ? "not installed (no folder selected)" : PendingLabel(plan, skill.Name),
+                        _installMode, isNew.Contains(skill.Source), differs.Contains(skill.Name),
                         _failures.TryGetValue(skill.Name, out var failure) ? failure : null));
                     foreach (var folder in selected)
                         _skillList.Add(FolderRow(skill, folder, plan, userScope, skips));
@@ -128,12 +155,48 @@ namespace Hissal.AgentSkillsSync.Editor
                     ShowStatus("The lockfile lists no skills.", HelpBoxMessageType.Info);
                 _canSync = (selected.Count > 0 && lockfile.Skills.Count > 0) || plan.HasChanges;
             }
-            catch (LockfileException e)
+            catch (Exception e) when (e is LockfileException || e is ProjectSyncSettingsException)
             {
                 ShowStatus(e.Message, HelpBoxMessageType.Error);
             }
 
             UpdateSyncButton();
+        }
+
+        void ShowMode()
+        {
+            _mode.SetValueWithoutNotify(_installMode);
+            if (_installMode == InstallMode.Latest)
+            {
+                _modeHelp.text = "Latest: installs each skill's current upstream copy. A skill whose upstream changed since it " +
+                                 $"was locked is installed and marked \"differs from lock\". {Lockfile.FileName} is never rewritten; " +
+                                 "update it with `npx skills update`.";
+                _consentNote.text = "Latest mode: skills that differ from the lock will be installed.";
+            }
+            else
+            {
+                _modeHelp.text = "Pinned: installs a skill only if its upstream still matches the locked hash, and refuses it " +
+                                 $"otherwise (run `npx skills update` and commit {Lockfile.FileName}).";
+                _consentNote.text = "";
+            }
+            _consentNote.style.display = _consentNote.text.Length == 0 ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        void ChangeMode(InstallMode mode)
+        {
+            if (mode == _installMode) return;
+            try
+            {
+                new ProjectSyncSettings(mode).Save(ProjectRoot);
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                ShowStatus($"Could not save {ProjectSyncSettings.RelativePath}: {e.Message}", HelpBoxMessageType.Error);
+                _mode.SetValueWithoutNotify(_installMode);
+                return;
+            }
+            _failures = new Dictionary<string, SkillFetchException>();
+            Refresh();
         }
 
         /// <summary>What Sync would do to the skill, most significant first.</summary>
@@ -238,7 +301,8 @@ namespace Hissal.AgentSkillsSync.Editor
             Refresh();
         }
 
-        static VisualElement SkillRow(LockedSkill skill, string pending, bool newSource, SkillFetchException failure)
+        static VisualElement SkillRow(LockedSkill skill, string pending, InstallMode mode, bool newSource, bool differsFromLock,
+            SkillFetchException failure)
         {
             var container = new VisualElement { style = { marginBottom = 2 } };
             var row = new VisualElement { style = { flexDirection = FlexDirection.Row } };
@@ -246,10 +310,23 @@ namespace Hissal.AgentSkillsSync.Editor
             row.Add(new Label(skill.Source) { style = { flexGrow = 1 } });
             if (newSource) row.Add(new Label("NEW SOURCE") { style = { unityFontStyleAndWeight = FontStyle.Bold, color = new Color(0.9f, 0.6f, 0.1f), marginRight = 8 } });
             if (failure == null && !GitHubSkillFetcher.CanVerify(skill))
-                row.Add(new Label("can't verify lock hash")
+                row.Add(mode == InstallMode.Pinned
+                    ? new Label("can't verify lock hash")
+                    {
+                        tooltip = "Locked with a skills.sh server hash, which this tool cannot check. Pinned mode refuses to install or update it.",
+                        style = { marginRight = 8 },
+                    }
+                    : new Label("hash not verifiable")
+                    {
+                        tooltip = "Locked with a skills.sh server hash; Latest mode installs it without a hash check.",
+                        style = { marginRight = 8 },
+                    });
+            if (differsFromLock)
+                row.Add(new Label("differs from lock")
                 {
-                    tooltip = "Locked with a skills.sh server hash, which this tool cannot check. Sync refuses to install or update it.",
-                    style = { marginRight = 8 },
+                    tooltip = "The installed copy is upstream's, which changed since it was locked. " +
+                              $"Run `npx skills update` and commit {Lockfile.FileName} to lock it.",
+                    style = { marginRight = 8, color = new StyleColor(new Color(0.9f, 0.7f, 0.2f)) },
                 });
             row.Add(new Label(failure != null ? FailureLabel(failure.Failure) : pending)
             {
@@ -364,13 +441,22 @@ namespace Hissal.AgentSkillsSync.Editor
                     return;
                 }
 
+                // The consent note described the mode the window listed; a mode changed since (a pull) needs a fresh look.
+                var mode = ProjectSyncSettings.Load(ProjectRoot).InstallMode;
+                if (mode != _installMode)
+                {
+                    ShowSummary($"The install mode changed to {mode} since the window listed the skills. Review it and sync again.", HelpBoxMessageType.Warning);
+                    Refresh();
+                    return;
+                }
+
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
                 selected = SelectedFolders();
                 userScope = ScanUserScope(selected);
                 skips = Skips();
                 // Run the very instance that passed the check, never a fresh read of the file.
-                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher(), selected: selected, userScope: userScope, skips: skips)
-                    .Run(lockfile);
+                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher(mode: mode), selected: selected, userScope: userScope,
+                    skips: skips, mode: mode).Run(lockfile);
                 ShowSummary(Describe(summary), summary.UserScopeDiffers.Count > 0 ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info);
             }
             catch (SyncAbortedException e)
@@ -379,7 +465,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 ShowSummary($"Sync aborted, nothing was changed: {e.Failures.Count} skill(s) could not be fetched. See the errors in the list.", HelpBoxMessageType.Error);
                 Debug.LogError(e.Message);
             }
-            catch (Exception e) when (e is LockfileException || e is IOException || e is UnauthorizedAccessException)
+            catch (Exception e) when (e is LockfileException || e is ProjectSyncSettingsException || e is IOException || e is UnauthorizedAccessException)
             {
                 ShowSummary("Sync failed: " + e.Message, HelpBoxMessageType.Error);
                 Debug.LogException(e);
@@ -426,6 +512,9 @@ namespace Hissal.AgentSkillsSync.Editor
             var text = new StringBuilder();
             if (summary.NothingChanged) text.AppendLine("Everything is already in sync.");
             else DescribeChanges(summary, text);
+            if (summary.DiffersFromLock.Count > 0)
+                text.AppendLine($"Differs from lock ({summary.DiffersFromLock.Count}): {string.Join(", ", summary.DiffersFromLock)}. " +
+                                $"Installed from upstream; run `npx skills update` and commit {Lockfile.FileName} to lock them.");
             foreach (var warning in summary.UserScopeDiffers)
                 text.AppendLine("Warning: " + DiffersMessage(warning));
             return text.ToString().TrimEnd();
