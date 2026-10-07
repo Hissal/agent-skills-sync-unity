@@ -27,5 +27,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   skills are installed next to it, local prefs and project settings stay in the Unity project, and the sync window
   shows the lock in use. What this machine manages is recorded per skills root, so moving the lock never claims
   same-named skills at the new location.
+- Lock entries with a source type other than `github` (e.g. `unity-package`) no longer fail the whole lockfile:
+  they are listed in the sync window as not installed by this tool, and their folders are left alone.
 - README: install, project setup, folder selection and skips, install mode, migration from vendored skills, and
   scoping the official Unity Claude plugin per project.

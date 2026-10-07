@@ -249,6 +249,20 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Plan_UnsupportedLockEntryInCanonicalFolder_IsLeftAlone()
+        {
+            var project = Project(
+                new FolderState(Agents, entries: new[] { "unity-pipeline" }, managed: null),
+                new FolderState(Claude, entries: null, managed: null));
+            var lockfile = new Lockfile(new LockedSkill[0], new[] { new UnsupportedSkill("unity-pipeline", "unity-package") });
+
+            var plan = InstallPlanner.Plan(lockfile, project, FolderLayout.Default);
+
+            Assert.That(plan.Actions, Is.Empty);
+            Assert.That(ManagedIn(plan, Claude), Is.Empty);
+        }
+
+        [Test]
         public void Plan_ProjectAuthoredSkillNextToLockedOne_IsOnlyEverLinked()
         {
             var project = Project(

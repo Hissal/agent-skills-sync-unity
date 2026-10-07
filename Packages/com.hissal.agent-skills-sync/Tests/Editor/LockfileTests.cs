@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 
 namespace Hissal.AgentSkillsSync.Tests
@@ -58,18 +59,34 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
-        public void Parse_NonGitHubSourceType_RejectsNamingTheSkillAndType()
+        public void Parse_NonGitHubSourceType_ListsItAsUnsupportedAndKeepsTheRest()
         {
             const string json = @"{
   ""version"": 1,
   ""skills"": {
-    ""local-thing"": { ""source"": ""./skills/local-thing"", ""sourceType"": ""local"", ""computedHash"": ""abc"" }
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""computedHash"": ""abc"" },
+    ""unity-pipeline"": { ""source"": ""com.unity.pipeline"", ""sourceType"": ""unity-package"", ""packageVersion"": ""0.7.0-exp.1"", ""skillPath"": "".claude/skills/unity-pipeline/SKILL.md"" },
+    ""local-thing"": { ""source"": ""./skills/local-thing"", ""sourceType"": ""local"" }
   }
 }";
 
+            var lockfile = Lockfile.Parse(json);
+
+            Assert.That(lockfile.Skills.Select(s => s.Name), Is.EqualTo(new[] { "tdd" }));
+            Assert.That(lockfile.Unsupported.Select(s => $"{s.Name}:{s.SourceType}"),
+                Is.EqualTo(new[] { "unity-pipeline:unity-package", "local-thing:local" }));
+        }
+
+        [TestCase(@"", TestName = "Parse_MissingSourceType_Rejects")]
+        [TestCase(@", ""sourceType"": """"", TestName = "Parse_EmptySourceType_Rejects")]
+        [TestCase(@", ""sourceType"": 3", TestName = "Parse_NonStringSourceType_Rejects")]
+        public void Parse_NoUsableSourceType_RejectsNamingTheSkill(string jsonSourceTypeMember)
+        {
+            var json = @"{ ""version"": 1, ""skills"": { ""a"": { ""source"": ""owner/repo""" + jsonSourceTypeMember + @" } } }";
+
             var error = Assert.Throws<LockfileException>(() => Lockfile.Parse(json));
 
-            Assert.That(error.Message, Does.Contain("local-thing").And.Contain("\"local\""));
+            Assert.That(error.Message, Does.Contain("\"a\"").And.Contain("source type"));
         }
 
         [TestCase(@"{ ""version"": 1, ""skills"": { ")]

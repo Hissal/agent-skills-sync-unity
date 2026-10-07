@@ -7,7 +7,8 @@ namespace Hissal.AgentSkillsSync
 {
     /// <summary>
     /// The parsed <c>skills-lock.json</c>, the project's source of truth for which skills to install.
-    /// Reads the <c>skills</c> CLI's format; only <c>version</c> 1 and <c>github</c> sources are accepted.
+    /// Reads the <c>skills</c> CLI's format; only <c>version</c> 1 is accepted. Only <c>github</c> sources are installed;
+    /// entries of any other source type are listed in <see cref="Unsupported"/> and left to whatever installs them.
     /// </summary>
     public sealed class Lockfile
     {
@@ -15,10 +16,17 @@ namespace Hissal.AgentSkillsSync
         public const int SupportedVersion = 1;
         public const string GitHubSourceType = "github";
 
-        public Lockfile(IReadOnlyList<LockedSkill> skills) => Skills = skills;
+        public Lockfile(IReadOnlyList<LockedSkill> skills, IReadOnlyList<UnsupportedSkill> unsupported = null)
+        {
+            Skills = skills;
+            Unsupported = unsupported ?? Array.Empty<UnsupportedSkill>();
+        }
 
-        /// <summary>The locked skills, in lockfile order.</summary>
+        /// <summary>The locked <c>github</c> skills this tool installs, in lockfile order.</summary>
         public IReadOnlyList<LockedSkill> Skills { get; }
+
+        /// <summary>The entries with another source type, in lockfile order. The tool never installs or touches them.</summary>
+        public IReadOnlyList<UnsupportedSkill> Unsupported { get; }
 
         /// <summary>
         /// The folder holding the <c>skills-lock.json</c> a Unity project syncs: the Unity project folder itself, else
@@ -40,7 +48,7 @@ namespace Hissal.AgentSkillsSync
             return Parse(File.ReadAllText(path));
         }
 
-        /// <exception cref="LockfileException">The JSON is malformed, the version is unknown, or a skill has an unsupported source.</exception>
+        /// <exception cref="LockfileException">The JSON is malformed, the version is unknown, or a skill entry is unusable.</exception>
         public static Lockfile Parse(string json)
         {
             object root;
@@ -66,26 +74,26 @@ namespace Hissal.AgentSkillsSync
                 throw new LockfileException($"{FileName} has no \"skills\" object.");
 
             var skills = new List<LockedSkill>();
+            var unsupported = new List<UnsupportedSkill>();
             foreach (var entry in skillsObject)
-                skills.Add(ParseSkill(entry.Key, entry.Value));
-            return new Lockfile(skills);
+            {
+                if (!(entry.Value is List<KeyValuePair<string, object>> skill))
+                    throw new LockfileException($"Skill \"{entry.Key}\" in {FileName} must be a JSON object.");
+                if (!(Get(skill, "sourceType") is string sourceType) || sourceType.Length == 0)
+                    throw new LockfileException($"Skill \"{entry.Key}\" in {FileName} has no source type.");
+                if (sourceType == GitHubSourceType) skills.Add(ParseSkill(entry.Key, skill));
+                else unsupported.Add(new UnsupportedSkill(entry.Key, sourceType));
+            }
+            return new Lockfile(skills, unsupported);
         }
 
-        static LockedSkill ParseSkill(string name, object value)
+        static LockedSkill ParseSkill(string name, List<KeyValuePair<string, object>> skill)
         {
             if (!IsSafeFolderName(name))
                 throw new LockfileException(
                     $"Skill name {Describe(name)} in {FileName} is not a safe skill folder name. " +
                     "A skill name must be a single folder name: no path separators, no \".\" or \"..\", no drive or root, " +
                     "no characters that are invalid in file names, and no trailing dot or space.");
-
-            if (!(value is List<KeyValuePair<string, object>> skill))
-                throw new LockfileException($"Skill \"{name}\" in {FileName} must be a JSON object.");
-
-            var sourceType = Get(skill, "sourceType") as string;
-            if (sourceType != GitHubSourceType)
-                throw new LockfileException(
-                    $"Skill \"{name}\" has source type {Describe(Get(skill, "sourceType"))}; only \"{GitHubSourceType}\" sources are supported.");
 
             var source = Get(skill, "source") as string;
             if (string.IsNullOrEmpty(source))
@@ -94,7 +102,7 @@ namespace Hissal.AgentSkillsSync
             return new LockedSkill(
                 name,
                 source,
-                sourceType,
+                GitHubSourceType,
                 Get(skill, "skillPath") as string,
                 Get(skill, "computedHash") as string,
                 ParseRef(name, Get(skill, "ref")));

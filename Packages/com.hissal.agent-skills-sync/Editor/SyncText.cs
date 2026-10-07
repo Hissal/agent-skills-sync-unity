@@ -22,6 +22,11 @@ namespace Hissal.AgentSkillsSync.Editor
             return "installed";
         }
 
+        /// <summary>Names the lock entries whose source type this tool does not install, and says it leaves them alone.</summary>
+        public static string UnsupportedMessage(IReadOnlyList<UnsupportedSkill> unsupported) =>
+            "Not installed by this tool (only \"github\" sources are; these are left to whatever installs them): " +
+            string.Join(", ", unsupported.Select(s => $"{s.Name} ({s.SourceType})")) + ".";
+
         /// <summary>What Sync does to the skill in one folder, from the plan.</summary>
         public static string FolderStatus(InstallPlan plan, LockedSkill skill, SkillsFolder folder, bool skipStored, bool foundAtUserScope)
         {
