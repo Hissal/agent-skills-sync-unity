@@ -14,6 +14,14 @@ namespace Hissal.AgentSkillsSync.Tests
 
         static Lockfile Lock(params string[] names) => new Lockfile(names.Select(Skill).ToList());
 
+        static UnsupportedSkill Unsupported(string name) => new UnsupportedSkill(name, "unity-package");
+
+        /// <summary>Every default folder holds <c>tdd</c>, installed by the tool at the locked hash, under the given block.</summary>
+        static ProjectState TddInstalledEverywhere(params string[] ignored) =>
+            new ProjectState(FolderLayout.Default.Folders.Select(f =>
+                new FolderState(f, new[] { "tdd" }, new[] { "tdd" },
+                    installedHashes: new Dictionary<string, string> { ["tdd"] = LockedHash }, ignored: ignored)));
+
         /// <summary>Renders an action the way the expectations below are written.</summary>
         static string Describe(PlanAction action) =>
             action.Kind == PlanActionKind.Link
@@ -185,12 +193,7 @@ namespace Hissal.AgentSkillsSync.Tests
         [Test]
         public void Plan_EverythingInstalledAndRecorded_HasNoChanges()
         {
-            var layout = FolderLayout.Default;
-            var tdd = new[] { "tdd" };
-            var project = new ProjectState(layout.Folders.Select(f =>
-                new FolderState(f, tdd, tdd, installedHashes: new Dictionary<string, string> { ["tdd"] = LockedHash }, ignored: tdd)));
-
-            var plan = InstallPlanner.Plan(Lock("tdd"), project, layout);
+            var plan = InstallPlanner.Plan(Lock("tdd"), TddInstalledEverywhere("tdd"), FolderLayout.Default);
 
             Assert.That(plan.HasChanges, Is.False);
         }
@@ -198,16 +201,11 @@ namespace Hissal.AgentSkillsSync.Tests
         [Test]
         public void Plan_GitignoreBlockMissingALockedSkill_HasChanges()
         {
-            var layout = FolderLayout.Default;
-            var tdd = new[] { "tdd" };
-            var project = new ProjectState(layout.Folders.Select(f =>
-                new FolderState(f, tdd, tdd, installedHashes: new Dictionary<string, string> { ["tdd"] = LockedHash })));
-
-            var plan = InstallPlanner.Plan(Lock("tdd"), project, layout);
+            var plan = InstallPlanner.Plan(Lock("tdd"), TddInstalledEverywhere(), FolderLayout.Default);
 
             Assert.That(plan.Actions, Is.Empty);
             Assert.That(plan.HasChanges, Is.True);
-            Assert.That(plan.IgnoredNames.Values, Has.All.EqualTo(tdd));
+            Assert.That(plan.IgnoredNames.Values, Has.All.EqualTo(new[] { "tdd" }));
         }
 
         [TestCase(LockedHash, true)]
@@ -254,12 +252,42 @@ namespace Hissal.AgentSkillsSync.Tests
             var project = Project(
                 new FolderState(Agents, entries: new[] { "unity-pipeline" }, managed: null),
                 new FolderState(Claude, entries: null, managed: null));
-            var lockfile = new Lockfile(new LockedSkill[0], new[] { new UnsupportedSkill("unity-pipeline", "unity-package") });
+            var lockfile = new Lockfile(new LockedSkill[0], new[] { Unsupported("unity-pipeline") });
 
             var plan = InstallPlanner.Plan(lockfile, project, FolderLayout.Default);
 
             Assert.That(plan.Actions, Is.Empty);
             Assert.That(ManagedIn(plan, Claude), Is.Empty);
+            Assert.That(plan.IgnoredNames.Keys, Is.EquivalentTo(new[] { Agents, Claude }));
+            Assert.That(plan.IgnoredNames.Values, Has.All.Empty);
+        }
+
+        [Test]
+        public void Plan_GithubAndUnsupportedLockEntries_IgnoresOnlyTheGithubSkill()
+        {
+            var project = Project(
+                new FolderState(Agents, entries: new[] { "unity-pipeline" }, managed: null),
+                new FolderState(Claude, entries: null, managed: null));
+            var lockfile = new Lockfile(new[] { Skill("tdd") }, new[] { Unsupported("unity-pipeline") });
+
+            var plan = InstallPlanner.Plan(lockfile, project, FolderLayout.Default);
+
+            Assert.That(plan.Actions.Where(a => a.SkillName == "unity-pipeline"), Is.Empty);
+            Assert.That(ManagedIn(plan, Claude), Is.EqualTo(new[] { "tdd" }));
+            Assert.That(plan.IgnoredNames.Keys, Is.EquivalentTo(new[] { Agents, Claude }));
+            Assert.That(plan.IgnoredNames.Values, Has.All.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
+        public void Plan_GitignoreBlockListingAnUnsupportedEntry_DropsItAndHasChanges()
+        {
+            var lockfile = new Lockfile(new[] { Skill("tdd") }, new[] { Unsupported("unity-pipeline") });
+
+            var plan = InstallPlanner.Plan(lockfile, TddInstalledEverywhere("tdd", "unity-pipeline"), FolderLayout.Default);
+
+            Assert.That(plan.Actions, Is.Empty);
+            Assert.That(plan.HasChanges, Is.True);
+            Assert.That(plan.IgnoredNames.Values, Has.All.EqualTo(new[] { "tdd" }));
         }
 
         [Test]

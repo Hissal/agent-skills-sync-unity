@@ -149,8 +149,8 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Per folder whose <c>.gitignore</c> block the sync writes (a folder this machine keeps entries in, or one
-        /// whose block exists), the sorted names the block lists: every locked skill, plus project-authored skills in
-        /// link folders. The block is committed, so it never depends on this machine's selection or skips.
+        /// whose block exists), the sorted names the block lists: every locked <c>github</c> skill, plus project-authored
+        /// skills in link folders. The block is committed, so it never depends on this machine's selection or skips.
         /// </summary>
         public IReadOnlyDictionary<SkillsFolder, IReadOnlyList<string>> IgnoredNames { get; }
     }

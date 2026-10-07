@@ -126,11 +126,11 @@ namespace Hissal.AgentSkillsSync
             // installed by the tool. A lock entry with an unsupported source type (e.g. a skill a Unity package
             // installs) is someone else's to place, so it is never one.
             // They stay tracked there; only the links the tool makes for them are managed.
-            var locked = new HashSet<string>(lockfile.Skills.Select(s => s.Name).Concat(lockfile.Unsupported.Select(s => s.Name)),
+            var allLocked = new HashSet<string>(lockfile.Skills.Select(s => s.Name).Concat(lockfile.Unsupported.Select(s => s.Name)),
                 StringComparer.Ordinal);
             var canonicalState = project.For(layout.Canonical);
             var projectAuthored = canonicalState.Entries
-                .Where(name => !locked.Contains(name) && !canonicalState.Manages(name) && canonicalState.IsSkillFolder(name))
+                .Where(name => !allLocked.Contains(name) && !canonicalState.Manages(name) && canonicalState.IsSkillFolder(name))
                 .OrderBy(name => name, StringComparer.Ordinal)
                 .ToList();
             foreach (var name in projectAuthored)
@@ -161,7 +161,7 @@ namespace Hissal.AgentSkillsSync
             var authored = new HashSet<string>(projectAuthored, StringComparer.Ordinal);
             var stale = layout.Folders
                 .SelectMany(f => project.For(f).Managed)
-                .Where(name => !locked.Contains(name) && !authored.Contains(name))
+                .Where(name => !allLocked.Contains(name) && !authored.Contains(name))
                 .Distinct()
                 .OrderBy(name => name, StringComparer.Ordinal);
             foreach (var name in stale)
@@ -175,12 +175,13 @@ namespace Hissal.AgentSkillsSync
                 }
             }
 
-            // The committed .gitignore blocks: the same on every machine, whatever it selected or manages.
+            // The committed .gitignore blocks: the same on every machine, whatever it selected or manages. They list
+            // only what the tool may install or link; an unsupported entry's placer decides whether git tracks it.
             var ignored = new Dictionary<SkillsFolder, IReadOnlyList<string>>();
             foreach (var folder in layout.Folders)
             {
                 if (!Needed(folder) && project.For(folder).Ignored.Count == 0) continue;
-                var names = new SortedSet<string>(locked, StringComparer.Ordinal);
+                var names = new SortedSet<string>(lockfile.Skills.Select(s => s.Name), StringComparer.Ordinal);
                 if (folder.Role == SkillsFolderRole.Link) names.UnionWith(projectAuthored);
                 ignored[folder] = names.ToList();
             }
