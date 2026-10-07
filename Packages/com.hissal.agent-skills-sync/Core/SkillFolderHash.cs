@@ -19,7 +19,39 @@ namespace Hissal.AgentSkillsSync
         /// <paramref name="skillDirectory"/> (the folder holding SKILL.md).
         /// </summary>
         /// <exception cref="DirectoryNotFoundException">The folder does not exist.</exception>
-        public static string Compute(string skillDirectory)
+        public static string Compute(string skillDirectory) => Compute(skillDirectory, crlfCheckout: false);
+
+        /// <summary>
+        /// The hash the CLI records when it hashed a git checkout made with <c>core.autocrlf=true</c>: every text
+        /// file (no NUL and no CR byte, as git decides for autocrlf) with its LF line endings turned into CRLF.
+        /// </summary>
+        internal static string ComputeAsCrlfCheckout(string skillDirectory) => Compute(skillDirectory, crlfCheckout: true);
+
+        /// <summary>
+        /// Rewrites the folder's text files as a <c>core.autocrlf=true</c> checkout has them, so the folder then
+        /// hashes (<see cref="Compute(string)"/>) to what <see cref="ComputeAsCrlfCheckout"/> returned before.
+        /// </summary>
+        internal static void ConvertToCrlfCheckout(string skillDirectory)
+        {
+            var files = new List<(string Path, string FullName)>();
+            CollectFiles(new DirectoryInfo(skillDirectory), "", files);
+            foreach (var file in files)
+            {
+                var content = File.ReadAllBytes(file.FullName);
+                var converted = ToCrlf(content);
+                if (converted != content) File.WriteAllBytes(file.FullName, converted);
+            }
+        }
+
+        /// <summary>Whether any file path in the folder has a non-ASCII character, where the path order (and so the hash) is not exact.</summary>
+        internal static bool HasNonAsciiPath(string skillDirectory)
+        {
+            var files = new List<(string Path, string FullName)>();
+            CollectFiles(new DirectoryInfo(skillDirectory), "", files);
+            return files.Any(f => f.Path.Any(c => c > 0x7E));
+        }
+
+        static string Compute(string skillDirectory, bool crlfCheckout)
         {
             var root = new DirectoryInfo(skillDirectory);
             if (!root.Exists) throw new DirectoryNotFoundException($"Skill folder not found: {skillDirectory}");
@@ -35,11 +67,25 @@ namespace Hissal.AgentSkillsSync
                     var pathBytes = Encoding.UTF8.GetBytes(file.Path);
                     sha.TransformBlock(pathBytes, 0, pathBytes.Length, null, 0);
                     var content = File.ReadAllBytes(file.FullName);
+                    if (crlfCheckout) content = ToCrlf(content);
                     sha.TransformBlock(content, 0, content.Length, null, 0);
                 }
                 sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
                 return string.Concat(sha.Hash.Select(b => b.ToString("x2")));
             }
+        }
+
+        static byte[] ToCrlf(byte[] content)
+        {
+            const byte Cr = 0x0D, Lf = 0x0A;
+            if (Array.IndexOf(content, (byte)0) >= 0 || Array.IndexOf(content, Cr) >= 0) return content;
+            var converted = new List<byte>(content.Length + content.Length / 16);
+            foreach (var b in content)
+            {
+                if (b == Lf) converted.Add(Cr);
+                converted.Add(b);
+            }
+            return converted.ToArray();
         }
 
         // Mirrors the CLI's collectFiles: recurse into real folders except .git and node_modules,

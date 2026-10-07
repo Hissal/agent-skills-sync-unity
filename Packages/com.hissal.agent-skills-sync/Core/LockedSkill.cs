@@ -25,7 +25,7 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Path of the skill's <c>SKILL.md</c> inside the source repo, or null when the lock omits it.</summary>
         public string SkillPath { get; }
 
-        /// <summary>Content hash as computed by the <c>skills</c> CLI. Not verified yet.</summary>
+        /// <summary>Content hash as computed by the <c>skills</c> CLI; the fetcher checks downloads against it.</summary>
         public string ComputedHash { get; }
 
         /// <summary>The branch, tag or commit the skill is locked to (the lock's <c>ref</c>), or null for the repo's default branch.</summary>
