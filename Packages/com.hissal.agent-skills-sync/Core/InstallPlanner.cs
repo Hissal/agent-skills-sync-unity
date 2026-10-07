@@ -123,9 +123,11 @@ namespace Hissal.AgentSkillsSync
             }
 
             // Project-authored skills: folders with a SKILL.md committed in the canonical folder, neither locked nor
-            // installed by the tool.
+            // installed by the tool. A lock entry with an unsupported source type (e.g. a skill a Unity package
+            // installs) is someone else's to place, so it is never one.
             // They stay tracked there; only the links the tool makes for them are managed.
-            var locked = new HashSet<string>(lockfile.Skills.Select(s => s.Name), StringComparer.Ordinal);
+            var locked = new HashSet<string>(lockfile.Skills.Select(s => s.Name).Concat(lockfile.Unsupported.Select(s => s.Name)),
+                StringComparer.Ordinal);
             var canonicalState = project.For(layout.Canonical);
             var projectAuthored = canonicalState.Entries
                 .Where(name => !locked.Contains(name) && !canonicalState.Manages(name) && canonicalState.IsSkillFolder(name))

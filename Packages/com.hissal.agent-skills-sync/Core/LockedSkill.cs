@@ -19,7 +19,7 @@ namespace Hissal.AgentSkillsSync
         /// <summary>The source repo, e.g. <c>owner/repo</c>.</summary>
         public string Source { get; }
 
-        /// <summary>Always <c>github</c>; the lockfile rejects anything else.</summary>
+        /// <summary>Always <c>github</c>; the lockfile lists other source types in <see cref="Lockfile.Unsupported"/>.</summary>
         public string SourceType { get; }
 
         /// <summary>Path of the skill's <c>SKILL.md</c> inside the source repo, or null when the lock omits it.</summary>

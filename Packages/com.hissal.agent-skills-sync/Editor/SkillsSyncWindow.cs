@@ -159,6 +159,8 @@ namespace Hissal.AgentSkillsSync.Editor
                         _skillList.Add(FolderRow(skill, folder, plan, choices));
                 }
                 ShowNewSources(newSources);
+                if (lockfile.Unsupported.Count > 0)
+                    _skillList.Add(new HelpBox(SyncText.UnsupportedMessage(lockfile.Unsupported), HelpBoxMessageType.Info));
 
                 _lockfile = lockfile;
 
@@ -168,7 +170,8 @@ namespace Hissal.AgentSkillsSync.Editor
                 else if (selected.Count == 0)
                     ShowStatus("No skills folder is selected, so Sync installs nothing. Select a folder above to opt in.", HelpBoxMessageType.Info);
                 else if (lockfile.Skills.Count == 0)
-                    ShowStatus("The lockfile lists no skills.", HelpBoxMessageType.Info);
+                    ShowStatus(lockfile.Unsupported.Count == 0 ? "The lockfile lists no skills." : "The lockfile lists no skills this tool installs.",
+                        HelpBoxMessageType.Info);
                 _canSync = (selected.Count > 0 && lockfile.Skills.Count > 0) || plan.HasChanges;
             }
             catch (Exception e) when (e is LockfileException || e is ProjectSyncSettingsException)
