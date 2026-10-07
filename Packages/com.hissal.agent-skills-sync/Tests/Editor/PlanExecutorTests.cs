@@ -225,8 +225,8 @@ namespace Hissal.AgentSkillsSync.Tests
                 Assert.That(Directory.GetFileSystemEntries(InProject(path)).Select(Path.GetFileName), Is.EqualTo(new[] { "SKILL.md" }), path);
                 Assert.That(File.ReadAllText(InProject(path + "/SKILL.md")), Is.EqualTo("# mine"), path);
             }
-            // The committed blocks list every locked github skill (and project-authored ones in link folders); what this
-            // machine manages, never the foreign entries, is in its prefs.
+            // The committed blocks list every locked github skill (and project-authored ones in link folders); what
+            // this machine manages, never the foreign entries, is in its prefs.
             Assert.That(ManagedLines(".agents/skills"), Is.EqualTo(new[] { "/tdd" }));
             Assert.That(ManagedLines(".claude/skills"), Is.EqualTo(new[] { "/mine", "/tdd" }));
             var managed = LocalPrefs.Load(_project).ManagedSkills;

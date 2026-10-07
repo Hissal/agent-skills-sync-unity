@@ -8,8 +8,8 @@ namespace Hissal.AgentSkillsSync
 {
     /// <summary>
     /// The tool's block inside the <c>.gitignore</c> of each skills folder. The block is committed, so it lists the
-    /// same names on every machine: every locked <c>github</c> skill, plus project-authored skills in link folders (see
-    /// <see cref="InstallPlan.IgnoredNames"/>). Which entries this machine actually manages is kept in its
+    /// same names on every machine: every locked <c>github</c> skill, plus project-authored skills in link folders
+    /// (see <see cref="InstallPlan.IgnoredNames"/>). Which entries this machine actually manages is kept in its
     /// <see cref="LocalPrefs.ManagedSkills"/>; the block is read as that record only before a sync first wrote it.
     /// Lines outside the block belong to the user: they are kept as they are and never read as the tool's.
     /// </summary>

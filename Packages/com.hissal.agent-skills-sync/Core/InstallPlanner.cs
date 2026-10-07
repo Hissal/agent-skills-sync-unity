@@ -126,11 +126,11 @@ namespace Hissal.AgentSkillsSync
             // installed by the tool. A lock entry with an unsupported source type (e.g. a skill a Unity package
             // installs) is someone else's to place, so it is never one.
             // They stay tracked there; only the links the tool makes for them are managed.
-            var locked = new HashSet<string>(lockfile.Skills.Select(s => s.Name).Concat(lockfile.Unsupported.Select(s => s.Name)),
+            var allLocked = new HashSet<string>(lockfile.Skills.Select(s => s.Name).Concat(lockfile.Unsupported.Select(s => s.Name)),
                 StringComparer.Ordinal);
             var canonicalState = project.For(layout.Canonical);
             var projectAuthored = canonicalState.Entries
-                .Where(name => !locked.Contains(name) && !canonicalState.Manages(name) && canonicalState.IsSkillFolder(name))
+                .Where(name => !allLocked.Contains(name) && !canonicalState.Manages(name) && canonicalState.IsSkillFolder(name))
                 .OrderBy(name => name, StringComparer.Ordinal)
                 .ToList();
             foreach (var name in projectAuthored)
@@ -161,7 +161,7 @@ namespace Hissal.AgentSkillsSync
             var authored = new HashSet<string>(projectAuthored, StringComparer.Ordinal);
             var stale = layout.Folders
                 .SelectMany(f => project.For(f).Managed)
-                .Where(name => !locked.Contains(name) && !authored.Contains(name))
+                .Where(name => !allLocked.Contains(name) && !authored.Contains(name))
                 .Distinct()
                 .OrderBy(name => name, StringComparer.Ordinal);
             foreach (var name in stale)
