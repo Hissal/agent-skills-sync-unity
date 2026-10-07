@@ -16,6 +16,8 @@ namespace Hissal.AgentSkillsSync.Editor
     /// A failed sync marks each skill that could not be fetched or verified with its error.
     /// The skills folders to install into are chosen at the top and stored in local prefs as soon as they change;
     /// until then they are pre-selected by autofill, and nothing is installed before Sync.
+    /// Each skill lists its status per selected folder; where that folder's agents already have the skill at user scope,
+    /// the row names where it was found and offers a skip toggle (stored in local prefs at once, applied on Sync).
     /// </summary>
     public sealed class SkillsSyncWindow : EditorWindow
     {
@@ -39,6 +41,11 @@ namespace Hissal.AgentSkillsSync.Editor
 
         static IReadOnlyList<SkillsFolder> SelectedFolders() =>
             FolderSelection.Effective(LocalPrefs.Load(ProjectRoot), Table, UserEnvironment.Current);
+
+        static UserScopeState ScanUserScope(IReadOnlyList<SkillsFolder> selected) =>
+            UserScopeScanner.Scan(selected, UserEnvironment.Current);
+
+        static SkipChoices Skips() => SkipChoices.From(LocalPrefs.Load(ProjectRoot));
 
         [MenuItem("Window/Agent Skills Sync")]
         public static void Open() => GetWindow<SkillsSyncWindow>(Title).Show();
@@ -96,12 +103,18 @@ namespace Hissal.AgentSkillsSync.Editor
             try
             {
                 var lockfile = Lockfile.Load(ProjectRoot);
-                var plan = new SkillSync(ProjectRoot, fetcher: null, selected: selected).Plan(lockfile);
+                var userScope = ScanUserScope(selected);
+                var skips = Skips();
+                var plan = new SkillSync(ProjectRoot, fetcher: null, selected: selected, userScope: userScope, skips: skips).Plan(lockfile);
                 var newSources = SourceConsent.NewSources(lockfile, LocalPrefs.Load(ProjectRoot));
                 var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
                 foreach (var skill in lockfile.Skills)
+                {
                     _skillList.Add(SkillRow(skill, selected.Count == 0 ? "not installed (no folder selected)" : PendingLabel(plan, skill.Name), isNew.Contains(skill.Source),
                         _failures.TryGetValue(skill.Name, out var failure) ? failure : null));
+                    foreach (var folder in selected)
+                        _skillList.Add(FolderRow(skill, folder, plan, userScope, skips));
+                }
                 ShowNewSources(newSources);
 
                 _lockfile = lockfile;
@@ -131,7 +144,81 @@ namespace Hissal.AgentSkillsSync.Editor
             if (kinds.Contains(PlanActionKind.Update)) return "to update";
             if (kinds.Contains(PlanActionKind.Link)) return "to link";
             if (kinds.Contains(PlanActionKind.LeaveForeign)) return "left alone (not managed)";
+            if (kinds.Contains(PlanActionKind.SkipUserScope)) return "skipped where you have your own copy";
             return "installed";
+        }
+
+        /// <summary>What Sync does to the skill in one folder, from the plan.</summary>
+        static string FolderStatus(InstallPlan plan, LockedSkill skill, SkillsFolder folder, bool skipStored, bool foundAtUserScope)
+        {
+            var kinds = plan.Actions.Where(a => a.SkillName == skill.Name && a.Folder.RelativePath == folder.RelativePath)
+                .Select(a => a.Kind).ToList();
+            if (kinds.Contains(PlanActionKind.SkipUserScope))
+                return kinds.Contains(PlanActionKind.Unlink) || kinds.Contains(PlanActionKind.Remove)
+                    ? "skipped (project copy removed on Sync)"
+                    : "skipped (using your copy)";
+            if (kinds.Contains(PlanActionKind.Install)) return "to install";
+            if (kinds.Contains(PlanActionKind.Update)) return "to update";
+            if (kinds.Contains(PlanActionKind.Link)) return "to link";
+            if (kinds.Contains(PlanActionKind.LeaveForeign)) return "left alone (not managed)";
+            if (skipStored && foundAtUserScope && folder.Role == SkillsFolderRole.Canonical)
+                return "installed (kept: another selected folder links to it)";
+            return "installed";
+        }
+
+        /// <summary>
+        /// The skill's status in one selected folder, where its agents already have it at user scope, and a toggle to
+        /// skip the project copy there. The toggle is shown while a user-scope copy is found or a skip is stored.
+        /// </summary>
+        VisualElement FolderRow(LockedSkill skill, SkillsFolder folder, InstallPlan plan, UserScopeState userScope, SkipChoices skips)
+        {
+            var copies = userScope.CopiesOf(folder, skill.Name);
+            var skipStored = skips.IsSkipped(folder, skill.Name);
+            var container = new VisualElement { style = { marginLeft = 16, marginBottom = 2 } };
+            var row = new VisualElement { style = { flexDirection = FlexDirection.Row } };
+            row.Add(new Label(folder.RelativePath) { style = { width = 184 } });
+            row.Add(new Label(FolderStatus(plan, skill, folder, skipStored, copies.Count > 0)) { style = { flexGrow = 1 } });
+            container.Add(row);
+
+            if (copies.Count > 0)
+                container.Add(new Label("The project also provides this skill, and you already have it at " +
+                                        string.Join(", ", copies.Select(c => c.FoundIn)) + ".")
+                {
+                    tooltip = string.Join("\n", copies.Select(c => c.Agents == null ? c.Path : $"{c.Path} - read by {c.Agents}")),
+                    style = { whiteSpace = WhiteSpace.Normal, color = new Color(0.9f, 0.6f, 0.1f) },
+                });
+            else if (skipStored)
+                container.Add(new Label("Skipped, but no user-scope copy was found any more, so the project copy is installed.")
+                    { style = { whiteSpace = WhiteSpace.Normal } });
+
+            if (copies.Count > 0 || skipStored)
+            {
+                var toggle = new Toggle($"Skip the project copy in {folder.RelativePath} (use mine)")
+                {
+                    tooltip = "Stored on this machine only. Applies on the next Sync: skipping removes the tool's link or copy " +
+                              "from this folder only; un-skipping installs it again.",
+                };
+                toggle.SetValueWithoutNotify(skipStored);
+                toggle.RegisterValueChangedCallback(e => SaveSkip(folder, skill.Name, e.newValue));
+                container.Add(toggle);
+            }
+            return container;
+        }
+
+        void SaveSkip(SkillsFolder folder, string skillName, bool skip)
+        {
+            try
+            {
+                var prefs = LocalPrefs.Load(ProjectRoot);
+                SkipChoices.Set(prefs, folder, skillName, skip);
+                prefs.Save();
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                ShowSummary("Saving the skip choice failed: " + e.Message, HelpBoxMessageType.Error);
+                Debug.LogException(e);
+            }
+            Refresh();
         }
 
         static VisualElement SkillRow(LockedSkill skill, string pending, bool newSource, SkillFetchException failure)
@@ -247,6 +334,8 @@ namespace Hissal.AgentSkillsSync.Editor
             SyncSummary summary = null;
             Lockfile lockfile = null;
             IReadOnlyList<SkillsFolder> selected = null;
+            UserScopeState userScope = null;
+            SkipChoices skips = null;
             try
             {
                 // Re-check against the lockfile as it is now: it may have gained a source since the window listed it.
@@ -260,8 +349,11 @@ namespace Hissal.AgentSkillsSync.Editor
 
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
                 selected = SelectedFolders();
+                userScope = ScanUserScope(selected);
+                skips = Skips();
                 // Run the very instance that passed the check, never a fresh read of the file.
-                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher(), selected: selected).Run(lockfile);
+                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher(), selected: selected, userScope: userScope, skips: skips)
+                    .Run(lockfile);
                 ShowSummary(Describe(summary), HelpBoxMessageType.Info);
             }
             catch (SyncAbortedException e)
@@ -285,7 +377,7 @@ namespace Hissal.AgentSkillsSync.Editor
             {
                 try
                 {
-                    RecordSynced(lockfile, selected);
+                    RecordSynced(lockfile, selected, userScope, skips);
                 }
                 catch (Exception e) when (e is LockfileException || e is IOException || e is UnauthorizedAccessException)
                 {
@@ -303,11 +395,11 @@ namespace Hissal.AgentSkillsSync.Editor
         /// its sources so they are not flagged as new again, and the folder selection synced into (which
         /// confirms an autofilled one). Only after a successful sync.
         /// </summary>
-        static void RecordSynced(Lockfile lockfile, IReadOnlyList<SkillsFolder> selected)
+        static void RecordSynced(Lockfile lockfile, IReadOnlyList<SkillsFolder> selected, UserScopeState userScope, SkipChoices skips)
         {
             var prefs = LocalPrefs.Load(ProjectRoot);
             FolderSelection.Save(prefs, Table, selected, UserEnvironment.Current);
-            StartupCheck.RecordSynced(prefs, SyncStatus.Read(ProjectRoot, Table, selected));
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(ProjectRoot, Table, selected, userScope, skips));
             SourceConsent.RecordSynced(prefs, lockfile);
             prefs.Save();
         }
@@ -320,6 +412,8 @@ namespace Hissal.AgentSkillsSync.Editor
             Line(text, "Updated", summary.Updated);
             Line(text, "Removed", summary.Removed);
             Line(text, "Skipped (not managed by the tool)", summary.Skipped);
+            if (summary.SkippedForUserScope.Count > 0)
+                text.AppendLine($"Skipped in favour of your user-scope copy ({summary.SkippedForUserScope.Count}): {string.Join(", ", summary.SkippedForUserScope)}");
             if (summary.Linked.Count > 0) text.AppendLine($"Linked ({summary.Linked.Count}): {string.Join(", ", summary.Linked)}");
             if (summary.Unlinked.Count > 0) text.AppendLine($"Unlinked ({summary.Unlinked.Count}): {string.Join(", ", summary.Unlinked)}");
             var junctions = summary.LinkedBy(LinkMethod.Junction);

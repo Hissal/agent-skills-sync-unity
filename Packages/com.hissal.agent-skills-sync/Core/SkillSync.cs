@@ -14,12 +14,18 @@ namespace Hissal.AgentSkillsSync
         readonly ISkillFetcher _fetcher;
         readonly FolderLayout _layout;
         readonly IReadOnlyList<SkillsFolder> _selected;
+        readonly UserScopeState _userScope;
+        readonly SkipChoices _skips;
         readonly PlanExecutor _executor;
 
         /// <param name="selected">The folders this machine installs into (see <see cref="FolderSelection.Effective"/>); null = every folder in the layout.</param>
+        /// <param name="userScope">The user-scope copies found (see <see cref="UserScopeScanner"/>); null = none.</param>
+        /// <param name="skips">The contributor's per-folder skip choices (see <see cref="SkipChoices.From"/>); null = none.</param>
         public SkillSync(string projectRoot, ISkillFetcher fetcher, FolderLayout layout = null, ILinkCreator linker = null,
-            IEnumerable<SkillsFolder> selected = null)
+            IEnumerable<SkillsFolder> selected = null, UserScopeState userScope = null, SkipChoices skips = null)
         {
+            _userScope = userScope;
+            _skips = skips;
             _projectRoot = projectRoot;
             _fetcher = fetcher;
             _layout = layout ?? FolderLayout.Default;
@@ -33,7 +39,8 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>What syncing <paramref name="lockfile"/> would do now, without doing it.</summary>
         public InstallPlan Plan(Lockfile lockfile) =>
-            InstallPlanner.Plan(lockfile, ProjectScanner.Scan(_projectRoot, _layout), _layout, selected: _selected);
+            InstallPlanner.Plan(lockfile, ProjectScanner.Scan(_projectRoot, _layout), _layout, selected: _selected,
+                userScope: _userScope, skips: _skips);
 
         /// <summary>Loads the lockfile, plans and applies. Call only after the contributor consented.</summary>
         /// <exception cref="LockfileException">The lockfile is missing or unusable; nothing was changed.</exception>

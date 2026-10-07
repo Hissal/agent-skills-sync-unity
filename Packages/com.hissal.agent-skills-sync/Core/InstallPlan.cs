@@ -22,13 +22,22 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>Delete a managed link whose canonical entry is gone, or that sits in a folder no longer selected.</summary>
         Unlink,
+
+        /// <summary>
+        /// Leave the project copy or link out of a folder because the contributor skips it there in favour of a
+        /// user-scope copy the folder's agents already read. Changes nothing by itself; a managed entry there goes
+        /// through its own Unlink or Remove.
+        /// </summary>
+        SkipUserScope,
     }
 
     /// <summary>One thing the executor does to one skill in one folder.</summary>
     public sealed class PlanAction
     {
-        PlanAction(PlanActionKind kind, LockedSkill skill, string skillName, SkillsFolder folder, SkillsFolder linkTarget)
+        PlanAction(PlanActionKind kind, LockedSkill skill, string skillName, SkillsFolder folder, SkillsFolder linkTarget,
+            IReadOnlyList<UserScopeCopy> userScopeCopies = null)
         {
+            UserScopeCopies = userScopeCopies ?? new UserScopeCopy[0];
             Kind = kind;
             Skill = skill;
             SkillName = skillName;
@@ -54,16 +63,23 @@ namespace Hissal.AgentSkillsSync
         public static PlanAction Unlink(string skillName, SkillsFolder folder) =>
             new PlanAction(PlanActionKind.Unlink, null, skillName, folder, null);
 
+        /// <param name="copies">Where the folder's agents already have the skill at user scope.</param>
+        public static PlanAction SkipUserScope(LockedSkill skill, SkillsFolder folder, IReadOnlyList<UserScopeCopy> copies) =>
+            new PlanAction(PlanActionKind.SkipUserScope, skill, skill.Name, folder, null, copies);
+
         public PlanActionKind Kind { get; }
 
-        /// <summary>The locked skill, for Install, Update (to fetch) and LeaveForeign; null otherwise.</summary>
+        /// <summary>The locked skill, for Install, Update (to fetch), LeaveForeign and SkipUserScope; null otherwise.</summary>
         public LockedSkill Skill { get; }
 
         /// <summary>Whether the action needs the skill fetched first (Install, Update).</summary>
         public bool NeedsFetch => Kind == PlanActionKind.Install || Kind == PlanActionKind.Update;
 
-        /// <summary>Whether applying the action changes the project (false for LeaveForeign).</summary>
-        public bool ChangesProject => Kind != PlanActionKind.LeaveForeign;
+        /// <summary>Whether applying the action changes the project (false for LeaveForeign and SkipUserScope).</summary>
+        public bool ChangesProject => Kind != PlanActionKind.LeaveForeign && Kind != PlanActionKind.SkipUserScope;
+
+        /// <summary>For SkipUserScope, every user-scope copy found for the folder (where, and its path); empty otherwise.</summary>
+        public IReadOnlyList<UserScopeCopy> UserScopeCopies { get; }
 
         public string SkillName { get; }
 
@@ -94,7 +110,8 @@ namespace Hissal.AgentSkillsSync
         }
 
         /// <summary>
-        /// Actions in execution order: per locked skill, the canonical folder first; then links for project-authored
+        /// Actions in execution order: per locked skill, the canonical folder first (link folders first when the
+        /// skill's canonical copy goes, each skip after the withdrawal in that folder); then links for project-authored
         /// skills; then, per name no longer locked, unlinks of dangling links and removals, link folders before the
         /// canonical copy.
         /// </summary>

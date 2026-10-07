@@ -28,6 +28,7 @@ namespace Hissal.AgentSkillsSync
         const string SelectedFoldersKey = "selectedFolders";
         const string DeclinedFoldersKey = "declinedFolders";
         const string ManagedSkillsKey = "managedSkills";
+        const string SkippedSkillsKey = "skippedSkills";
 
         readonly string _path;
         readonly List<KeyValuePair<string, object>> _members;
@@ -105,6 +106,44 @@ namespace Hissal.AgentSkillsSync
         {
             get => GetStringList(DeclinedFoldersKey);
             set => SetStringList(DeclinedFoldersKey, value);
+        }
+
+        /// <summary>
+        /// Per skills folder (<see cref="SkillsFolder.RelativePath"/>), the sorted names of locked skills the contributor
+        /// chose to skip there in favour of their user-scope copy. Never null; folders with no skips are left out.
+        /// Use <see cref="SkipChoices"/> rather than this directly.
+        /// </summary>
+        public IReadOnlyDictionary<string, IReadOnlyList<string>> SkippedSkills
+        {
+            get
+            {
+                var result = new SortedDictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+                if (Get(SkippedSkillsKey) is List<KeyValuePair<string, object>> folders)
+                    foreach (var folder in folders)
+                    {
+                        if (!(folder.Value is List<object> items)) continue;
+                        var names = new SortedSet<string>(StringComparer.Ordinal);
+                        foreach (var item in items)
+                            if (item is string s) names.Add(s);
+                        if (names.Count > 0) result[folder.Key] = new List<string>(names);
+                    }
+                return result;
+            }
+            set
+            {
+                var members = new List<KeyValuePair<string, object>>();
+                if (value != null)
+                {
+                    var keys = new List<string>(value.Keys);
+                    keys.Sort(StringComparer.Ordinal);
+                    foreach (var key in keys)
+                    {
+                        var names = new SortedSet<string>(value[key] ?? new string[0], StringComparer.Ordinal);
+                        if (names.Count > 0) members.Add(new KeyValuePair<string, object>(key, new List<object>(names)));
+                    }
+                }
+                Set(SkippedSkillsKey, members.Count == 0 ? null : members);
+            }
         }
 
         /// <summary>

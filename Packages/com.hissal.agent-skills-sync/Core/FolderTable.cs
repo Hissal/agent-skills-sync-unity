@@ -44,6 +44,7 @@ namespace Hissal.AgentSkillsSync
                 new[]
                 {
                     new UserScopeLocation("Claude Code", "~/.claude", envVar: "CLAUDE_CONFIG_DIR"),
+                    new UserScopeLocation("Claude Code (synced from Claude.ai)", "~/.claude", "skills/synced", envVar: "CLAUDE_CONFIG_DIR"),
                 }),
         });
     }

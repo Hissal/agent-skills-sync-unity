@@ -22,14 +22,27 @@ namespace Hissal.AgentSkillsSync
     /// In a folder that is not needed, the tool's managed entries go (Unlink in a link folder, Remove of the canonical
     /// copy, links first) and its managed names are dropped; entries it does not manage are never touched.
     /// </para>
+    /// <para>
+    /// User-scope skips: a locked skill is skipped in a selected folder when the contributor chose to skip it there
+    /// (<see cref="SkipChoices"/>) <b>and</b> a user-scope copy the folder's agents read was found
+    /// (<see cref="UserScopeState"/>) -> SkipUserScope, and the folder is not needed for that skill (its managed entry
+    /// goes as above). The canonical copy stays while any selected folder still needs it for that skill, so a skip of
+    /// the canonical folder only takes effect once no selected link folder links to it. Project-authored skills are
+    /// never skipped.
+    /// </para>
     /// </remarks>
     public static class InstallPlanner
     {
         /// <param name="installedCopyCheck">Whether a managed canonical copy is current; defaults to <see cref="LockedHashCheck"/>.</param>
         /// <param name="selected">The folders this machine installs into (see <see cref="FolderSelection"/>); null = every folder in the layout.</param>
+        /// <param name="userScope">The user-scope copies found (see <see cref="UserScopeScanner"/>); null = none.</param>
+        /// <param name="skips">The contributor's per-folder skip choices; null = none.</param>
         public static InstallPlan Plan(Lockfile lockfile, ProjectState project, FolderLayout layout,
-            IInstalledCopyCheck installedCopyCheck = null, IEnumerable<SkillsFolder> selected = null)
+            IInstalledCopyCheck installedCopyCheck = null, IEnumerable<SkillsFolder> selected = null,
+            UserScopeState userScope = null, SkipChoices skips = null)
         {
+            userScope = userScope ?? UserScopeState.Empty;
+            skips = skips ?? SkipChoices.None;
             var check = installedCopyCheck ?? LockedHashCheck.Instance;
             var actions = new List<PlanAction>();
             var managed = layout.Folders.ToDictionary(f => f, f => new SortedSet<string>(StringComparer.Ordinal));
@@ -45,6 +58,17 @@ namespace Hissal.AgentSkillsSync
             bool Needed(SkillsFolder folder) =>
                 folder.Role == SkillsFolderRole.Canonical ? anySelected : selectedPaths.Contains(folder.RelativePath);
 
+            // A selected folder whose agents already have the skill at user scope, and where the contributor skips it.
+            bool Skipped(SkillsFolder folder, string skill) =>
+                selectedPaths.Contains(folder.RelativePath) && skips.IsSkipped(folder, skill) && userScope.Has(folder, skill);
+
+            // Per locked skill: a selected link folder that does not skip it, or the canonical folder while any selected
+            // folder (canonical or link) still needs the project copy of it.
+            bool NeededFor(SkillsFolder folder, string skill) =>
+                folder.Role == SkillsFolderRole.Canonical
+                    ? layout.Folders.Any(f => selectedPaths.Contains(f.RelativePath) && !Skipped(f, skill))
+                    : Needed(folder) && !Skipped(folder, skill);
+
             // Takes a managed entry out of a folder the tool no longer keeps entries in.
             void Withdraw(string name, SkillsFolder folder, FolderState state)
             {
@@ -54,13 +78,15 @@ namespace Hissal.AgentSkillsSync
 
             foreach (var skill in lockfile.Skills)
             {
-                foreach (var folder in anySelected ? layout.Folders : removalOrder)
+                foreach (var folder in NeededFor(layout.Canonical, skill.Name) ? layout.Folders : removalOrder)
                 {
                     var state = project.For(folder);
                     var canonical = folder.Role == SkillsFolderRole.Canonical;
-                    if (!Needed(folder))
+                    if (!NeededFor(folder, skill.Name))
                     {
                         Withdraw(skill.Name, folder, state);
+                        if (Skipped(folder, skill.Name))
+                            actions.Add(PlanAction.SkipUserScope(skill, folder, userScope.CopiesOf(folder, skill.Name)));
                     }
                     else if (!state.Has(skill.Name))
                     {
