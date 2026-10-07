@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 
 namespace Hissal.AgentSkillsSync.Tests
@@ -230,6 +231,68 @@ namespace Hissal.AgentSkillsSync.Tests
             File.WriteAllText(Path.Combine(_project, Lockfile.FileName), "{ broken");
 
             Assert.That(ShouldNotify(), Is.True);
+        }
+
+        static SkillsFolder[] Only(params string[] paths) => paths.Select(FolderLayout.Default.Find).ToArray();
+
+        [Test]
+        public void ShouldNotify_NoFolderSelected_NeverNotifies()
+        {
+            var status = SyncStatus.Read(_project, selected: Only());
+
+            Assert.That(status.NoFolderSelected, Is.True);
+            Assert.That(StartupCheck.ShouldNotify(status, Prefs), Is.False);
+        }
+
+        [Test]
+        public void ShouldNotify_NoFolderSelectedWithManagedEntriesLeft_NeverNotifies()
+        {
+            InstallAll();
+
+            Assert.That(StartupCheck.ShouldNotify(SyncStatus.Read(_project, selected: Only()), Prefs), Is.False);
+        }
+
+        [Test]
+        public void ShouldNotify_DeclinedThenSelectionChangedWithSameSkillMissing_Notifies()
+        {
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), @"{
+  ""version"": 1,
+  ""skills"": {
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" }
+  }
+}");
+            var layout = FolderLayout.Default;
+            var agentsOnly = Only(".agents/skills");
+            var plan = InstallPlanner.Plan(Lockfile.Load(_project), ProjectScanner.Scan(_project, layout), layout, selected: agentsOnly);
+            new PlanExecutor().Execute(_project, plan, new Dictionary<string, string> { ["tdd"] = Path.Combine(FixturesRoot, "minimal") });
+            var prefs = Prefs;
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(_project, selected: agentsOnly));
+            prefs.Save();
+            TempDirectory.Delete(Path.Combine(_project, ".agents/skills/tdd"));
+            prefs = Prefs;
+            StartupCheck.RecordDeclined(prefs, SyncStatus.Read(_project, selected: agentsOnly));
+            prefs.Save();
+
+            var widened = SyncStatus.Read(_project, selected: Only(".agents/skills", ".claude/skills"));
+
+            Assert.That(widened.MissingSkills, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(StartupCheck.ShouldNotify(widened, Prefs), Is.True);
+        }
+
+        [Test]
+        public void Read_OnlyAgentsSelectedAndInstalledThere_ReportsNothingMissing()
+        {
+            var layout = FolderLayout.Default;
+            var selected = Only(".agents/skills");
+            var plan = InstallPlanner.Plan(Lockfile.Load(_project), ProjectScanner.Scan(_project, layout), layout, selected: selected);
+            new PlanExecutor().Execute(_project, plan, new Dictionary<string, string>
+            {
+                ["tdd"] = Path.Combine(FixturesRoot, "minimal"),
+                ["code-review"] = Path.Combine(FixturesRoot, "nested"),
+            });
+
+            Assert.That(SyncStatus.Read(_project, selected: selected).MissingSkills, Is.Empty);
+            Assert.That(SyncStatus.Read(_project).MissingSkills, Is.EqualTo(new[] { "code-review", "tdd" }));
         }
     }
 }

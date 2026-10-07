@@ -185,9 +185,29 @@ namespace Hissal.AgentSkillsSync.Tests
         [Test]
         public void Plan_EverythingInstalledAndRecorded_HasNoChanges()
         {
-            var plan = InstallPlanner.Plan(Lock("tdd"), Project(new[] { "tdd" }, new[] { "tdd" }), FolderLayout.Default);
+            var layout = FolderLayout.Default;
+            var tdd = new[] { "tdd" };
+            var project = new ProjectState(layout.Folders.Select(f =>
+                new FolderState(f, tdd, tdd, installedHashes: new Dictionary<string, string> { ["tdd"] = LockedHash }, ignored: tdd)));
+
+            var plan = InstallPlanner.Plan(Lock("tdd"), project, layout);
 
             Assert.That(plan.HasChanges, Is.False);
+        }
+
+        [Test]
+        public void Plan_GitignoreBlockMissingALockedSkill_HasChanges()
+        {
+            var layout = FolderLayout.Default;
+            var tdd = new[] { "tdd" };
+            var project = new ProjectState(layout.Folders.Select(f =>
+                new FolderState(f, tdd, tdd, installedHashes: new Dictionary<string, string> { ["tdd"] = LockedHash })));
+
+            var plan = InstallPlanner.Plan(Lock("tdd"), project, layout);
+
+            Assert.That(plan.Actions, Is.Empty);
+            Assert.That(plan.HasChanges, Is.True);
+            Assert.That(plan.IgnoredNames.Values, Has.All.EqualTo(tdd));
         }
 
         [TestCase(LockedHash, true)]

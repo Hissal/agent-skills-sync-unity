@@ -194,8 +194,10 @@ namespace Hissal.AgentSkillsSync.Tests
         public void Execute_CanonicalCopyTakenOverByTheProject_KeepsTheCopyAndItsLink()
         {
             Sync("tdd=v1");
-            // The contributor took the canonical copy over: no longer managed there, so it is project-authored.
-            ManagedStateFile.Write(InProject(".agents/skills"), new string[0]);
+            // The contributor took the canonical copy over: this machine no longer manages it, so it is project-authored.
+            var prefs = LocalPrefs.Load(_project);
+            prefs.ManagedSkills = new Dictionary<string, IReadOnlyList<string>> { [".claude/skills"] = new[] { "tdd" } };
+            prefs.Save();
 
             var summary = Sync();
 
@@ -223,8 +225,13 @@ namespace Hissal.AgentSkillsSync.Tests
                 Assert.That(Directory.GetFileSystemEntries(InProject(path)).Select(Path.GetFileName), Is.EqualTo(new[] { "SKILL.md" }), path);
                 Assert.That(File.ReadAllText(InProject(path + "/SKILL.md")), Is.EqualTo("# mine"), path);
             }
+            // The committed blocks list every locked skill (and project-authored ones in link folders); what this
+            // machine manages, never the foreign entries, is in its prefs.
             Assert.That(ManagedLines(".agents/skills"), Is.EqualTo(new[] { "/tdd" }));
-            Assert.That(ManagedLines(".claude/skills"), Is.Empty);
+            Assert.That(ManagedLines(".claude/skills"), Is.EqualTo(new[] { "/mine", "/tdd" }));
+            var managed = LocalPrefs.Load(_project).ManagedSkills;
+            Assert.That(managed[".agents/skills"], Is.EqualTo(new[] { "tdd" }));
+            Assert.That(managed.ContainsKey(".claude/skills"), Is.False);
             Assert.That(summary.Skipped, Is.EqualTo(new[] { "tdd" }));
         }
 

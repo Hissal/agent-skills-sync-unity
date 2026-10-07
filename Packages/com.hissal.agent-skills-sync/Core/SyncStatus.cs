@@ -11,11 +11,19 @@ namespace Hissal.AgentSkillsSync
     /// </summary>
     public sealed class SyncStatus
     {
-        public SyncStatus(string lockHash, IEnumerable<string> missingSkills)
+        /// <param name="noFolderSelected">The contributor selected no skills folder, so the check stays quiet.</param>
+        /// <param name="selectedFolders">Relative paths of the skills folders the status was read for.</param>
+        public SyncStatus(string lockHash, IEnumerable<string> missingSkills, bool noFolderSelected = false,
+            IEnumerable<string> selectedFolders = null)
         {
             LockHash = lockHash;
-            MissingSkills = (missingSkills ?? Enumerable.Empty<string>()).Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList();
+            NoFolderSelected = noFolderSelected;
+            MissingSkills = Sorted(missingSkills);
+            SelectedFolders = Sorted(selectedFolders);
         }
+
+        static IReadOnlyList<string> Sorted(IEnumerable<string> names) =>
+            (names ?? Enumerable.Empty<string>()).Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList();
 
         /// <summary>See <see cref="LockfileHash.Compute"/>.</summary>
         public string LockHash { get; }
@@ -28,24 +36,37 @@ namespace Hissal.AgentSkillsSync
         /// </summary>
         public IReadOnlyList<string> MissingSkills { get; }
 
-        /// <summary>Identifies this status; a decline holds while the status keeps the same fingerprint.</summary>
-        public string Fingerprint => LockHash + "|" + string.Join(",", MissingSkills);
+        /// <summary>True when no skills folder is selected: nothing is installed and the startup check never notifies.</summary>
+        public bool NoFolderSelected { get; }
+
+        /// <summary>Sorted relative paths of the skills folders this status was read for.</summary>
+        public IReadOnlyList<string> SelectedFolders { get; }
+
+        /// <summary>
+        /// Identifies this status; a decline holds while the status keeps the same fingerprint. Includes the
+        /// selected folders, so changing the selection (such as accepting an offered folder) lifts a decline.
+        /// </summary>
+        public string Fingerprint => LockHash + "|" + string.Join(",", MissingSkills) + "|" + string.Join(",", SelectedFolders);
 
         /// <summary>
         /// Reads the project's status; null when there is no lockfile. An unusable lockfile reports
         /// no missing skills, so only a hash change surfaces it.
         /// </summary>
-        public static SyncStatus Read(string projectRoot, FolderLayout layout = null)
+        /// <param name="selected">The folders this machine installs into (see <see cref="FolderSelection.Effective"/>); null = every folder in the layout.</param>
+        public static SyncStatus Read(string projectRoot, FolderLayout layout = null, IEnumerable<SkillsFolder> selected = null)
         {
             var lockHash = LockfileHash.Compute(projectRoot);
             if (lockHash == null) return null;
 
             layout = layout ?? FolderLayout.Default;
+            var selection = selected?.ToList();
+            var noFolderSelected = selection != null && !layout.Folders.Any(f => selection.Any(s => s?.RelativePath == f.RelativePath));
             IEnumerable<string> missing;
             try
             {
                 var project = ProjectScanner.Scan(projectRoot, layout, readContents: false);
-                var plan = InstallPlanner.Plan(Lockfile.Load(projectRoot), project, layout, PresentCopyIsCurrent.Instance);
+                var plan = InstallPlanner.Plan(Lockfile.Load(projectRoot), project, layout, PresentCopyIsCurrent.Instance,
+                    selected: selection);
                 // A left-alone (foreign) entry is never synced, so it does not count as out of sync.
                 missing = plan.Actions.Where(a => a.ChangesProject).Select(a => a.SkillName);
             }
@@ -53,7 +74,10 @@ namespace Hissal.AgentSkillsSync
             {
                 missing = null;
             }
-            return new SyncStatus(lockHash, missing);
+            var selectedFolders = layout.Folders
+                .Where(f => selection == null || selection.Any(s => s?.RelativePath == f.RelativePath))
+                .Select(f => f.RelativePath);
+            return new SyncStatus(lockHash, missing, noFolderSelected, selectedFolders);
         }
 
         /// <summary>The quick scan has no hashes: any installed copy counts as current.</summary>

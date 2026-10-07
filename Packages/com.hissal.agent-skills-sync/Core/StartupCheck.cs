@@ -3,14 +3,14 @@ namespace Hissal.AgentSkillsSync
     /// <summary>
     /// The decision behind the once-per-session editor notification: notify when the lockfile changed
     /// since the last sync or a locked skill is missing, unless the contributor already declined this
-    /// exact status.
+    /// exact status. Never notifies while no skills folder is selected.
     /// </summary>
     public static class StartupCheck
     {
         /// <param name="status">From <see cref="SyncStatus.Read"/>; null (no lockfile) never notifies.</param>
         public static bool ShouldNotify(SyncStatus status, LocalPrefs prefs)
         {
-            if (status == null) return false;
+            if (status == null || status.NoFolderSelected) return false;
             var outOfSync = status.LockHash != prefs.LastSyncedLockHash || status.MissingSkills.Count > 0;
             return outOfSync && status.Fingerprint != prefs.DeclinedState;
         }

@@ -29,7 +29,7 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Names of skills whose canonical copy was replaced with the locked version.</summary>
         public IReadOnlyList<string> Updated => NamesOf(PlanActionKind.Update);
 
-        /// <summary>Names of skills no longer locked whose managed copy or links were deleted.</summary>
+        /// <summary>Names of skills whose managed copy or links were deleted (no longer locked, or no folder selected).</summary>
         public IReadOnlyList<string> Removed => NamesOf(PlanActionKind.Remove);
 
         /// <summary>Names of locked skills left alone in at least one folder because the entry there is not the tool's.</summary>

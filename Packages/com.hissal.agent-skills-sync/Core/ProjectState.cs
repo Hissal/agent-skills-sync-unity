@@ -10,14 +10,17 @@ namespace Hissal.AgentSkillsSync
         /// <param name="installedHashes">Content hash of each managed skill copy in the folder (see <see cref="InstalledHash"/>).</param>
         /// <param name="files">Names in <paramref name="entries"/> that are plain files rather than folders or folder links.</param>
         /// <param name="withoutSkillFile">Folders in <paramref name="entries"/> with no <c>SKILL.md</c>, which are not skills.</param>
+        /// <param name="ignored">Names the folder's <c>.gitignore</c> block lists now (see <see cref="Ignored"/>).</param>
         /// <param name="staleLinks">Managed link-folder entries that no longer show the canonical entry (see <see cref="IsStaleLink"/>).</param>
         public FolderState(SkillsFolder folder, IEnumerable<string> entries, IEnumerable<string> managed,
             IReadOnlyDictionary<string, string> installedHashes = null, IEnumerable<string> files = null,
-            IEnumerable<string> staleLinks = null, IEnumerable<string> withoutSkillFile = null)
+            IEnumerable<string> staleLinks = null, IEnumerable<string> withoutSkillFile = null,
+            IEnumerable<string> ignored = null)
         {
             Folder = folder;
             Entries = new HashSet<string>(entries ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
             Managed = new HashSet<string>(managed ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
+            Ignored = new HashSet<string>(ignored ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
             _installedHashes = installedHashes ?? new Dictionary<string, string>();
             _files = new HashSet<string>(files ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
             _staleLinks = new HashSet<string>(staleLinks ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
@@ -34,8 +37,18 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Names of every entry (folder, link or file) in the folder, managed or not.</summary>
         public IReadOnlyCollection<string> Entries { get; }
 
-        /// <summary>Names the folder's managed-state file says the tool manages.</summary>
+        /// <summary>
+        /// Names of the entries this machine's syncs made in the folder and still manage (from
+        /// <see cref="LocalPrefs.ManagedSkills"/>; before the first recorded sync, the names in the folder's
+        /// <c>.gitignore</c> block).
+        /// </summary>
         public IReadOnlyCollection<string> Managed { get; }
+
+        /// <summary>
+        /// Names the tool's block in the folder's <c>.gitignore</c> lists now. The block is committed and the same on
+        /// every machine (see <see cref="InstallPlan.IgnoredNames"/>), so it is no record of what this machine manages.
+        /// </summary>
+        public IReadOnlyCollection<string> Ignored { get; }
 
         public bool Has(string name) => ((HashSet<string>)Entries).Contains(name);
 
