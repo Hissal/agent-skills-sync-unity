@@ -77,6 +77,12 @@ namespace Hissal.AgentSkillsSync
             var unsupported = new List<UnsupportedSkill>();
             foreach (var entry in skillsObject)
             {
+                // Every name is checked, unsupported ones too, so no list the tool acts on ever holds an unsafe name.
+                if (!IsSafeFolderName(entry.Key))
+                    throw new LockfileException(
+                        $"Skill name {Describe(entry.Key)} in {FileName} is not a safe skill folder name. " +
+                        "A skill name must be a single folder name: no path separators, no \".\" or \"..\", no drive or root, " +
+                        "no characters that are invalid in file names, and no trailing dot or space.");
                 if (!(entry.Value is List<KeyValuePair<string, object>> skill))
                     throw new LockfileException($"Skill \"{entry.Key}\" in {FileName} must be a JSON object.");
                 if (!(Get(skill, "sourceType") is string sourceType) || sourceType.Length == 0)
@@ -89,12 +95,6 @@ namespace Hissal.AgentSkillsSync
 
         static LockedSkill ParseSkill(string name, List<KeyValuePair<string, object>> skill)
         {
-            if (!IsSafeFolderName(name))
-                throw new LockfileException(
-                    $"Skill name {Describe(name)} in {FileName} is not a safe skill folder name. " +
-                    "A skill name must be a single folder name: no path separators, no \".\" or \"..\", no drive or root, " +
-                    "no characters that are invalid in file names, and no trailing dot or space.");
-
             var source = Get(skill, "source") as string;
             if (string.IsNullOrEmpty(source))
                 throw new LockfileException($"Skill \"{name}\" in {FileName} has no source.");

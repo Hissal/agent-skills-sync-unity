@@ -124,6 +124,16 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(error.Message, Does.Contain("not a safe skill folder name"));
         }
 
+        [Test]
+        public void Parse_UnsupportedEntryWithUnsafeName_RejectsAsUnsafeName()
+        {
+            const string json = @"{ ""version"": 1, ""skills"": { ""safe\n!Assets"": { ""source"": ""com.unity.pipeline"", ""sourceType"": ""unity-package"" } } }";
+
+            var error = Assert.Throws<LockfileException>(() => Lockfile.Parse(json));
+
+            Assert.That(error.Message, Does.Contain("not a safe skill folder name"));
+        }
+
         [TestCase("code-review")]
         [TestCase(".hidden-skill")]
         [TestCase("skill.v2")]
