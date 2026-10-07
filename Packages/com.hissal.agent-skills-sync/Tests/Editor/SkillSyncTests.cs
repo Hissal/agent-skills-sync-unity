@@ -8,20 +8,25 @@ namespace Hissal.AgentSkillsSync.Tests
 {
     public class SkillSyncTests
     {
-        /// <summary>Fakes the network: each skill's folder is written into the temp dir; listed names fail.</summary>
+        /// <summary>Fakes the network: serves each skill as a copy of the hash fixture its locked hash names; listed names fail.</summary>
         sealed class FakeFetcher : ISkillFetcher
         {
+            static readonly string FixturesRoot =
+                Path.GetFullPath("Packages/com.hissal.agent-skills-sync/Tests/Editor/Fixtures~/SkillFolderHash");
+
             readonly string _root;
             public readonly HashSet<string> Failing = new HashSet<string>();
+            public readonly List<string> Fetched = new List<string>();
 
             public FakeFetcher(string root) => _root = root;
 
             public string Fetch(LockedSkill skill)
             {
+                Fetched.Add(skill.Name);
                 if (Failing.Contains(skill.Name)) throw new SkillFetchException($"Could not download {skill.Source}.");
-                var folder = Path.Combine(_root, "fetched", skill.Name);
-                Directory.CreateDirectory(folder);
-                File.WriteAllText(Path.Combine(folder, "SKILL.md"), "# " + skill.Name);
+                var fixture = skill.ComputedHash == FakeGitHub.NestedHash ? "nested" : "minimal";
+                var folder = Path.Combine(_root, "fetched", skill.Name, Guid.NewGuid().ToString("N"));
+                Paths.CopyDirectory(Path.Combine(FixturesRoot, fixture), folder);
                 return folder;
             }
         }
@@ -29,8 +34,16 @@ namespace Hissal.AgentSkillsSync.Tests
         const string Lock = @"{
   ""version"": 1,
   ""skills"": {
-    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": ""a"" },
-    ""code-review"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/code-review/SKILL.md"", ""computedHash"": ""b"" }
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" },
+    ""code-review"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/code-review/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" }
+  }
+}";
+
+        /// <summary>The same lock after a pull: tdd's hash changed, code-review dropped.</summary>
+        const string PulledLock = @"{
+  ""version"": 1,
+  ""skills"": {
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + FakeGitHub.NestedHash + @""" }
   }
 }";
 
@@ -61,7 +74,7 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd", "code-review" }));
             Assert.That(summary.Linked, Is.EqualTo(new[] { "tdd", "code-review" }));
-            Assert.That(File.ReadAllText(Path.Combine(_project, ".claude/skills/code-review/SKILL.md")), Is.EqualTo("# code-review"));
+            Assert.That(File.ReadAllText(Path.Combine(_project, ".claude/skills/code-review/SKILL.md")), Does.Contain("# minimal"));
         }
 
         [Test]
@@ -216,6 +229,58 @@ namespace Hissal.AgentSkillsSync.Tests
             var state = ProjectScanner.Scan(_project, FolderLayout.Default).For(FolderLayout.Default.Canonical);
 
             Assert.That(state.Managed, Is.EquivalentTo(new[] { "tdd", "code-review" }));
+        }
+
+        [Test]
+        public void Run_AfterAPull_UpdatesAndRemoves()
+        {
+            new SkillSync(_project, _fetcher).Run();
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), PulledLock);
+
+            var summary = new SkillSync(_project, _fetcher).Run();
+
+            Assert.That(summary.Updated, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(summary.Removed, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(SkillFolderHash.Compute(Path.Combine(_project, ".agents/skills/tdd")), Is.EqualTo(FakeGitHub.NestedHash));
+        }
+
+        [Test]
+        public void Run_UpdateFetchFails_ChangesNothingInTheProject()
+        {
+            new SkillSync(_project, _fetcher).Run();
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), PulledLock);
+            _fetcher.Failing.Add("tdd");
+            var before = Tree(_project).ToList();
+
+            var error = Assert.Throws<SyncAbortedException>(() => new SkillSync(_project, _fetcher).Run());
+
+            Assert.That(error.Failures.Keys, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(Tree(_project), Is.EqualTo(before));
+        }
+
+        [Test]
+        public void Run_Twice_SecondRunFetchesNothing()
+        {
+            new SkillSync(_project, _fetcher).Run();
+            _fetcher.Fetched.Clear();
+
+            new SkillSync(_project, _fetcher).Run();
+
+            Assert.That(_fetcher.Fetched, Is.Empty);
+        }
+
+        [Test]
+        public void Run_EmptyLockAndStaleManagedNameMissingOnDisk_DropsTheNameFromTheManagedState()
+        {
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), @"{ ""version"": 1, ""skills"": {} }");
+            var canonical = Path.Combine(_project, ".agents/skills");
+            ManagedStateFile.Write(canonical, new[] { "tdd" });
+            var sync = new SkillSync(_project, _fetcher);
+            Assert.That(sync.Plan().HasChanges, Is.True, "the window only offers Sync when the plan has changes");
+
+            sync.Run();
+
+            Assert.That(ManagedStateFile.Read(canonical), Is.Empty);
         }
     }
 }
