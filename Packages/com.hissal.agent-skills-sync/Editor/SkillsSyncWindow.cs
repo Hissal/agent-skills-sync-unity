@@ -144,10 +144,11 @@ namespace Hissal.AgentSkillsSync.Editor
             if (!_consent.value) return;
             _failures = new Dictionary<string, SkillFetchException>();
 
+            SyncSummary summary = null;
             try
             {
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
-                var summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher()).Run();
+                summary = new SkillSync(ProjectRoot, new GitHubSkillFetcher()).Run();
                 ShowSummary(Describe(summary), HelpBoxMessageType.Info);
             }
             catch (SyncAbortedException e)
@@ -166,7 +167,30 @@ namespace Hissal.AgentSkillsSync.Editor
                 EditorUtility.ClearProgressBar();
             }
 
+            // Kept out of the sync's try: the sync already changed the project, so failing here must not read as "Sync failed".
+            if (summary != null)
+            {
+                try
+                {
+                    RecordSynced();
+                }
+                catch (Exception e) when (e is LockfileException || e is IOException || e is UnauthorizedAccessException)
+                {
+                    ShowSummary(Describe(summary) + "\nWarning: the sync finished, but saving the out-of-sync notification state failed: "
+                        + e.Message, HelpBoxMessageType.Warning);
+                    Debug.LogException(e);
+                }
+            }
+
             Refresh();
+        }
+
+        /// <summary>Remembers the synced lockfile so the startup check stays quiet until something changes.</summary>
+        static void RecordSynced()
+        {
+            var prefs = LocalPrefs.Load(ProjectRoot);
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(ProjectRoot));
+            prefs.Save();
         }
 
         static string Describe(SyncSummary summary)
