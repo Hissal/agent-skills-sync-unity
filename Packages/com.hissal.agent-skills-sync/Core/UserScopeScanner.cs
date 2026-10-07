@@ -59,7 +59,7 @@ namespace Hissal.AgentSkillsSync
 
         public IEnumerable<UserScopeCopy> Find(SkillsFolder folder, UserEnvironment environment)
         {
-            var seen = new HashSet<string>(Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+            var seen = new HashSet<string>(Paths.Comparer);
             foreach (var location in folder.UserScopeLocations)
             {
                 var skillsFolder = location.ResolveSkillsFolder(environment);

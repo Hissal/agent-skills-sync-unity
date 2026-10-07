@@ -59,7 +59,7 @@ namespace Hissal.AgentSkillsSync
             Distinct(UserScopeLocations.Select(l => l.ResolveSkillsFolder(environment)));
 
         static IReadOnlyList<string> Distinct(IEnumerable<string> paths) =>
-            paths.Distinct(System.IO.Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToList();
+            paths.Distinct(Paths.Comparer).ToList();
 
         public override string ToString() => RelativePath;
     }
