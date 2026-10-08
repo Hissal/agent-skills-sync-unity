@@ -82,11 +82,52 @@ Open it from **Window → Agent Skills Sync**. From top to bottom:
   after each sync.
 - **Sync** and **Refresh**, then a summary of the last sync.
 
+### Unity CLI for agents and CI
+
+With the optional `com.unity.pipeline` package installed, `skills_sync` runs the same sync as the window.
+The package has no Pipeline dependency; projects without Pipeline use the window as before.
+
+```sh
+# Offline preview. No consent, downloads, or saved state.
+unity run . --command skills_sync --format json -- --dry_run true
+
+# After explicit user approval, trust all new source repos in the current lock and sync.
+unity run . --command skills_sync --format json -- --consent_new_sources true
+
+# Override the mode for this run only.
+unity run . --command skills_sync --format json -- --consent_new_sources true --install_mode pinned
+
+# In an open editor, use the connected command instead.
+unity command skills_sync --consent_new_sources true
+```
+
+Run `unity command` in a connected editor to find the command and its argument descriptions. Pipeline and the
+Unity CLI are experimental; this integration is verified with Pipeline `0.8.0-exp.1`.
+
+`--consent_new_sources true` confirms every source repo new to this machine for that invocation. Without it,
+a sync with new sources fails and lists them before fetching or changing the project. Sources are remembered
+only after a successful sync. A dry run needs no consent and returns the actions and managed/ignored names from
+`SkillSync.Plan()`. In Latest mode it cannot predict upstream updates without a download.
+
+Agents must obtain explicit user approval for the listed new source repositories before passing
+`--consent_new_sources true`. A request to sync or install skills does not itself grant source consent.
+Run with `--dry_run true` to list new sources, then ask the user to approve them. Approval already given
+for those sources in the current conversation remains valid. If the lock gains another source, obtain
+approval for that source before consenting again.
+
+The command honours this machine's saved folder selection, user-scope copies and install-anyway choices,
+including an empty folder selection. Its default mode is the project's setting. `--install_mode latest` or
+`pinned` overrides that setting without saving it. The result contains skill-name arrays for `installed`,
+`updated`, `removed`, `skipped`, `skippedForUserScope`, `linked`, `unlinked`, and `differsFromLock`, plus
+`userScopeDiffers`, `nothingChanged` and an empty `failures` array on success. Aborted or failed syncs fail the
+command, and `unity run` exits nonzero with the error details. If skills were applied but saving consent and
+notification state failed, the error says that the sync finished so callers can distinguish it from an aborted fetch.
+
 ### Startup check
 
 Once per editor session the tool checks the project. If `skills-lock.json` changed since the last sync on this
 machine, or locked skills are missing, it offers to open the sync window. **Not Now** keeps it quiet until something
-changes. Nothing is installed without the window's consent.
+changes. Nothing is installed automatically; a sync needs consent in the window or through the CLI command.
 
 - The check is cheap: it looks at folder names, links and the lockfile's hash, never at skill contents. An installed
   copy that differs from the lock is caught through the lockfile change that caused it; the window, which hashes
@@ -237,6 +278,7 @@ never synced from is tagged `NEW SOURCE`, and needs its own confirmation as well
 after the window listed the skills, Sync stops and asks you to review again. The same happens if the install mode
 changed on disk. Confirmed sources are recorded per machine after a successful sync. The same rules apply in both
 install modes. In Latest mode, the window also tells you that skills differing from the lock will be installed.
+The [CLI command](#unity-cli-for-agents-and-ci) uses an explicit flag to confirm all new sources for its invocation.
 
 ## Migrating a project that commits vendored skills
 
@@ -286,6 +328,7 @@ does not change plugin settings itself.
 - `Packages/com.hissal.agent-skills-sync/`: the package (embedded in the dev project).
   - `Core/`: engine-free core (`noEngineReferences`), Editor-only.
   - `Editor/`: Unity front end (sync window, startup check).
+  - `Pipeline/`: optional Editor command, compiled only when `com.unity.pipeline` is installed.
   - `Tests/Editor/`: EditMode tests.
 - `Assets/`, `ProjectSettings/`, `Packages/manifest.json`: minimal Unity 6000.3 host project used
   to develop and test the package. Open the repo root in Unity.

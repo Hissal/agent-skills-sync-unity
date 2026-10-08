@@ -59,9 +59,15 @@ The `Record*`/`Set`/`Save` helpers change a loaded `LocalPrefs`; the caller then
 
 ## Editor side
 
+- `SkillsSyncService` — shared setup for the window and optional Pipeline `skills_sync` command: resolves roots,
+  loads one lock and mode, reads machine choices, checks source consent, runs that snapshot, then records consent
+  and notification state. Planning is offline; the fetcher is created only after the consent and mode checks.
+  Tests pass a temp user environment and a fetcher backed by `FakeGitHub`.
+- `SkillsSyncCommand` (`Pipeline/`) — parses invocation-only options and returns a structured plan or sync summary.
+  Its Editor assembly is enabled by a package version define only when `com.unity.pipeline` is installed.
 - `SkillsSyncWindow` — the sync window: folder selection, plan preview, source consent (`SourceConsent`), install
-  mode, install-anyway toggles, then `SkillSync.Run` with a `GitHubSkillFetcher`. Resolves `UnityProjectRoot` (holds
-  `LocalPrefs`, `ProjectSyncSettings`) and `SkillsRoot` (holds `skills-lock.json` and the skills folders).
+  mode, install-anyway toggles, then `SkillsSyncService.Run`. `UnityProjectRoot` holds `LocalPrefs` and
+  `ProjectSyncSettings`; `SkillsRoot` holds `skills-lock.json` and the skills folders.
 - `StartupNotifier` — once per editor session: offers newly found folders (`FolderSelection.Offers`), reads
   `SyncStatus`, and asks `StartupCheck.ShouldNotify` whether to offer opening the window.
 - `StartupCheck` (Core) — the notify decision; `StartupNotifier` records declines, `SkillsSyncWindow` records syncs.
