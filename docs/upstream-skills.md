@@ -1,12 +1,14 @@
 # Upstream skills
 
 The `Sync skills` workflow (`.github/workflows/sync-skills.yml`) runs every Monday and on demand. It watches every GitHub
-source with a skill in `skills-lock.json`.
+source with a skill in `skills-lock.json`, at the `ref` its skills are locked at. Proposals only come from the default
+branch, since that's where an accepted skill is added from.
 
 ## The rolling PR
 
 One PR, `chore(skills): sync skills with upstream` on `chore/sync-skills`, is force-pushed on every run. It only changes
-`skills-lock.json` and `skills-rejected.json`, and it lists:
+`skills-lock.json`, `skills-rejected.json` and the generated blocks in `.agents/skills/.gitignore` and
+`.claude/skills/.gitignore`, and it lists:
 
 - **Updated**: locked skills whose upstream changed, with the upstream commits that touched each one.
 - **Added**: skills accepted from proposal issues.

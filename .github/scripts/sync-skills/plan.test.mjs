@@ -8,6 +8,7 @@ import {
   proposalIssue,
   rejectionReason,
   watchedSources,
+  withIgnoreBlock,
   withRejections,
   unmetRequirements,
 } from "./plan.mjs";
@@ -125,6 +126,7 @@ test("the plan drops vanished skills, takes accepted and rejected proposals and 
   const upstreamSkill = (name) => ({ name, skillPath: `skills/${name}/SKILL.md`, frontmatter: {} });
   const upstream = {
     [source]: {
+      source,
       ref: "main",
       skills: ["ui-uitk", "ui-ugui", "accepted", "rejected-now", "already-proposed", "closed-done", "brand-new"]
         .map(upstreamSkill),
@@ -162,7 +164,7 @@ test("the plan drops vanished skills, takes accepted and rejected proposals and 
 test("an accepted proposal for a skill that is gone upstream or already locked adds nothing", () => {
   const source = "o/r";
   const lock = { version: 1, skills: { a: { source, sourceType: "github", skillPath: "a/SKILL.md", computedHash: "h" } } };
-  const upstream = { [source]: { ref: "main", skills: [{ name: "a", skillPath: "a/SKILL.md", frontmatter: {} }] } };
+  const upstream = { [source]: { source, ref: "main", skills: [{ name: "a", skillPath: "a/SKILL.md", frontmatter: {} }] } };
   const accepted = (number, skill) => ({
     number,
     title: `chore(skills): adopt ${skill} from ${source}`,
@@ -183,7 +185,7 @@ test("an accepted proposal for a skill that is gone upstream or already locked a
   assert.deepEqual(plan.propose, []);
 });
 
-test("every github source with a locked skill is watched, once", () => {
+test("every github source with a locked skill is watched once per ref", () => {
   const lock = {
     version: 1,
     skills: {
@@ -191,9 +193,45 @@ test("every github source with a locked skill is watched, once", () => {
       b: { source: "o/r", sourceType: "github" },
       c: { source: "x/y", sourceType: "github" },
       d: { source: "./local", sourceType: "local" },
+      e: { source: "o/r", sourceType: "github", ref: "v2" },
     },
   };
-  assert.deepEqual(watchedSources(lock), ["o/r", "x/y"]);
+  assert.deepEqual(watchedSources(lock), [
+    { key: "o/r", source: "o/r", ref: undefined },
+    { key: "x/y", source: "x/y", ref: undefined },
+    { key: "o/r#v2", source: "o/r", ref: "v2" },
+  ]);
+});
+
+test("a skill locked at a ref is checked against that ref, which proposes nothing", () => {
+  const lock = {
+    version: 1,
+    skills: { pinned: { source: "o/r", sourceType: "github", ref: "v2", skillPath: "pinned/SKILL.md", computedHash: "h" } },
+  };
+  const upstream = {
+    "o/r#v2": { source: "o/r", ref: "v2", pinned: true, skills: [
+      { name: "pinned", skillPath: "pinned/SKILL.md", frontmatter: {} },
+      { name: "only-on-v2", skillPath: "only-on-v2/SKILL.md", frontmatter: {} },
+    ] },
+  };
+
+  const plan = planSync({ lock, rejected: { version: 1, sources: {} }, upstream, issues: [] });
+
+  assert.deepEqual(plan.removed, []);
+  assert.deepEqual(plan.propose, []);
+});
+
+test("the ignore block is rewritten in name order, and lines outside it are kept", () => {
+  const begin = "# >>> Agent Skills Sync: managed from skills-lock.json; do not edit this block.";
+  const intro = "# Lists every skill the tool may install or link here, on any machine. Anything else stays tracked.";
+  const end = "# <<< Agent Skills Sync";
+  const text = ["mine", "", begin, intro, "/old", end, "after", ""].join("\n");
+
+  assert.equal(
+    withIgnoreBlock(text, ["zeta", "Alpha", "beta"]),
+    ["mine", "", begin, intro, "/Alpha", "/beta", "/zeta", end, "after", ""].join("\n"),
+  );
+  assert.equal(withIgnoreBlock("no block\n", ["a"]), "no block\n");
 });
 
 test("rejections are added in name order, under a new source when needed", () => {
@@ -252,8 +290,8 @@ test("a closing fence with trailing whitespace ends the frontmatter", () => {
 test("a skill whose name is already locked from another source is neither accepted nor proposed", () => {
   const lock = { version: 1, skills: { a: { source: "x/y", sourceType: "github", skillPath: "a/SKILL.md", computedHash: "h" } } };
   const upstream = {
-    "x/y": { ref: "main", skills: [{ name: "a", skillPath: "a/SKILL.md", frontmatter: {} }] },
-    "o/r": { ref: "main", skills: [{ name: "a", skillPath: "skills/a/SKILL.md", frontmatter: {} }] },
+    "x/y": { source: "x/y", ref: "main", skills: [{ name: "a", skillPath: "a/SKILL.md", frontmatter: {} }] },
+    "o/r": { source: "o/r", ref: "main", skills: [{ name: "a", skillPath: "skills/a/SKILL.md", frontmatter: {} }] },
   };
   const accepted = {
     number: 1,

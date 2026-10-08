@@ -12,7 +12,9 @@ import {
   prBody,
   proposalIssue,
   rejectionReason,
+  watchKey,
   watchedSources,
+  withIgnoreBlock,
   withRejections,
 } from "./plan.mjs";
 
@@ -21,7 +23,11 @@ const BRANCH = "chore/sync-skills";
 const TITLE = "chore(skills): sync skills with upstream";
 const LOCK = "skills-lock.json";
 const REJECTED = "skills-rejected.json";
-const INSTALL_DIRS = [".agents/skills", ".claude/skills"];
+// The package's default layout: skills are installed in the canonical folder and linked into the other.
+const CANONICAL_DIR = ".agents/skills";
+const LINK_DIR = ".claude/skills";
+const INSTALL_DIRS = [CANONICAL_DIR, LINK_DIR];
+const IGNORE_FILES = INSTALL_DIRS.map((dir) => posix.join(dir, ".gitignore"));
 // Folders the skills CLI never discovers skills in.
 const SKIPPED_DIRS = new Set(["node_modules", ".git", "dist", "build", "__pycache__"]);
 
@@ -35,7 +41,7 @@ if (!dryRun && git(["rev-parse", "--abbrev-ref", "HEAD"]).trim() !== base) {
 
 const lock = readJson(LOCK);
 const rejected = existsSync(REJECTED) ? readJson(REJECTED) : { version: 1, sources: {} };
-const upstream = Object.fromEntries(watchedSources(lock).map((source) => [source, listUpstream(source)]));
+const upstream = Object.fromEntries(watchedSources(lock).map((watched) => [watched.key, listUpstream(watched)]));
 const issues = ghList(`repos/${repo}/issues?labels=${PROPOSAL_LABEL}&state=all&per_page=100`)
   .filter((issue) => !issue.pull_request);
 const plan = planSync({ lock, rejected, upstream, issues });
@@ -67,10 +73,11 @@ const rejections = plan.reject.map(({ issue, source, name }) => {
 });
 if (rejections.length > 0) writeJson(REJECTED, withRejections(rejected, rejections));
 
-// Only the two JSON files are committed; the installed copies go.
+// The installed copies go; the JSON files and the generated .gitignore blocks are committed.
 for (const name of new Set([...Object.keys(lock.skills), ...Object.keys(syncedLock.skills)])) {
   for (const dir of INSTALL_DIRS) rmSync(posix.join(dir, name), { recursive: true, force: true });
 }
+updateIgnoreBlocks(syncedLock);
 
 const body = prBody({
   updated,
@@ -93,12 +100,14 @@ if (dryRun) {
   updateRollingPr(body);
 }
 
-function listUpstream(source) {
-  const { default_branch: ref } = ghJson(`repos/${source}`);
+function listUpstream({ source, ref: lockedRef }) {
+  const ref = lockedRef ?? ghJson(`repos/${source}`).default_branch;
   const tree = ghJson(`repos/${source}/git/trees/${encodeURIComponent(ref)}?recursive=1`);
   if (tree.truncated) throw new Error(`The file tree of ${source} is too large to list in one request.`);
   return {
+    source,
     ref,
+    pinned: lockedRef !== undefined,
     skills: tree.tree
       .filter((entry) => entry.type === "blob" && posix.basename(entry.path) === "SKILL.md")
       .filter((entry) => !entry.path.split("/").some((segment) => SKIPPED_DIRS.has(segment)))
@@ -112,7 +121,7 @@ function listUpstream(source) {
 
 // The upstream commits that touched the skill's folder since its old hash entered the lock.
 function upstreamChanges(name, entry) {
-  const { ref } = upstream[entry.source];
+  const { ref } = upstream[watchKey(entry)];
   const folder = posix.dirname(entry.skillPath ?? "");
   const historyUrl = `https://github.com/${entry.source}/commits/${ref}${folder === "." ? "" : `/${folder}`}`;
   const lockedAt = git(["log", "-S", entry.computedHash, "--format=%cI", "--", LOCK]).trim().split("\n").at(-1);
@@ -124,6 +133,24 @@ function upstreamChanges(name, entry) {
 
 function toCommit({ sha, html_url, commit }) {
   return { sha, html_url, message: commit.message };
+}
+
+// The blocks list what the package may install or link, the same on every machine (see ManagedStateFile): every
+// locked github skill, plus, in the link folder, the project-authored skills committed in the canonical one.
+function updateIgnoreBlocks(finalLock) {
+  const locked = Object.keys(finalLock.skills).filter((name) => finalLock.skills[name].sourceType === "github");
+  const authored = git(["ls-files", "--", `${CANONICAL_DIR}/*/SKILL.md`])
+    .split("\n")
+    .filter((path) => path.split("/").length === 4)
+    .map((path) => path.split("/")[2])
+    .filter((name) => !(name in finalLock.skills));
+  for (const dir of INSTALL_DIRS) {
+    const path = posix.join(dir, ".gitignore");
+    if (!existsSync(path)) continue;
+    const text = readFileSync(path, "utf8");
+    const updated = withIgnoreBlock(text, dir === LINK_DIR ? [...locked, ...authored] : locked);
+    if (updated !== text) writeFileSync(path, updated);
+  }
 }
 
 function readProject() {
@@ -142,7 +169,7 @@ function ensureLabels() {
 
 function updateRollingPr(body) {
   const open = JSON.parse(gh(["pr", "list", "--head", BRANCH, "--state", "open", "--json", "number"]));
-  const changed = git(["status", "--porcelain", "--", LOCK, REJECTED]).trim() !== "";
+  const changed = git(["status", "--porcelain", "--", LOCK, REJECTED, ...IGNORE_FILES]).trim() !== "";
   if (!body || !changed) {
     if (open.length > 0) gh(["pr", "close", String(open[0].number), "--delete-branch", "--comment", "Nothing left to sync."]);
     console.log("Nothing to sync.");
@@ -150,7 +177,7 @@ function updateRollingPr(body) {
   }
 
   git(["switch", "-C", BRANCH]);
-  git(["add", "--", LOCK, REJECTED]);
+  git(["add", "--", LOCK, REJECTED, ...IGNORE_FILES]);
   git(["-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "commit", "-m", TITLE]);
   git(["push", "--force", "origin", BRANCH]);
   if (open.length > 0) {

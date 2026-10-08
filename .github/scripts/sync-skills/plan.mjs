@@ -142,16 +142,25 @@ export function rejectionReason(issue, comments) {
   return reason || issue.html_url;
 }
 
-// Every GitHub source with a locked skill is watched.
+// Every GitHub source with a locked skill is watched, at each ref it's locked at (none: its default branch).
 export function watchedSources(lock) {
-  const sources = Object.values(lock.skills ?? {})
-    .filter((entry) => entry.sourceType === "github")
-    .map((entry) => entry.source);
-  return [...new Set(sources)];
+  const watched = new Map();
+  for (const entry of Object.values(lock.skills ?? {})) {
+    if (entry.sourceType !== "github") continue;
+    const key = watchKey(entry);
+    if (!watched.has(key)) watched.set(key, { key, source: entry.source, ref: entry.ref || undefined });
+  }
+  return [...watched.values()];
+}
+
+// Where an entry's upstream inventory is kept: "<owner>/<repo>", or "<owner>/<repo>#<ref>" when it's locked at a ref.
+export function watchKey(entry) {
+  return entry.ref ? `${entry.source}#${entry.ref}` : entry.source;
 }
 
 // What a run changes, from main's lock and rejection list, each watched source's skills
-// (upstream: { "<owner>/<repo>": { ref, skills: [{ name, skillPath, frontmatter }] } }) and every skill-proposal issue.
+// (upstream: { [watchKey]: { source, ref, pinned, skills: [{ name, skillPath, frontmatter }] } }) and every
+// skill-proposal issue. Accepting adds from the default branch, so a ref-pinned inventory is never proposed from.
 //   removed: locked skills that no longer exist upstream; they leave the lock.
 //   accept:  open proposals labelled skill-accepted, for skills that exist upstream and aren't locked yet.
 //   reject:  proposals closed as not planned, for skills not yet in the rejection list ({ issue, source, name }).
@@ -163,7 +172,7 @@ export function planSync({ lock, rejected, upstream, issues }) {
 
   const removed = [];
   for (const [name, entry] of Object.entries(lock.skills)) {
-    const skills = upstream[entry.source]?.skills;
+    const skills = upstream[watchKey(entry)]?.skills;
     if (entry.sourceType !== "github" || !skills) continue;
     if (skills.some((skill) => skill.name === name || skill.skillPath === entry.skillPath)) continue;
     removed.push({ name, source: entry.source, skillPath: entry.skillPath });
@@ -190,7 +199,8 @@ export function planSync({ lock, rejected, upstream, issues }) {
   }
 
   const propose = [];
-  for (const [source, { skills }] of Object.entries(upstream)) {
+  for (const { source, pinned, skills } of Object.values(upstream)) {
+    if (pinned) continue;
     for (const skill of skills) {
       if (isLocked(skill.name) || isRejected(source, skill.name)) continue;
       if (openProposals.has(`${source}\n${skill.name}`)) continue;
@@ -243,4 +253,22 @@ export function prBody({ updated, added, rejected, removed }) {
   ]);
 
   return sections.length > 0 ? sections.join("\n\n") + "\n" : null;
+}
+
+const IGNORE_BEGIN = "# >>> Agent Skills Sync: managed from skills-lock.json; do not edit this block.";
+const IGNORE_INTRO = "# Lists every skill the tool may install or link here, on any machine. Anything else stays tracked.";
+const IGNORE_END = "# <<< Agent Skills Sync";
+
+// A skills folder's .gitignore with the package's managed block listing `names`, as ManagedStateFile.Write writes it.
+// Only an existing block is rewritten: the package decides which folders get one.
+export function withIgnoreBlock(text, names) {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => line.trim() === IGNORE_BEGIN);
+  if (start === -1) return text;
+  const endLine = lines.findIndex((line, index) => index > start && line.trim() === IGNORE_END);
+  const end = endLine === -1 ? lines.length : endLine + 1;
+  const sorted = [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const block = [IGNORE_BEGIN, IGNORE_INTRO, ...sorted.map((name) => `/${name}`), IGNORE_END];
+  const after = lines.slice(end);
+  return [...lines.slice(0, start), ...block, ...(after.length > 0 ? after : [""])].join("\n");
 }
