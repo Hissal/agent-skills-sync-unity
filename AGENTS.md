@@ -22,7 +22,7 @@ Host project at `.` with the embedded package at `Packages/com.hissal.agent-skil
 
 ### Code map
 
-Before exploring the package code, read `docs/code-map.md`.
+Before exploring or changing the package code, read `docs/code-map.md`.
 
 ### Releases
 

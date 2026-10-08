@@ -1,21 +1,19 @@
 # Code map
 
 How a sync flows through `Packages/com.hissal.agent-skills-sync`. Terms are in [GLOSSARY.md](../GLOSSARY.md);
-each type's doc comment holds the detail. Namespace: `Hissal.AgentSkillsSync`.
-
-Assemblies: `Core/` (plain C#, no `UnityEngine`), `Editor/` (Unity UI over Core), `Tests/Editor/` (EditMode tests).
+each type's doc comment holds the detail.
 
 ## A sync, in order
 
-The caller (the Editor) finds the lock root and builds `MachineChoices` (step 2's user-scope scan) first, then hands
-them to `SkillSync`, which runs the rest: `SkillSync.Run` does it all, `SkillSync.Plan` stops after step 3 offline.
+`SkillSync.Run` runs the steps; `SkillSync.Plan` stops after step 3, offline. Parts marked _caller_ run before, in the
+Editor, which hands their results to the `SkillSync` constructor.
 
-1. **Read the lock.** `Lockfile.FindRoot` (caller) finds it; `Lockfile` loads `skills-lock.json` into `LockedSkill`s;
+1. **Read the lock.** _Caller:_ `Lockfile.FindRoot` finds it. `Lockfile` loads `skills-lock.json` into `LockedSkill`s;
    `LockfileException` when it is missing or unusable. `LockfileHash` hashes it for the startup check.
 2. **Scan what is there.**
    - `ProjectScanner` reads each skills folder of the `FolderLayout` (default `FolderLayout.Default`, a list of
      `SkillsFolder`s) into a `ProjectState` of `FolderState`s.
-   - Caller, via `MachineChoices.Read`: `UserScopeScanner` asks each `IUserScopeSource` (`UserScopeLocationSource`
+   - _Caller,_ in `MachineChoices.Read`: `UserScopeScanner` asks each `IUserScopeSource` (`UserScopeLocationSource`
      for folders like `~/.codex/skills`, `ClaudePluginSource` for Claude Code plugins) for user-scope copies, giving
      a `UserScopeState` of `UserScopeCopy`s.
      `MachineChoices` bundles this machine's layout, `FolderSelection`, `UserScopeState` and `InstallAnywayChoices`.
@@ -67,14 +65,12 @@ The `Record*`/`Set`/`Save` helpers change a loaded `LocalPrefs`; the caller then
 - `StartupNotifier` — once per editor session: offers newly found folders (`FolderSelection.Offers`), reads
   `SyncStatus`, and asks `StartupCheck.ShouldNotify` whether to offer opening the window.
 - `StartupCheck` (Core) — the notify decision; `StartupNotifier` records declines, `SkillsSyncWindow` records syncs.
-- `SyncText` — the window's user-facing strings.
 
 ## Tests
 
-`Packages/com.hissal.agent-skills-sync/Tests/Editor/`, one `*Tests.cs` per Core type or behaviour (e.g.
-`SkillSyncTests`, `InstallPlannerTests`, `PlanExecutorTests`, `StartupCheckTests`). Helpers:
+`Packages/com.hissal.agent-skills-sync/Tests/Editor/`, one `*Tests.cs` per Core type or behaviour. Helpers:
 
 - `FakeGitHub` — serves fixture-built repo zips in place of GitHub, or fails as if offline.
 - `TempDirectory` — deletes temp trees safely even when they hold symlinks or junctions.
-- `Fixtures~/` — skill folders with known `skills` CLI hashes (`SkillFolderHashTests`, `FakeGitHub` and
-  other tests read them).
+- `Fixtures~/` — skill folders with known `skills` CLI hashes (read by `SkillFolderHashTests`,
+  `FakeGitHub` and others).
