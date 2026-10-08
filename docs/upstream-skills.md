@@ -27,5 +27,5 @@ an issue titled `chore(skills): adopt <name> from <owner>/<repo>`. It notes any 
   as the reason, or the issue's URL without one.
 - Closing it as completed does nothing, so the skill is proposed again.
 
-Merging the rolling PR closes the accepted and rejected issues. To apply a decision right away, run the workflow from
+Merging the rolling PR closes the accepted issues; rejected ones are already closed. To apply a decision right away, run the workflow from
 the Actions tab. Its `dry-run` input prints the PR body and the proposals without writing to GitHub.

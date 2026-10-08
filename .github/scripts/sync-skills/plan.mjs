@@ -5,7 +5,7 @@
 export function parseFrontmatter(skillMd) {
   const lines = skillMd.replace(/\r\n?/g, "\n").split("\n");
   if (lines[0].trim() !== "---") return {};
-  const end = lines.indexOf("---", 1);
+  const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
   const body = lines.slice(1, end === -1 ? lines.length : end);
 
   const result = {};
@@ -154,10 +154,11 @@ export function watchedSources(lock) {
 // (upstream: { "<owner>/<repo>": { ref, skills: [{ name, skillPath, frontmatter }] } }) and every skill-proposal issue.
 //   removed: locked skills that no longer exist upstream; they leave the lock.
 //   accept:  open proposals labelled skill-accepted, for skills that exist upstream and aren't locked yet.
-//   reject:  proposals closed as not planned, for skills not yet in the rejection list.
+//   reject:  proposals closed as not planned, for skills not yet in the rejection list ({ issue, source, name }).
 //   propose: upstream skills that are neither locked nor rejected and have no open proposal.
 export function planSync({ lock, rejected, upstream, issues }) {
-  const isLocked = (source, name) => lock.skills[name]?.source === source;
+  // Lock entries are keyed by name, so a name locked from any source is taken.
+  const isLocked = (name) => name in lock.skills;
   const findUpstream = (source, name) => upstream[source]?.skills.find((skill) => skill.name === name);
 
   const removed = [];
@@ -175,23 +176,23 @@ export function planSync({ lock, rejected, upstream, issues }) {
   const accept = [];
   const reject = [];
   const isRejected = (source, name) =>
-    rejected.sources[source]?.[name] !== undefined || reject.some((r) => r.source === source && r.skill === name);
+    rejected.sources[source]?.[name] !== undefined || reject.some((r) => r.source === source && r.name === name);
   const openProposals = new Set();
   for (const { issue, proposal: { source, skill } } of proposals) {
     if (issue.state === "open") {
       openProposals.add(`${source}\n${skill}`);
       const upstreamSkill = findUpstream(source, skill);
       const isAccepted = issue.labels.some((label) => label.name === ACCEPTED_LABEL);
-      if (isAccepted && upstreamSkill && !isLocked(source, skill)) accept.push({ issue, source, skill: upstreamSkill });
+      if (isAccepted && upstreamSkill && !isLocked(skill)) accept.push({ issue, source, skill: upstreamSkill });
     } else if (issue.state_reason === "not_planned" && !isRejected(source, skill)) {
-      reject.push({ issue, source, skill });
+      reject.push({ issue, source, name: skill });
     }
   }
 
   const propose = [];
   for (const [source, { skills }] of Object.entries(upstream)) {
     for (const skill of skills) {
-      if (isLocked(source, skill.name) || isRejected(source, skill.name)) continue;
+      if (isLocked(skill.name) || isRejected(source, skill.name)) continue;
       if (openProposals.has(`${source}\n${skill.name}`)) continue;
       propose.push({ source, skill });
     }
@@ -203,7 +204,7 @@ export function planSync({ lock, rejected, upstream, issues }) {
 // A copy of skills-rejected.json with the rejections added, each source's skills in name order.
 export function withRejections(rejected, rejections) {
   const sources = structuredClone(rejected.sources);
-  for (const { source, skill, reason } of rejections) (sources[source] ??= {})[skill] = reason;
+  for (const { source, name, reason } of rejections) (sources[source] ??= {})[name] = reason;
   for (const source of Object.keys(sources)) {
     sources[source] = Object.fromEntries(Object.entries(sources[source]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
   }

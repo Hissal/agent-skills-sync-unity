@@ -152,7 +152,7 @@ test("the plan drops vanished skills, takes accepted and rejected proposals and 
 
   assert.deepEqual(plan.removed, [{ name: "gone", source, skillPath: "skills/gone/SKILL.md" }]);
   assert.deepEqual(plan.accept, [{ issue: issues[0], source, skill: upstreamSkill("accepted") }]);
-  assert.deepEqual(plan.reject, [{ issue: issues[1], source, skill: "rejected-now" }]);
+  assert.deepEqual(plan.reject, [{ issue: issues[1], source, name: "rejected-now" }]);
   assert.deepEqual(plan.propose, [
     { source, skill: upstreamSkill("closed-done") },
     { source, skill: upstreamSkill("brand-new") },
@@ -200,8 +200,8 @@ test("rejections are added in name order, under a new source when needed", () =>
   const rejected = { version: 1, sources: { "o/r": { alpha: "A.", zulu: "Z." } } };
 
   const updated = withRejections(rejected, [
-    { source: "o/r", skill: "mike", reason: "M." },
-    { source: "x/y", skill: "solo", reason: "S." },
+    { source: "o/r", name: "mike", reason: "M." },
+    { source: "x/y", name: "solo", reason: "S." },
   ]);
 
   assert.equal(JSON.stringify(updated, null, 2), JSON.stringify({
@@ -243,4 +243,29 @@ test("empty sections are left out, and nothing to say is no body", () => {
 
   const body = prBody({ ...empty, added: [{ name: "a", source: "o/r", issue: 1 }] });
   assert.deepEqual(body.match(/^## .+$/gm), ["## Added"]);
+});
+
+test("a closing fence with trailing whitespace ends the frontmatter", () => {
+  assert.deepEqual(parseFrontmatter("---\r\nname: a\r\n--- \r\nother: b\r\n"), { name: "a" });
+});
+
+test("a skill whose name is already locked from another source is neither accepted nor proposed", () => {
+  const lock = { version: 1, skills: { a: { source: "x/y", sourceType: "github", skillPath: "a/SKILL.md", computedHash: "h" } } };
+  const upstream = {
+    "x/y": { ref: "main", skills: [{ name: "a", skillPath: "a/SKILL.md", frontmatter: {} }] },
+    "o/r": { ref: "main", skills: [{ name: "a", skillPath: "skills/a/SKILL.md", frontmatter: {} }] },
+  };
+  const accepted = {
+    number: 1,
+    title: "chore(skills): adopt a from o/r",
+    body: "",
+    state: "open",
+    state_reason: null,
+    labels: [{ name: "skill-proposal" }, { name: "skill-accepted" }],
+  };
+
+  const plan = planSync({ lock, rejected: { version: 1, sources: {} }, upstream, issues: [accepted] });
+
+  assert.deepEqual(plan.accept, []);
+  assert.deepEqual(plan.propose, []);
 });

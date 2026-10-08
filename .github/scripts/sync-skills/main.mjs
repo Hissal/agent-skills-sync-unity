@@ -27,6 +27,11 @@ const SKIPPED_DIRS = new Set(["node_modules", ".git", "dist", "build", "__pycach
 
 const dryRun = process.env.DRY_RUN === "true";
 const repo = process.env.GITHUB_REPOSITORY ?? gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).trim();
+// The rolling PR always targets the default branch, so a real run has to start from it.
+const base = ghJson(`repos/${repo}`).default_branch;
+if (!dryRun && git(["rev-parse", "--abbrev-ref", "HEAD"]).trim() !== base) {
+  throw new Error(`Run from ${base}, or set DRY_RUN=true.`);
+}
 
 const lock = readJson(LOCK);
 const rejected = existsSync(REJECTED) ? readJson(REJECTED) : { version: 1, sources: {} };
@@ -55,10 +60,10 @@ const updated = githubSkills
   .filter((name) => syncedLock.skills[name] && syncedLock.skills[name].computedHash !== keptLock.skills[name].computedHash)
   .map((name) => upstreamChanges(name, keptLock.skills[name]));
 
-const rejections = plan.reject.map(({ issue, source, skill }) => {
+const rejections = plan.reject.map(({ issue, source, name }) => {
   const closed = ghJson(`repos/${repo}/issues/${issue.number}`);
   const comments = ghList(`repos/${repo}/issues/${issue.number}/comments?per_page=100`);
-  return { source, skill, reason: rejectionReason(closed, comments), issue: issue.number };
+  return { source, name, reason: rejectionReason(closed, comments), issue: issue.number };
 });
 if (rejections.length > 0) writeJson(REJECTED, withRejections(rejected, rejections));
 
@@ -70,7 +75,7 @@ for (const name of new Set([...Object.keys(lock.skills), ...Object.keys(syncedLo
 const body = prBody({
   updated,
   added: plan.accept.map(({ issue, source, skill }) => ({ name: skill.name, source, issue: issue.number })),
-  rejected: rejections.map(({ source, skill, reason, issue }) => ({ name: skill, source, issue, reason })),
+  rejected: rejections,
   removed: plan.removed,
 });
 const project = readProject();
@@ -144,7 +149,6 @@ function updateRollingPr(body) {
     return;
   }
 
-  const base = git(["rev-parse", "--abbrev-ref", "HEAD"]).trim();
   git(["switch", "-C", BRANCH]);
   git(["add", "--", LOCK, REJECTED]);
   git(["-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "commit", "-m", TITLE]);
