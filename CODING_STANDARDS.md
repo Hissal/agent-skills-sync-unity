@@ -24,5 +24,5 @@ and the next sync saw it as current.
 When copying another tool's file format or behaviour, link its source documentation in a comment or in `docs/`, and
 handle each precedence and default rule it states, or record why one is skipped.
 
-Why: these rules are easy to miss without the source to hand. In #26, `enabledPlugins` was merged key by key across
-settings files, but Claude Code's settings precedence takes the whole value from the highest-precedence file.
+Why: these rules are easy to miss without the source to hand. In #26, the fallback to `defaultEnabled` read only the
+plugin manifest, but Claude Code's plugin reference says the marketplace entry's value overrides it.
