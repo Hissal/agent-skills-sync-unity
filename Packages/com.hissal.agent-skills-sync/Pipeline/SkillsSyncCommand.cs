@@ -12,9 +12,14 @@ namespace Hissal.AgentSkillsSync.Pipeline
         // CLI reference: unity skill show --path references/integration-advanced.md
         [CliCommand("skills_sync",
             "Sync locked agent skills using this machine's folder and user-scope choices. " +
-            "New sources require --consent_new_sources true. Use --dry_run true for an offline plan.")]
+            "Agents must obtain explicit user approval for the listed new source repositories before passing " +
+            "--consent_new_sources true. A request to sync or install skills does not grant source consent. " +
+            "Use --dry_run true to list new sources and an offline plan. " +
+            "Approval already given for those sources in the current conversation remains valid.")]
         public static object Run(
-            [CliArg("consent_new_sources", "Trust all source repos new to this machine for this sync.")] bool consentNewSources = false,
+            [CliArg("consent_new_sources", "Trust all source repos new to this machine for this sync. " +
+                "Agents must first list them with --dry_run true and obtain explicit user approval for those sources. " +
+                "A sync/install request alone is insufficient; approval already given in this conversation remains valid.")] bool consentNewSources = false,
             [CliArg("install_mode", "Override latest or pinned for this invocation without saving project settings.")] string installMode = "",
             [CliArg("dry_run", "Return the offline plan without fetching skills or saving any state.")] bool dryRun = false)
         {

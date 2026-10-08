@@ -91,7 +91,7 @@ The package has no Pipeline dependency; projects without Pipeline use the window
 # Offline preview. No consent, downloads, or saved state.
 unity run . --command skills_sync --format json -- --dry_run true
 
-# Trust all new source repos in the current lock and sync.
+# After explicit user approval, trust all new source repos in the current lock and sync.
 unity run . --command skills_sync --format json -- --consent_new_sources true
 
 # Override the mode for this run only.
@@ -108,6 +108,12 @@ Unity CLI are experimental; this integration is verified with Pipeline `0.8.0-ex
 a sync with new sources fails and lists them before fetching or changing the project. Sources are remembered
 only after a successful sync. A dry run needs no consent and returns the actions and managed/ignored names from
 `SkillSync.Plan()`. In Latest mode it cannot predict upstream updates without a download.
+
+Agents must obtain explicit user approval for the listed new source repositories before passing
+`--consent_new_sources true`. A request to sync or install skills does not itself grant source consent.
+Run with `--dry_run true` to list new sources, then ask the user to approve them. Approval already given
+for those sources in the current conversation remains valid. If the lock gains another source, obtain
+approval for that source before consenting again.
 
 The command honours this machine's saved folder selection, user-scope copies and install-anyway choices,
 including an empty folder selection. Its default mode is the project's setting. `--install_mode latest` or
