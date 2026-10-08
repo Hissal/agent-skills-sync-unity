@@ -55,6 +55,39 @@ namespace Hissal.AgentSkillsSync.Tests
         static IEnumerable<PlanAction> Warnings(InstallPlan plan) =>
             plan.Actions.Where(a => a.Kind == PlanActionKind.WarnUserScopeDiffers);
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void Plan_ChangedCanonicalUserCopyRetainedForLink_WarnsWhileKeepingProjectCopy(bool installed)
+        {
+            var copy = MinimalCopy(AgentsPath, "~/.codex/skills");
+            Edit(copy);
+            var agents = Layout.Find(AgentsPath);
+            var claude = Layout.Find(ClaudePath);
+            var project = installed
+                ? new ProjectState(new[]
+                {
+                    new FolderState(agents, new[] { "tdd" }, new[] { "tdd" },
+                        new Dictionary<string, string> { ["tdd"] = FakeGitHub.MinimalHash }),
+                    new FolderState(claude, new[] { "tdd" }, new[] { "tdd" }),
+                })
+                : ProjectState.Empty;
+            var skill = Lock(FakeGitHub.MinimalHash).Skills.Single();
+
+            var plan = InstallPlanner.Plan(Lock(FakeGitHub.MinimalHash), project, Layout,
+                selected: new[] { agents, claude }, userScope: new UserScopeState(new[] { copy }));
+
+            Assert.That(plan.Actions.Where(a => a.Folder == agents).Select(a => a.Kind), Is.EqualTo(installed
+                ? new[] { PlanActionKind.SkipUserScope, PlanActionKind.WarnUserScopeDiffers }
+                : new[] { PlanActionKind.Install, PlanActionKind.SkipUserScope, PlanActionKind.WarnUserScopeDiffers }));
+            Assert.That(plan.ManagedNames[agents], Is.EqualTo(new[] { "tdd" }));
+            Assert.That(plan.ManagedNames[claude], Is.EqualTo(new[] { "tdd" }));
+            Assert.That(plan.Actions.Any(a => a.Kind == PlanActionKind.Remove || a.Kind == PlanActionKind.Unlink), Is.False);
+            Assert.That(plan.Actions.Any(a => a.ChangesProject), Is.EqualTo(!installed));
+            Assert.That(new SyncSummary(plan.Actions).UserScopeDiffers.Single().UserScopeCopies, Is.EqualTo(new[] { copy }));
+            Assert.That(Hissal.AgentSkillsSync.Editor.SyncText.FolderStatus(plan, skill, agents, false, new[] { copy }),
+                Does.Contain("using yours").And.Contain("project copy kept for another selected folder"));
+        }
+
         [Test]
         public void Plan_SkippedCopyMatchesTheLock_NoWarning()
         {

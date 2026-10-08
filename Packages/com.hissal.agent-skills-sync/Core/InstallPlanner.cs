@@ -26,8 +26,8 @@ namespace Hissal.AgentSkillsSync
     /// User-scope defaults: a locked skill is skipped in a selected folder unless the contributor chose to install it anyway there
     /// (<see cref="InstallAnywayChoices"/>), while a user-scope copy the folder's agents read was found
     /// (<see cref="UserScopeState"/>) -> SkipUserScope, and the folder is not needed for that skill (its managed entry
-    /// goes as above). The canonical copy stays while any selected folder still needs it for that skill, so a skip of
-    /// the canonical folder only takes effect once no selected link folder links to it. Project-authored skills are
+    /// goes as above). The canonical copy stays while any selected folder still needs it for that skill, but the
+    /// canonical folder still reports its user-scope skip and any difference warning. Project-authored skills are
     /// never skipped. Where a skipped folder's user-scope copy verifiably differs from the lock
     /// (<see cref="UserScopeCopy.DiffersFromLock"/>) -> WarnUserScopeDiffers right after its SkipUserScope. That check
     /// hashes the copy, the planner's only read of the filesystem.
@@ -92,13 +92,6 @@ namespace Hissal.AgentSkillsSync
                     if (!NeededFor(folder, skill.Name))
                     {
                         Withdraw(skill.Name, folder, state);
-                        if (Skipped(folder, skill.Name))
-                        {
-                            var copies = userScope.CopiesOf(folder, skill.Name);
-                            actions.Add(PlanAction.SkipUserScope(skill, folder, copies));
-                            var differing = copies.Where(c => c.DiffersFromLock(skill)).ToList();
-                            if (differing.Count > 0) actions.Add(PlanAction.WarnUserScopeDiffers(skill, folder, differing));
-                        }
                     }
                     else if (!state.Has(skill.Name))
                     {
@@ -118,6 +111,14 @@ namespace Hissal.AgentSkillsSync
                     else
                     {
                         actions.Add(PlanAction.LeaveForeign(skill, folder));
+                    }
+
+                    if (Skipped(folder, skill.Name))
+                    {
+                        var copies = userScope.CopiesOf(folder, skill.Name);
+                        actions.Add(PlanAction.SkipUserScope(skill, folder, copies));
+                        var differing = copies.Where(c => c.DiffersFromLock(skill)).ToList();
+                        if (differing.Count > 0) actions.Add(PlanAction.WarnUserScopeDiffers(skill, folder, differing));
                     }
                 }
             }

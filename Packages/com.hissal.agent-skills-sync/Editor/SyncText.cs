@@ -37,7 +37,8 @@ namespace Hissal.AgentSkillsSync.Editor
                 var status = "using yours (found in " + string.Join(", ", copies.Select(c => c.FoundIn)) + ")";
                 if (kinds.Contains(PlanActionKind.Unlink) || kinds.Contains(PlanActionKind.Remove))
                     return status + "; project copy removed on Sync";
-                if (folder.Role == SkillsFolderRole.Canonical && !kinds.Contains(PlanActionKind.SkipUserScope))
+                if (folder.Role == SkillsFolderRole.Canonical &&
+                    (plan.ManagedNames[folder].Contains(skill.Name) || kinds.Contains(PlanActionKind.LeaveForeign)))
                     return status + "; project copy kept for another selected folder";
                 return status;
             }

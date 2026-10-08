@@ -75,7 +75,7 @@ namespace Hissal.AgentSkillsSync.Tests
             yield return Case("ClaudeFound_NoChoice_CopiesForAgents", "", Both, ClaudePath, "",
                 "Install .agents/skills/tdd", "SkipUserScope .claude/skills/tdd");
             yield return Case("AgentsFound_ClaudeNeedsCanonical_KeepsCopy", "", Both, AgentsPath, "",
-                "Install .agents/skills/tdd", "Link .claude/skills/tdd");
+                "Install .agents/skills/tdd", "SkipUserScope .agents/skills/tdd", "Link .claude/skills/tdd");
             yield return Case("AgentsOnly_Found_UsesMine", "", AgentsPath, AgentsPath, "",
                 "SkipUserScope .agents/skills/tdd");
             yield return Case("ClaudeOnly_Found_UsesMine", "", ClaudePath, ClaudePath, "",
@@ -83,7 +83,7 @@ namespace Hissal.AgentSkillsSync.Tests
             yield return Case("OverrideInUnselectedFolder_Ignored", "", ClaudePath, Both, AgentsPath,
                 "SkipUserScope .claude/skills/tdd");
             yield return Case("ClaudeOverride_InstallsBoth", "", Both, Both, ClaudePath,
-                "Install .agents/skills/tdd", "Link .claude/skills/tdd");
+                "Install .agents/skills/tdd", "SkipUserScope .agents/skills/tdd", "Link .claude/skills/tdd");
             yield return Case("AgentsOverride_OnlyInstallsAgents", "", Both, Both, AgentsPath,
                 "Install .agents/skills/tdd", "SkipUserScope .claude/skills/tdd");
 
