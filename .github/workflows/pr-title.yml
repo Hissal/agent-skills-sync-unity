@@ -1,0 +1,21 @@
+name: PR title
+
+# The squash commit title is the PR title, and release-please builds the version bump and the changelog from it.
+# pull_request_target so titles of fork PRs are checked too; the job only reads the event and never checks out PR code.
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: The description "{subject}" must start with a lowercase letter.
