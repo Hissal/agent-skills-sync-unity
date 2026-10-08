@@ -46,11 +46,8 @@ namespace Hissal.AgentSkillsSync.Tests
 
         static void Edit(UserScopeCopy copy) => File.AppendAllText(Path.Combine(copy.Path, "SKILL.md"), "\nmy own tweak\n");
 
-        static SkipChoices Skip(params string[] folders) =>
-            new SkipChoices(folders.ToDictionary(f => f, f => (IReadOnlyList<string>)new[] { "tdd" }));
-
-        static InstallPlan Plan(Lockfile lockfile, SkipChoices skips, params UserScopeCopy[] copies) =>
-            InstallPlanner.Plan(lockfile, ProjectState.Empty, Layout, userScope: new UserScopeState(copies), skips: skips);
+        static InstallPlan Plan(Lockfile lockfile, InstallAnywayChoices installAnyway, params UserScopeCopy[] copies) =>
+            InstallPlanner.Plan(lockfile, ProjectState.Empty, Layout, userScope: new UserScopeState(copies), installAnyway: installAnyway);
 
         static IEnumerable<string> Describe(InstallPlan plan) =>
             plan.Actions.Select(a => $"{a.Kind} {a.Folder.RelativePath}/{a.SkillName}");
@@ -58,10 +55,43 @@ namespace Hissal.AgentSkillsSync.Tests
         static IEnumerable<PlanAction> Warnings(InstallPlan plan) =>
             plan.Actions.Where(a => a.Kind == PlanActionKind.WarnUserScopeDiffers);
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void Plan_ChangedCanonicalUserCopyRetainedForLink_WarnsWhileKeepingProjectCopy(bool installed)
+        {
+            var copy = MinimalCopy(AgentsPath, "~/.codex/skills");
+            Edit(copy);
+            var agents = Layout.Find(AgentsPath);
+            var claude = Layout.Find(ClaudePath);
+            var project = installed
+                ? new ProjectState(new[]
+                {
+                    new FolderState(agents, new[] { "tdd" }, new[] { "tdd" },
+                        new Dictionary<string, string> { ["tdd"] = FakeGitHub.MinimalHash }),
+                    new FolderState(claude, new[] { "tdd" }, new[] { "tdd" }),
+                })
+                : ProjectState.Empty;
+            var skill = Lock(FakeGitHub.MinimalHash).Skills.Single();
+
+            var plan = InstallPlanner.Plan(Lock(FakeGitHub.MinimalHash), project, Layout,
+                selected: new[] { agents, claude }, userScope: new UserScopeState(new[] { copy }));
+
+            Assert.That(plan.Actions.Where(a => a.Folder == agents).Select(a => a.Kind), Is.EqualTo(installed
+                ? new[] { PlanActionKind.SkipUserScope, PlanActionKind.WarnUserScopeDiffers }
+                : new[] { PlanActionKind.Install, PlanActionKind.SkipUserScope, PlanActionKind.WarnUserScopeDiffers }));
+            Assert.That(plan.ManagedNames[agents], Is.EqualTo(new[] { "tdd" }));
+            Assert.That(plan.ManagedNames[claude], Is.EqualTo(new[] { "tdd" }));
+            Assert.That(plan.Actions.Any(a => a.Kind == PlanActionKind.Remove || a.Kind == PlanActionKind.Unlink), Is.False);
+            Assert.That(plan.Actions.Any(a => a.ChangesProject), Is.EqualTo(!installed));
+            Assert.That(new SyncSummary(plan.Actions).UserScopeDiffers.Single().UserScopeCopies, Is.EqualTo(new[] { copy }));
+            Assert.That(Hissal.AgentSkillsSync.Editor.SyncText.FolderStatus(plan, skill, agents, false, new[] { copy }),
+                Does.Contain("using yours").And.Contain("project copy kept for another selected folder"));
+        }
+
         [Test]
         public void Plan_SkippedCopyMatchesTheLock_NoWarning()
         {
-            var plan = Plan(Lock(FakeGitHub.MinimalHash), Skip(ClaudePath), MinimalCopy(ClaudePath));
+            var plan = Plan(Lock(FakeGitHub.MinimalHash), InstallAnywayChoices.None, MinimalCopy(ClaudePath));
 
             Assert.That(Describe(plan), Is.EqualTo(new[] { "Install .agents/skills/tdd", "SkipUserScope .claude/skills/tdd" }));
         }
@@ -72,7 +102,7 @@ namespace Hissal.AgentSkillsSync.Tests
             var copy = MinimalCopy(ClaudePath);
             Edit(copy);
 
-            var plan = Plan(Lock(FakeGitHub.MinimalHash), Skip(ClaudePath), copy);
+            var plan = Plan(Lock(FakeGitHub.MinimalHash), InstallAnywayChoices.None, copy);
 
             Assert.That(Describe(plan), Is.EqualTo(new[]
             {
@@ -94,19 +124,20 @@ namespace Hissal.AgentSkillsSync.Tests
             var copy = MinimalCopy(ClaudePath);
             Edit(copy);
 
-            var plan = Plan(Lock(hash), Skip(ClaudePath), copy);
+            var plan = Plan(Lock(hash), InstallAnywayChoices.None, copy);
 
             Assert.That(Warnings(plan), Is.Empty);
         }
 
         [Test]
-        public void Plan_ChangedCopyNotSkipped_NoWarning()
+        public void Plan_ChangedCopyInstallAnyway_NoWarning()
         {
             // The project copy is installed there, so the agents run what teammates run.
             var copy = MinimalCopy(ClaudePath);
             Edit(copy);
 
-            var plan = Plan(Lock(FakeGitHub.MinimalHash), SkipChoices.None, copy);
+            var plan = Plan(Lock(FakeGitHub.MinimalHash),
+                new InstallAnywayChoices(new Dictionary<string, IReadOnlyList<string>> { [ClaudePath] = new[] { "tdd" } }), copy);
 
             Assert.That(Warnings(plan), Is.Empty);
         }
@@ -118,7 +149,7 @@ namespace Hissal.AgentSkillsSync.Tests
             var changed = MinimalCopy(ClaudePath, "plugin unity@claude-plugins");
             Edit(changed);
 
-            var plan = Plan(Lock(FakeGitHub.MinimalHash), Skip(ClaudePath), same, changed);
+            var plan = Plan(Lock(FakeGitHub.MinimalHash), InstallAnywayChoices.None, same, changed);
 
             Assert.That(Warnings(plan).Single().UserScopeCopies.Select(c => c.FoundIn), Is.EqualTo(new[] { "plugin unity@claude-plugins" }));
         }
@@ -131,7 +162,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Edit(agents);
             Edit(claude);
 
-            var plan = Plan(Lock(FakeGitHub.MinimalHash), Skip(AgentsPath, ClaudePath), agents, claude);
+            var plan = Plan(Lock(FakeGitHub.MinimalHash), InstallAnywayChoices.None, agents, claude);
 
             Assert.That(Describe(plan), Is.EqualTo(new[]
             {
@@ -144,7 +175,7 @@ namespace Hissal.AgentSkillsSync.Tests
         public void Plan_SkillsShHashedSource_NoWarning()
         {
             // A skills.sh server hash is a different algorithm: a mismatch says nothing about the content.
-            var plan = Plan(Lock(FakeGitHub.MinimalHash, "vercel-labs/agent-skills"), Skip(ClaudePath), MinimalCopy(ClaudePath));
+            var plan = Plan(Lock(FakeGitHub.MinimalHash, "vercel-labs/agent-skills"), InstallAnywayChoices.None, MinimalCopy(ClaudePath));
 
             Assert.That(Warnings(plan), Is.Empty);
         }
@@ -160,7 +191,7 @@ namespace Hissal.AgentSkillsSync.Tests
             var crlfHash = SkillFolderHash.Compute(crlf);
             Assume.That(crlfHash, Is.Not.EqualTo(FakeGitHub.MinimalHash));
 
-            var plan = Plan(Lock(crlfHash), Skip(ClaudePath), MinimalCopy(ClaudePath));
+            var plan = Plan(Lock(crlfHash), InstallAnywayChoices.None, MinimalCopy(ClaudePath));
 
             Assert.That(Warnings(plan), Is.Empty);
         }
@@ -172,7 +203,7 @@ namespace Hissal.AgentSkillsSync.Tests
             var copy = MinimalCopy(ClaudePath);
             File.WriteAllText(Path.Combine(copy.Path, "café.md"), "x");
 
-            var plan = Plan(Lock(FakeGitHub.MinimalHash), Skip(ClaudePath), copy);
+            var plan = Plan(Lock(FakeGitHub.MinimalHash), InstallAnywayChoices.None, copy);
 
             Assert.That(Warnings(plan), Is.Empty);
         }
@@ -183,7 +214,7 @@ namespace Hissal.AgentSkillsSync.Tests
             var copy = MinimalCopy(ClaudePath);
             TempDirectory.Delete(copy.Path);
 
-            var plan = Plan(Lock(FakeGitHub.MinimalHash), Skip(ClaudePath), copy);
+            var plan = Plan(Lock(FakeGitHub.MinimalHash), InstallAnywayChoices.None, copy);
 
             Assert.That(Describe(plan), Is.EqualTo(new[] { "Install .agents/skills/tdd", "SkipUserScope .claude/skills/tdd" }));
         }
@@ -193,13 +224,13 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             var copy = MinimalCopy(ClaudePath);
             Edit(copy);
-            var plan = Plan(Lock(FakeGitHub.MinimalHash), Skip(ClaudePath), copy);
+            var plan = Plan(Lock(FakeGitHub.MinimalHash), InstallAnywayChoices.None, copy);
 
             var summary = new SyncSummary(plan.Actions);
 
             Assert.That(summary.UserScopeDiffers.Select(a => $"{a.Folder.RelativePath}/{a.SkillName}"),
                 Is.EqualTo(new[] { ".claude/skills/tdd" }));
-            Assert.That(new SyncSummary(Plan(Lock(FakeGitHub.MinimalHash), Skip(ClaudePath), MinimalCopy(ClaudePath)).Actions)
+            Assert.That(new SyncSummary(Plan(Lock(FakeGitHub.MinimalHash), InstallAnywayChoices.None, MinimalCopy(ClaudePath)).Actions)
                 .UserScopeDiffers, Is.Empty);
         }
     }

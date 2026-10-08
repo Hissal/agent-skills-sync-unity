@@ -23,11 +23,11 @@ namespace Hissal.AgentSkillsSync
     /// copy, links first) and its managed names are dropped; entries it does not manage are never touched.
     /// </para>
     /// <para>
-    /// User-scope skips: a locked skill is skipped in a selected folder when the contributor chose to skip it there
-    /// (<see cref="SkipChoices"/>) <b>and</b> a user-scope copy the folder's agents read was found
+    /// User-scope defaults: a locked skill is skipped in a selected folder unless the contributor chose to install it anyway there
+    /// (<see cref="InstallAnywayChoices"/>), while a user-scope copy the folder's agents read was found
     /// (<see cref="UserScopeState"/>) -> SkipUserScope, and the folder is not needed for that skill (its managed entry
-    /// goes as above). The canonical copy stays while any selected folder still needs it for that skill, so a skip of
-    /// the canonical folder only takes effect once no selected link folder links to it. Project-authored skills are
+    /// goes as above). The canonical copy stays while any selected folder still needs it for that skill, but the
+    /// canonical folder still reports its user-scope skip and any difference warning. Project-authored skills are
     /// never skipped. Where a skipped folder's user-scope copy verifiably differs from the lock
     /// (<see cref="UserScopeCopy.DiffersFromLock"/>) -> WarnUserScopeDiffers right after its SkipUserScope. That check
     /// hashes the copy, the planner's only read of the filesystem.
@@ -39,17 +39,17 @@ namespace Hissal.AgentSkillsSync
         /// <param name="installedCopyCheck">Whether a managed canonical copy is current; defaults to <see cref="LockedHashCheck"/>.</param>
         public static InstallPlan Plan(Lockfile lockfile, ProjectState project, FolderLayout layout,
             IInstalledCopyCheck installedCopyCheck = null, IEnumerable<SkillsFolder> selected = null,
-            UserScopeState userScope = null, SkipChoices skips = null) =>
-            Plan(lockfile, project, new MachineChoices(layout, selected, userScope, skips), installedCopyCheck);
+            UserScopeState userScope = null, InstallAnywayChoices installAnyway = null) =>
+            Plan(lockfile, project, new MachineChoices(layout, selected, userScope, installAnyway), installedCopyCheck);
 
-        /// <param name="choices">This machine's layout, folder selection, user-scope copies and skips.</param>
+        /// <param name="choices">This machine's layout, folder selection, user-scope copies and install-anyway choices.</param>
         /// <param name="installedCopyCheck">Whether a managed canonical copy is current; defaults to <see cref="LockedHashCheck"/>.</param>
         public static InstallPlan Plan(Lockfile lockfile, ProjectState project, MachineChoices choices,
             IInstalledCopyCheck installedCopyCheck = null)
         {
             var layout = choices.Layout;
             var userScope = choices.UserScope;
-            var skips = choices.Skips;
+            var installAnyway = choices.InstallAnyway;
             var check = installedCopyCheck ?? LockedHashCheck.Instance;
             var actions = new List<PlanAction>();
             var managed = layout.Folders.ToDictionary(f => f, f => new SortedSet<string>(StringComparer.Ordinal));
@@ -65,9 +65,9 @@ namespace Hissal.AgentSkillsSync
             bool Needed(SkillsFolder folder) =>
                 folder.Role == SkillsFolderRole.Canonical ? anySelected : selectedPaths.Contains(folder.RelativePath);
 
-            // A selected folder whose agents already have the skill at user scope, and where the contributor skips it.
+            // A selected folder whose agents already have the skill at user scope, and no install-anyway override is stored.
             bool Skipped(SkillsFolder folder, string skill) =>
-                selectedPaths.Contains(folder.RelativePath) && skips.IsSkipped(folder, skill) && userScope.Has(folder, skill);
+                selectedPaths.Contains(folder.RelativePath) && !installAnyway.IsInstalledAnyway(folder, skill) && userScope.Has(folder, skill);
 
             // Per locked skill: a selected link folder that does not skip it, or the canonical folder while any selected
             // folder (canonical or link) still needs the project copy of it.
@@ -92,13 +92,6 @@ namespace Hissal.AgentSkillsSync
                     if (!NeededFor(folder, skill.Name))
                     {
                         Withdraw(skill.Name, folder, state);
-                        if (Skipped(folder, skill.Name))
-                        {
-                            var copies = userScope.CopiesOf(folder, skill.Name);
-                            actions.Add(PlanAction.SkipUserScope(skill, folder, copies));
-                            var differing = copies.Where(c => c.DiffersFromLock(skill)).ToList();
-                            if (differing.Count > 0) actions.Add(PlanAction.WarnUserScopeDiffers(skill, folder, differing));
-                        }
                     }
                     else if (!state.Has(skill.Name))
                     {
@@ -118,6 +111,14 @@ namespace Hissal.AgentSkillsSync
                     else
                     {
                         actions.Add(PlanAction.LeaveForeign(skill, folder));
+                    }
+
+                    if (Skipped(folder, skill.Name))
+                    {
+                        var copies = userScope.CopiesOf(folder, skill.Name);
+                        actions.Add(PlanAction.SkipUserScope(skill, folder, copies));
+                        var differing = copies.Where(c => c.DiffersFromLock(skill)).ToList();
+                        if (differing.Count > 0) actions.Add(PlanAction.WarnUserScopeDiffers(skill, folder, differing));
                     }
                 }
             }

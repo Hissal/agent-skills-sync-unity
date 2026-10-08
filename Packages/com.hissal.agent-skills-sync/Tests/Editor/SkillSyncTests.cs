@@ -574,14 +574,13 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
-        public void Run_Latest_SkipStoredWithAUserScopeCopy_LeavesThatFolderOut()
+        public void Run_Latest_UserScopeCopyFound_LeavesThatFolderOut()
         {
             var agents = FolderLayout.Default.Find(".agents/skills");
             var claude = FolderLayout.Default.Find(".claude/skills");
             var userScope = new UserScopeState(new[] { new UserScopeCopy(claude, "tdd", Path.Combine(_root, "home", "tdd"), "~/.claude/skills") });
-            var skips = new SkipChoices(new Dictionary<string, IReadOnlyList<string>> { [claude.RelativePath] = new[] { "tdd" } });
 
-            var summary = new SkillSync(_project, _fetcher, selected: new[] { agents, claude }, userScope: userScope, skips: skips,
+            var summary = new SkillSync(_project, _fetcher, selected: new[] { agents, claude }, userScope: userScope,
                 mode: InstallMode.Latest).Run();
 
             Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd", "code-review" }));

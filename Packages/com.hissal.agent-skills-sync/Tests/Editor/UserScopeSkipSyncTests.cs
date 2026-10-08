@@ -6,7 +6,7 @@ using NUnit.Framework;
 
 namespace Hissal.AgentSkillsSync.Tests
 {
-    /// <summary>Syncing a temp project against a faked user home while skip choices are toggled.</summary>
+    /// <summary>Syncing a temp project against a faked user home while install-anyway choices are toggled.</summary>
     public class UserScopeSkipSyncTests
     {
         sealed class FixtureFetcher : ISkillFetcher
@@ -67,20 +67,20 @@ namespace Hissal.AgentSkillsSync.Tests
             File.WriteAllText(Path.Combine(folder, "SKILL.md"), "mine");
         }
 
-        void SetSkip(string folder, bool skip)
+        void SetInstallAnyway(string folder, bool installAnyway)
         {
             var prefs = LocalPrefs.Load(_project);
-            SkipChoices.Set(prefs, Layout.Find(folder), "tdd", skip);
+            InstallAnywayChoices.Set(prefs, Layout.Find(folder), "tdd", installAnyway);
             prefs.Save();
         }
 
         SyncSummary Sync() =>
             new SkillSync(_project, new FixtureFetcher(_root), selected: Both,
                 userScope: UserScopeScanner.Scan(Both, Environment),
-                skips: SkipChoices.From(LocalPrefs.Load(_project))).Run();
+                installAnyway: InstallAnywayChoices.From(LocalPrefs.Load(_project))).Run();
 
         SyncStatus Status() =>
-            SyncStatus.Read(_project, Layout, Both, UserScopeScanner.Scan(Both, Environment), SkipChoices.From(LocalPrefs.Load(_project)));
+            SyncStatus.Read(_project, Layout, Both, UserScopeScanner.Scan(Both, Environment), InstallAnywayChoices.From(LocalPrefs.Load(_project)));
 
         string InProject(string relative) => Path.Combine(_project, relative.Replace('/', Path.DirectorySeparatorChar));
 
@@ -92,17 +92,18 @@ namespace Hissal.AgentSkillsSync.Tests
                 ? names.ToArray()
                 : new string[0];
 
-        /// <summary>The names the folder's committed .gitignore block lists; skips never change it.</summary>
+        /// <summary>The names the folder's committed .gitignore block lists; installAnyway never change it.</summary>
         string[] IgnoredIn(string folder) => ManagedStateFile.Read(InProject(folder)).ToArray();
 
         [Test]
-        public void Run_ClaudeSkipToggledOnThenOff_UnlinksThenLinksAgain()
+        public void Run_ClaudeOverrideRemovedThenAdded_UnlinksThenLinksAgain()
         {
             MakeUserScopeSkill(".claude/skills", "tdd");
+            SetInstallAnyway(Claude, true);
             Sync();
             Directory.CreateDirectory(InProject(Claude + "/mine"));
 
-            SetSkip(Claude, true);
+            SetInstallAnyway(Claude, false);
             var skipped = Sync();
 
             Assert.That(skipped.Unlinked, Is.EqualTo(new[] { "tdd" }));
@@ -115,7 +116,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(Exists(Path.Combine(_home, ".claude", "skills", "tdd")), Is.True);
             Assert.That(Status().OutOfSyncSkills, Is.Empty);
 
-            SetSkip(Claude, false);
+            SetInstallAnyway(Claude, true);
             var unskipped = Sync();
 
             Assert.That(unskipped.Linked, Is.EqualTo(new[] { "tdd" }));
@@ -125,14 +126,16 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
-        public void Run_BothSkippedThenAgentsUnskipped_RemovesTheCopyThenInstallsItAgain()
+        public void Run_BothOverridesRemovedThenAgentsOverrideAdded_WithdrawsThenInstallsAgentsOnly()
         {
             MakeUserScopeSkill(".claude/skills", "tdd");
             MakeUserScopeSkill(".codex/skills", "tdd");
+            SetInstallAnyway(Claude, true);
+            SetInstallAnyway(Agents, true);
             Sync();
 
-            SetSkip(Claude, true);
-            SetSkip(Agents, true);
+            SetInstallAnyway(Claude, false);
+            SetInstallAnyway(Agents, false);
             var skipped = Sync();
 
             Assert.That(skipped.Removed, Is.EqualTo(new[] { "tdd" }));
@@ -142,7 +145,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(IgnoredIn(Agents), Is.EqualTo(new[] { "tdd" }));
             Assert.That(Exists(Path.Combine(_home, ".codex", "skills", "tdd")), Is.True);
 
-            SetSkip(Agents, false);
+            SetInstallAnyway(Agents, true);
             var unskipped = Sync();
 
             Assert.That(unskipped.Installed, Is.EqualTo(new[] { "tdd" }));
@@ -151,12 +154,35 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Run_UpgradeWithdrawsManagedCopiesByDefault_LeavesForeignEntriesAndIgnoreBlocks()
+        {
+            Sync();
+            var agentsIgnore = File.ReadAllText(InProject(Agents + "/.gitignore"));
+            var claudeIgnore = File.ReadAllText(InProject(Claude + "/.gitignore"));
+            Directory.CreateDirectory(InProject(Claude + "/foreign"));
+            File.WriteAllText(InProject(Claude + "/foreign/SKILL.md"), "hand-made");
+            MakeUserScopeSkill(".claude/skills", "tdd");
+            MakeUserScopeSkill(".codex/skills", "tdd");
+
+            Assert.That(Status().OutOfSyncSkills, Is.EqualTo(new[] { "tdd" }));
+            var summary = Sync();
+
+            Assert.That(summary.Unlinked, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(summary.Removed, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(Exists(Claude + "/tdd"), Is.False);
+            Assert.That(Exists(Agents + "/tdd"), Is.False);
+            Assert.That(File.ReadAllText(InProject(Claude + "/foreign/SKILL.md")), Is.EqualTo("hand-made"));
+            Assert.That(File.ReadAllText(InProject(Agents + "/.gitignore")), Is.EqualTo(agentsIgnore));
+            Assert.That(File.ReadAllText(InProject(Claude + "/.gitignore")), Is.EqualTo(claudeIgnore));
+            Assert.That(Status().OutOfSyncSkills, Is.Empty);
+        }
+
+        [Test]
         public void Run_SkipOverAForeignEntry_LeavesItUntouched()
         {
             MakeUserScopeSkill(".claude/skills", "tdd");
             Directory.CreateDirectory(InProject(Claude + "/tdd"));
             File.WriteAllText(InProject(Claude + "/tdd/SKILL.md"), "hand-made");
-            SetSkip(Claude, true);
 
             Sync();
 
@@ -168,7 +194,6 @@ namespace Hissal.AgentSkillsSync.Tests
         public void Status_SkippedButUserScopeCopyGone_ReportsTheSkillMissing()
         {
             MakeUserScopeSkill(".claude/skills", "tdd");
-            SetSkip(Claude, true);
             Sync();
             Directory.Delete(Path.Combine(_home, ".claude", "skills", "tdd"), recursive: true);
 

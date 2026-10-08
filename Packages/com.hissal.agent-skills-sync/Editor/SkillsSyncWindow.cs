@@ -16,7 +16,7 @@ namespace Hissal.AgentSkillsSync.Editor
     /// The skills folders to install into are chosen at the top and stored in local prefs as soon as they change;
     /// until then they are pre-selected by autofill, and nothing is installed before Sync.
     /// Each skill lists its status per selected folder; where that folder's agents already have the skill at user scope,
-    /// the row names where it was found and offers a skip toggle (stored in local prefs at once, applied on Sync).
+    /// the row names where it was found and offers an install-anyway toggle (stored in local prefs at once, applied on Sync).
     /// The project's install mode (Latest or Pinned) is shown and edited here, and saved to the committed project settings.
     /// </summary>
     public sealed class SkillsSyncWindow : EditorWindow
@@ -63,7 +63,7 @@ namespace Hissal.AgentSkillsSync.Editor
 
         static FolderLayout Layout => FolderLayout.Default;
 
-        /// <summary>This machine's folder selection, user-scope copies and skips, as stored now.</summary>
+        /// <summary>This machine's folder selection, user-scope copies and install-anyway choices, as stored now.</summary>
         static MachineChoices Choices() =>
             MachineChoices.Read(SkillsRoot, LocalPrefs.Load(UnityProjectRoot), UserEnvironment.Current, Layout);
 
@@ -228,16 +228,16 @@ namespace Hissal.AgentSkillsSync.Editor
 
         /// <summary>
         /// The skill's status in one selected folder, where its agents already have it at user scope, and a toggle to
-        /// skip the project copy there. The toggle is shown while a user-scope copy is found or a skip is stored.
+        /// install the project copy anyway. The toggle is shown while a user-scope copy is found.
         /// </summary>
         VisualElement FolderRow(LockedSkill skill, SkillsFolder folder, InstallPlan plan, MachineChoices choices)
         {
             var copies = choices.UserScope.CopiesOf(folder, skill.Name);
-            var skipStored = choices.Skips.IsSkipped(folder, skill.Name);
+            var installAnywayStored = choices.InstallAnyway.IsInstalledAnyway(folder, skill.Name);
             var container = new VisualElement { style = { marginLeft = 16, marginBottom = 2 } };
             var row = new VisualElement { style = { flexDirection = FlexDirection.Row } };
             row.Add(new Label(folder.RelativePath) { style = { width = 184 } });
-            row.Add(new Label(SyncText.FolderStatus(plan, skill, folder, skipStored, copies.Count > 0)) { style = { flexGrow = 1 } });
+            row.Add(new Label(SyncText.FolderStatus(plan, skill, folder, installAnywayStored, copies)) { style = { flexGrow = 1 } });
             container.Add(row);
 
             if (copies.Count > 0)
@@ -247,41 +247,37 @@ namespace Hissal.AgentSkillsSync.Editor
                     tooltip = string.Join("\n", copies.Select(c => c.Agents == null ? c.Path : $"{c.Path} - read by {c.Agents}")),
                     style = { whiteSpace = WhiteSpace.Normal, color = new Color(0.9f, 0.6f, 0.1f) },
                 });
-            else if (skipStored)
-                container.Add(new Label("Skipped, but no user-scope copy was found any more, so the project copy is installed.")
-                    { style = { whiteSpace = WhiteSpace.Normal } });
-
             var differs = plan.Actions.FirstOrDefault(a => a.Kind == PlanActionKind.WarnUserScopeDiffers &&
                                                           a.SkillName == skill.Name && a.Folder.RelativePath == folder.RelativePath);
             if (differs != null)
                 container.Add(new HelpBox(SyncText.DiffersMessage(differs), HelpBoxMessageType.Warning)
                     { tooltip = string.Join("\n", differs.UserScopeCopies.Select(c => c.Path)) });
 
-            if (copies.Count > 0 || skipStored)
+            if (copies.Count > 0)
             {
-                var toggle = new Toggle($"Skip the project copy in {folder.RelativePath} (use mine)")
+                var toggle = new Toggle($"Install the project copy in {folder.RelativePath} anyway")
                 {
-                    tooltip = "Stored on this machine only. Applies on the next Sync: skipping removes the tool's link or copy " +
-                              "from this folder only; un-skipping installs it again.",
+                    tooltip = "Stored on this machine only. Applies on the next Sync in this folder. " +
+                              "Leave unchecked to use your user-scope copy.",
                 };
-                toggle.SetValueWithoutNotify(skipStored);
-                toggle.RegisterValueChangedCallback(e => SaveSkip(folder, skill.Name, e.newValue));
+                toggle.SetValueWithoutNotify(installAnywayStored);
+                toggle.RegisterValueChangedCallback(e => SaveInstallAnyway(folder, skill.Name, e.newValue));
                 container.Add(toggle);
             }
             return container;
         }
 
-        void SaveSkip(SkillsFolder folder, string skillName, bool skip)
+        void SaveInstallAnyway(SkillsFolder folder, string skillName, bool installAnyway)
         {
             try
             {
                 var prefs = LocalPrefs.Load(UnityProjectRoot);
-                SkipChoices.Set(prefs, folder, skillName, skip);
+                InstallAnywayChoices.Set(prefs, folder, skillName, installAnyway);
                 prefs.Save();
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
             {
-                ShowSummary("Saving the skip choice failed: " + e.Message, HelpBoxMessageType.Error);
+                ShowSummary("Saving the install-anyway choice failed: " + e.Message, HelpBoxMessageType.Error);
                 Debug.LogException(e);
             }
             Refresh();

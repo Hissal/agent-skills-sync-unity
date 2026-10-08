@@ -49,9 +49,9 @@ namespace Hissal.AgentSkillsSync.Tests
             new UserScopeState(Paths(folders).Select(p =>
                 new UserScopeCopy(Layout.Find(p), "tdd", "/home/" + p + "/tdd", p == ClaudePath ? "~/.claude/skills" : "~/.codex/skills")));
 
-        /// <summary>Folders (comma-separated) where the contributor skips <c>tdd</c>; empty = none.</summary>
-        static SkipChoices Skips(string folders) =>
-            new SkipChoices(Paths(folders).ToDictionary(p => p, p => (IReadOnlyList<string>)new[] { "tdd" }));
+        /// <summary>Folders (comma-separated) where the contributor installs anyway <c>tdd</c>; empty = none.</summary>
+        static InstallAnywayChoices Overrides(string folders) =>
+            new InstallAnywayChoices(Paths(folders).ToDictionary(p => p, p => (IReadOnlyList<string>)new[] { "tdd" }));
 
         static IEnumerable<string> Paths(string list) => list.Split(',').Select(p => p.Trim()).Where(p => p.Length > 0);
 
@@ -59,66 +59,75 @@ namespace Hissal.AgentSkillsSync.Tests
 
         const string Both = AgentsPath + "," + ClaudePath;
 
-        static TestCaseData Case(string name, string project, string selected, string found, string skipped, params string[] expected) =>
-            new TestCaseData(project, selected, found, skipped, expected).SetName("Plan_SkipUserScope_" + name);
+        static TestCaseData Case(string name, string project, string selected, string found, string installAnyway, params string[] expected) =>
+            new TestCaseData(project, selected, found, installAnyway, expected).SetName("Plan_SkipUserScope_" + name);
 
         static IEnumerable<TestCaseData> Cases()
         {
-            // Fresh project.
-            yield return Case("NoCopyFound_SkipStored_InstallsAsUsual", "", Both, "", Both,
+            yield return Case("NoCopy_NoChoice_Installs", "", Both, "", "",
                 "Install .agents/skills/tdd", "Link .claude/skills/tdd");
-            yield return Case("CopyFound_NotSkipped_InstallsAsUsual", "", Both, Both, "",
+            yield return Case("NoCopy_OverridesStored_Installs", "", Both, "", Both,
                 "Install .agents/skills/tdd", "Link .claude/skills/tdd");
-            yield return Case("ClaudeSkipped_CopiesForAgentsOnly", "", Both, ClaudePath, ClaudePath,
-                "Install .agents/skills/tdd", "SkipUserScope .claude/skills/tdd");
-            yield return Case("AgentsSkipped_KeepsTheCopyTheClaudeLinkNeeds", "", Both, AgentsPath, AgentsPath,
-                "Install .agents/skills/tdd", "Link .claude/skills/tdd");
-            yield return Case("AgentsSkippedClaudeNotSelected_InstallsNothing", "", AgentsPath, AgentsPath, AgentsPath,
-                "SkipUserScope .agents/skills/tdd");
-            yield return Case("ClaudeSkippedAgentsNotSelected_InstallsNothing", "", ClaudePath, ClaudePath, ClaudePath,
-                "SkipUserScope .claude/skills/tdd");
-            yield return Case("BothSkipped_InstallsNothing", "", Both, Both, Both,
+            yield return Case("BothFound_NoChoice_UsesMine", "", Both, Both, "",
                 "SkipUserScope .claude/skills/tdd", "SkipUserScope .agents/skills/tdd");
-            yield return Case("SkipStoredForAnUnselectedFolder_Ignored", "", ClaudePath, Both, AgentsPath,
+            yield return Case("BothFound_BothInstallAnyway_Installs", "", Both, Both, Both,
                 "Install .agents/skills/tdd", "Link .claude/skills/tdd");
+            yield return Case("ClaudeFound_NoChoice_CopiesForAgents", "", Both, ClaudePath, "",
+                "Install .agents/skills/tdd", "SkipUserScope .claude/skills/tdd");
+            yield return Case("AgentsFound_ClaudeNeedsCanonical_KeepsCopy", "", Both, AgentsPath, "",
+                "Install .agents/skills/tdd", "SkipUserScope .agents/skills/tdd", "Link .claude/skills/tdd");
+            yield return Case("AgentsOnly_Found_UsesMine", "", AgentsPath, AgentsPath, "",
+                "SkipUserScope .agents/skills/tdd");
+            yield return Case("ClaudeOnly_Found_UsesMine", "", ClaudePath, ClaudePath, "",
+                "SkipUserScope .claude/skills/tdd");
+            yield return Case("OverrideInUnselectedFolder_Ignored", "", ClaudePath, Both, AgentsPath,
+                "SkipUserScope .claude/skills/tdd");
+            yield return Case("ClaudeOverride_InstallsBoth", "", Both, Both, ClaudePath,
+                "Install .agents/skills/tdd", "SkipUserScope .agents/skills/tdd", "Link .claude/skills/tdd");
+            yield return Case("AgentsOverride_OnlyInstallsAgents", "", Both, Both, AgentsPath,
+                "Install .agents/skills/tdd", "SkipUserScope .claude/skills/tdd");
 
-            // Installed in both folders.
             const string installed = AgentsPath + "=tdd;" + ClaudePath + "=tdd";
-            yield return Case("Installed_ClaudeSkipped_UnlinksOnlyClaude", installed, Both, Both, ClaudePath,
+            yield return Case("Installed_ClaudeFound_UnlinksClaude", installed, Both, ClaudePath, "",
                 "Unlink .claude/skills/tdd", "SkipUserScope .claude/skills/tdd");
-            yield return Case("Installed_AgentsSkipped_KeepsEverything", installed, Both, Both, AgentsPath);
-            yield return Case("Installed_BothSkipped_UnlinksThenRemoves", installed, Both, Both, Both,
+            yield return Case("Installed_BothFound_WithdrawsBoth", installed, Both, Both, "",
                 "Unlink .claude/skills/tdd", "SkipUserScope .claude/skills/tdd",
                 "Remove .agents/skills/tdd", "SkipUserScope .agents/skills/tdd");
-            yield return Case("Installed_ClaudeSkippedButCopyGone_KeepsTheLink", installed, Both, "", ClaudePath);
-
-            // Skipped earlier, now un-skipped (or the user-scope copy is gone): the project copy comes back.
-            yield return Case("ClaudeUnskipped_LinksAgain", AgentsPath + "=tdd", Both, ClaudePath, "",
+            yield return Case("Installed_CopyGone_KeepsBoth", installed, Both, "", "");
+            yield return Case("ClaudeInstallAnyway_LinksAgain", AgentsPath + "=tdd", Both, ClaudePath, ClaudePath,
                 "Link .claude/skills/tdd");
-            yield return Case("BothUnskipped_InstallsAgain", "", Both, Both, "",
-                "Install .agents/skills/tdd", "Link .claude/skills/tdd");
-
-            // Entries the tool does not manage are never touched.
-            yield return Case("ClaudeSkippedOverAForeignEntry_LeavesItAlone", AgentsPath + "=tdd;" + ClaudePath + "=tdd?", Both, ClaudePath, ClaudePath,
+            yield return Case("ForeignClaude_LeavesUntouched", AgentsPath + "=tdd;" + ClaudePath + "=tdd?", Both, ClaudePath, "",
                 "SkipUserScope .claude/skills/tdd");
-            yield return Case("BothSkippedOverAForeignCanonicalEntry_LeavesItAlone", AgentsPath + "=tdd?", Both, Both, Both,
+            yield return Case("ForeignCanonical_LeavesUntouched", AgentsPath + "=tdd?", Both, Both, "",
                 "SkipUserScope .claude/skills/tdd", "SkipUserScope .agents/skills/tdd");
         }
 
         [TestCaseSource(nameof(Cases))]
-        public void Plan_SkipUserScope(string project, string selected, string found, string skipped, string[] expected)
+        public void Plan_SkipUserScope(string project, string selected, string found, string installAnyway, string[] expected)
         {
             var plan = InstallPlanner.Plan(Lock("tdd"), Project(project.Split(';')), Layout, selected: Selected(selected),
-                userScope: UserScope(found), skips: Skips(skipped));
+                userScope: UserScope(found), installAnyway: Overrides(installAnyway));
 
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void Plan_UserScopeCopyFoundWithoutStoredChoice_UsesMineByDefault()
+        {
+            var plan = InstallPlanner.Plan(Lock("tdd"), ProjectState.Empty, Layout,
+                selected: Selected(Both), userScope: UserScope(Both));
+
+            Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[]
+            {
+                "SkipUserScope .claude/skills/tdd", "SkipUserScope .agents/skills/tdd",
+            }));
         }
 
         [Test]
         public void Plan_ClaudeSkipped_DropsTheNameFromClaudesManagedListOnly()
         {
             var plan = InstallPlanner.Plan(Lock("tdd"), Project(AgentsPath + "=tdd", ClaudePath + "=tdd"), Layout,
-                userScope: UserScope(ClaudePath), skips: Skips(ClaudePath));
+                userScope: UserScope(ClaudePath), installAnyway: InstallAnywayChoices.None);
 
             Assert.That(plan.ManagedNames[Layout.Find(ClaudePath)], Is.Empty);
             Assert.That(plan.ManagedNames[Layout.Canonical], Is.EqualTo(new[] { "tdd" }));
@@ -128,7 +137,7 @@ namespace Hissal.AgentSkillsSync.Tests
         public void Plan_SkipUserScope_NamesWhereTheCopyWasFoundAndChangesNothing()
         {
             var plan = InstallPlanner.Plan(Lock("tdd"), ProjectState.Empty, Layout,
-                userScope: UserScope(ClaudePath), skips: Skips(ClaudePath));
+                userScope: UserScope(ClaudePath), installAnyway: InstallAnywayChoices.None);
 
             var skip = plan.Actions.Single(a => a.Kind == PlanActionKind.SkipUserScope);
             Assert.That(skip.UserScopeCopies.Select(c => c.FoundIn), Is.EqualTo(new[] { "~/.claude/skills" }));
@@ -138,10 +147,10 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
-        public void Plan_OnlySkippedSkillIsSkipped()
+        public void Plan_OnlySkillFoundAtUserScopeIsSkipped()
         {
             var plan = InstallPlanner.Plan(Lock("other", "tdd"), ProjectState.Empty, Layout,
-                userScope: UserScope(ClaudePath), skips: Skips(ClaudePath));
+                userScope: UserScope(ClaudePath), installAnyway: InstallAnywayChoices.None);
 
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[]
             {
@@ -155,7 +164,7 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             // Skips cover locked skills only; a project-authored skill is the project's own.
             var plan = InstallPlanner.Plan(Lock(), Project(AgentsPath + "=tdd?"), Layout,
-                userScope: UserScope(ClaudePath), skips: Skips(ClaudePath));
+                userScope: UserScope(ClaudePath), installAnyway: InstallAnywayChoices.None);
 
             Assert.That(plan.Actions.Select(Describe), Is.EqualTo(new[] { "Link .claude/skills/tdd" }));
         }

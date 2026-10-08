@@ -5,7 +5,7 @@ namespace Hissal.AgentSkillsSync
 {
     /// <summary>
     /// What this machine brings to a sync besides the lockfile and the project: the folder layout, the skills folders
-    /// it installs into, the user-scope copies found for them, and the contributor's skip choices. Planning, syncing
+    /// it installs into, the user-scope copies found for them, and the contributor's install-anyway choices. Planning, syncing
     /// and the startup status all read the same choices, so build them once with <see cref="Read"/>.
     /// </summary>
     public sealed class MachineChoices
@@ -13,21 +13,21 @@ namespace Hissal.AgentSkillsSync
         /// <param name="layout">The folder layout; null = <see cref="FolderLayout.Default"/>.</param>
         /// <param name="selected">The folders this machine installs into (see <see cref="FolderSelection.Effective"/>); null = every folder in the layout.</param>
         /// <param name="userScope">The user-scope copies found (see <see cref="UserScopeScanner"/>); null = none.</param>
-        /// <param name="skips">The contributor's per-folder skip choices (see <see cref="SkipChoices.From"/>); null = none.</param>
+        /// <param name="installAnyway">The contributor's per-folder install-anyway choices (see <see cref="InstallAnywayChoices.From"/>); null = none.</param>
         public MachineChoices(FolderLayout layout = null, IEnumerable<SkillsFolder> selected = null,
-            UserScopeState userScope = null, SkipChoices skips = null)
+            UserScopeState userScope = null, InstallAnywayChoices installAnyway = null)
         {
             Layout = layout ?? FolderLayout.Default;
             Selected = selected?.ToList();
             UserScope = userScope ?? UserScopeState.Empty;
-            Skips = skips ?? SkipChoices.None;
+            InstallAnyway = installAnyway ?? InstallAnywayChoices.None;
         }
 
-        /// <summary>Every folder of the default layout selected, nothing found at user scope, nothing skipped.</summary>
+        /// <summary>Every folder of the default layout selected, nothing found at user scope, no install-anyway overrides.</summary>
         public static MachineChoices Default { get; } = new MachineChoices();
 
         /// <summary>
-        /// This machine's choices for the project: the <see cref="FolderSelection.Effective"/> selection and skips stored
+        /// This machine's choices for the project: the <see cref="FolderSelection.Effective"/> selection and install-anyway choices stored
         /// in <paramref name="prefs"/>, and the user-scope copies <paramref name="environment"/> holds for that selection
         /// (from <see cref="UserScopeScanner.DefaultSourcesFor"/> the project).
         /// </summary>
@@ -36,7 +36,7 @@ namespace Hissal.AgentSkillsSync
             layout = layout ?? FolderLayout.Default;
             var selected = FolderSelection.Effective(prefs, layout, environment);
             var userScope = UserScopeScanner.Scan(selected, environment, UserScopeScanner.DefaultSourcesFor(projectRoot));
-            return new MachineChoices(layout, selected, userScope, SkipChoices.From(prefs));
+            return new MachineChoices(layout, selected, userScope, InstallAnywayChoices.From(prefs));
         }
 
         public FolderLayout Layout { get; }
@@ -47,7 +47,7 @@ namespace Hissal.AgentSkillsSync
         /// <summary>The user-scope copies found; never null.</summary>
         public UserScopeState UserScope { get; }
 
-        /// <summary>The contributor's per-folder skip choices; never null.</summary>
-        public SkipChoices Skips { get; }
+        /// <summary>The contributor's per-folder install-anyway choices; never null.</summary>
+        public InstallAnywayChoices InstallAnyway { get; }
     }
 }

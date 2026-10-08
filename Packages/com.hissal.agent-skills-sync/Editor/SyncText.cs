@@ -28,20 +28,24 @@ namespace Hissal.AgentSkillsSync.Editor
             string.Join(", ", unsupported.Select(s => $"{s.Name} ({s.SourceType})")) + ".";
 
         /// <summary>What Sync does to the skill in one folder, from the plan.</summary>
-        public static string FolderStatus(InstallPlan plan, LockedSkill skill, SkillsFolder folder, bool skipStored, bool foundAtUserScope)
+        public static string FolderStatus(InstallPlan plan, LockedSkill skill, SkillsFolder folder, bool installAnywayStored, IReadOnlyList<UserScopeCopy> copies)
         {
             var kinds = plan.Actions.Where(a => a.SkillName == skill.Name && a.Folder.RelativePath == folder.RelativePath)
                 .Select(a => a.Kind).ToList();
-            if (kinds.Contains(PlanActionKind.SkipUserScope))
-                return kinds.Contains(PlanActionKind.Unlink) || kinds.Contains(PlanActionKind.Remove)
-                    ? "skipped (project copy removed on Sync)"
-                    : "skipped (using your copy)";
+            if (!installAnywayStored && copies.Count > 0)
+            {
+                var status = "using yours (found in " + string.Join(", ", copies.Select(c => c.FoundIn)) + ")";
+                if (kinds.Contains(PlanActionKind.Unlink) || kinds.Contains(PlanActionKind.Remove))
+                    return status + "; project copy removed on Sync";
+                if (folder.Role == SkillsFolderRole.Canonical &&
+                    (plan.ManagedNames[folder].Contains(skill.Name) || kinds.Contains(PlanActionKind.LeaveForeign)))
+                    return status + "; project copy kept for another selected folder";
+                return status;
+            }
             if (kinds.Contains(PlanActionKind.Install)) return "to install";
             if (kinds.Contains(PlanActionKind.Update)) return "to update";
             if (kinds.Contains(PlanActionKind.Link)) return "to link";
             if (kinds.Contains(PlanActionKind.LeaveForeign)) return "left alone (not managed)";
-            if (skipStored && foundAtUserScope && folder.Role == SkillsFolderRole.Canonical)
-                return "installed (kept: another selected folder links to it)";
             return "installed";
         }
 
