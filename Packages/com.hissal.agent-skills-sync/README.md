@@ -4,7 +4,7 @@ Editor-only Unity package that treats a project's committed `skills-lock.json` a
 the locked agent skills into `.agents/skills/` (one copy) and `.claude/skills/` (a link to it), and detects skills
 contributors already have at user scope, so every agent gets each skill exactly once.
 
-Status: in development (0.1.0). See the [spec](https://github.com/Hissal/agent-skills-sync-unity/issues/1).
+Status: in development. See the [spec](https://github.com/Hissal/agent-skills-sync-unity/issues/1).
 
 ## Requirements
 
@@ -24,16 +24,27 @@ Status: in development (0.1.0). See the [spec](https://github.com/Hissal/agent-s
 Package Manager → **+** → **Install package from git URL…**:
 
 ```
-https://github.com/Hissal/agent-skills-sync-unity.git?path=Packages/com.hissal.agent-skills-sync
+https://github.com/Hissal/agent-skills-sync-unity.git?path=Packages/com.hissal.agent-skills-sync#latest
 ```
 
 Or add it to `Packages/manifest.json`:
 
 ```json
-"com.hissal.agent-skills-sync": "https://github.com/Hissal/agent-skills-sync-unity.git?path=Packages/com.hissal.agent-skills-sync"
+"com.hissal.agent-skills-sync": "https://github.com/Hissal/agent-skills-sync-unity.git?path=Packages/com.hissal.agent-skills-sync#latest"
 ```
 
-Append `#<tag or commit>` to the URL to pin a version.
+`latest` is a branch that moves to each new release, so the Package Manager's **Update** button only ever installs a
+released version. See the [releases](https://github.com/Hissal/agent-skills-sync-unity/releases) for what changed.
+
+To pin a version, put its tag in place of `latest`:
+
+<!-- x-release-please-start-version -->
+```
+https://github.com/Hissal/agent-skills-sync-unity.git?path=Packages/com.hissal.agent-skills-sync#v0.1.0
+```
+<!-- x-release-please-end -->
+
+To follow unreleased changes on `main`, leave the `#…` off.
 
 ## How it works
 

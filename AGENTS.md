@@ -19,3 +19,7 @@ Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/d
 ### Unity
 
 Host project at `.` with the embedded package at `Packages/com.hissal.agent-skills-sync` (shape: both). See `docs/agents/unity.md`.
+
+### Releases
+
+release-please builds versions and the changelog from squash-merged PR titles: write each PR title as a user-facing Conventional Commit, with `!` for breaking changes. See `docs/releasing.md`.
