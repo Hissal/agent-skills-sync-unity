@@ -12,6 +12,13 @@
       "sourceType": "github",
       "skillPath": "skills/unity-cli/SKILL.md",
       "computedHash": "3dc226a7f8fdb938126606c6f7ed4c97a1eee541e9f0ae1a38e8d7918f37964e"
+    },
+    "unity-pipeline": {
+      "source": "com.unity.pipeline",
+      "sourceType": "unity-package",
+      "packageVersion": "0.8.0-exp.1",
+      "skillPath": ".claude/skills/unity-pipeline/SKILL.md",
+      "installedHash": "3072c2f15731d2f6a1b6a6ac0f58fafd4904d9f5e750c1ac4b793c5107da70a7"
     }
   }
 }
