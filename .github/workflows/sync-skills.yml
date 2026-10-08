@@ -1,0 +1,44 @@
+name: Sync skills
+
+# Keeps skills-lock.json current with its upstream sources on one rolling PR (chore/sync-skills), applies accepted
+# and rejected skill-proposal issues to it, and opens a proposal issue for each upstream skill nobody has reviewed yet.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Print the PR body and proposals instead of writing to GitHub
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: sync-skills
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: an updated skill's upstream commits are listed from when its old hash entered the lock.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # skills 1.7.1 requires Node >=22.20.0.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+
+      - name: Test
+        run: node --test .github/scripts/sync-skills/plan.test.mjs
+
+      - name: Sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry-run || false }}
+        run: node .github/scripts/sync-skills/main.mjs
