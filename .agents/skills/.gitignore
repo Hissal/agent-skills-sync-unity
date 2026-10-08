@@ -1,0 +1,5 @@
+# >>> Agent Skills Sync: managed from skills-lock.json; do not edit this block.
+# Lists every skill the tool may install or link here, on any machine. Anything else stays tracked.
+/ui-uitk
+/unity-cli
+# <<< Agent Skills Sync

@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "sources": {
+    "Unity-Technologies/skills": {
+      "2d-pixel-perfect": "No 2D content: the repo is an Editor-only package.",
+      "asset-transformer-toolkit": "No 3D model or point cloud imports.",
+      "audio-setup-mixers": "No audio.",
+      "build-gtk": "Needs Unity 6000.6+ (the package supports 6000.3+), and there is no graph tooling.",
+      "build-live-game": "No live game or Unity Services backend.",
+      "generate-editor-search-query": "No scenes or assets to search.",
+      "implement-in-app-purchases": "No monetization.",
+      "initialize-ai-navigation": "No gameplay or navigation.",
+      "levelplay-unity-integration": "No ads.",
+      "localization": "No localized content.",
+      "manage-sprite-atlas": "No 2D content.",
+      "migrate-birp-to-urp": "No render pipeline work.",
+      "new-unity-project": "The project already exists.",
+      "optimize-audio": "No audio.",
+      "optimize-text-mesh-pro": "No TextMeshPro text.",
+      "optimize-web": "No WebGL or WebGPU builds.",
+      "physics-3d-collision": "No physics.",
+      "project-auditor-fixes": "Needs Project Auditor and its rules package in the host project; too heavy for a small Editor-only codebase.",
+      "setup-multiplayer-services": "No multiplayer.",
+      "setup-vivox-voice-chat": "No voice or text chat.",
+      "shader-graph-create-custom-node": "No shaders.",
+      "sprite-editor": "No 2D content.",
+      "sprite-segment-3x3grid": "No 2D content.",
+      "tilemap-palette-create": "No 2D content.",
+      "tilemap-ruletile-createempty": "No 2D content.",
+      "tilemap-ruletile-createfromsegment": "No 2D content.",
+      "ui": "Only Editor UI here, which ui-uitk already covers; the router adds little.",
+      "ui-imgui": "No IMGUI code, and the skill itself sends new Editor UI to UI Toolkit.",
+      "ui-ugui": "No runtime Canvas UI.",
+      "unity-package-management": "Adds packages to a project through the Client API; this repo authors a package instead.",
+      "urp-postprocessing": "No render pipeline work.",
+      "validate-urp-render-graph-renderer-feature": "No render pipeline work."
+    }
+  }
+}
