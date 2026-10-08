@@ -29,7 +29,7 @@ namespace Hissal.AgentSkillsSync
         const string DeclinedFoldersKey = "declinedFolders";
         const string ManagedSkillsKey = "managedSkills";
         const string ManagedSkillsRootKey = "managedSkillsRoot";
-        const string SkippedSkillsKey = "skippedSkills";
+        const string InstallAnywaySkillsKey = "installAnywaySkills";
 
         readonly string _path;
         readonly List<KeyValuePair<string, object>> _members;
@@ -56,6 +56,7 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Writes the prefs, creating <c>UserSettings/</c> if needed.</summary>
         public void Save()
         {
+            Set("skippedSkills", null); // Retired choices are ignored, never migrated to install-anyway.
             if (Get(VersionKey) == null) _members.Insert(0, new KeyValuePair<string, object>(VersionKey, (double)FormatVersion));
             Directory.CreateDirectory(Path.GetDirectoryName(_path));
             var temp = _path + ".tmp";
@@ -114,15 +115,15 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Per skills folder (<see cref="SkillsFolder.RelativePath"/>), the sorted names of locked skills the contributor
-        /// chose to skip there in favour of their user-scope copy. Never null; folders with no skips are left out.
-        /// Use <see cref="SkipChoices"/> rather than this directly.
+        /// chose to install despite a found user-scope copy. Never null; folders with no overrides are left out.
+        /// Use <see cref="InstallAnywayChoices"/> rather than this directly.
         /// </summary>
-        public IReadOnlyDictionary<string, IReadOnlyList<string>> SkippedSkills
+        public IReadOnlyDictionary<string, IReadOnlyList<string>> InstallAnywaySkills
         {
             get
             {
                 var result = new SortedDictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-                if (Get(SkippedSkillsKey) is List<KeyValuePair<string, object>> folders)
+                if (Get(InstallAnywaySkillsKey) is List<KeyValuePair<string, object>> folders)
                     foreach (var folder in folders)
                     {
                         if (!(folder.Value is List<object> items)) continue;
@@ -146,7 +147,7 @@ namespace Hissal.AgentSkillsSync
                         if (names.Count > 0) members.Add(new KeyValuePair<string, object>(key, new List<object>(names)));
                     }
                 }
-                Set(SkippedSkillsKey, members.Count == 0 ? null : members);
+                Set(InstallAnywaySkillsKey, members.Count == 0 ? null : members);
             }
         }
 

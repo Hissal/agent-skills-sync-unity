@@ -26,13 +26,13 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>Shorthand for the <see cref="MachineChoices"/> constructor with the choices given one by one (see there).</summary>
         public SkillSync(string projectRoot, ISkillFetcher fetcher, FolderLayout layout = null, ILinkCreator linker = null,
-            IEnumerable<SkillsFolder> selected = null, UserScopeState userScope = null, SkipChoices skips = null,
+            IEnumerable<SkillsFolder> selected = null, UserScopeState userScope = null, InstallAnywayChoices installAnyway = null,
             InstallMode mode = InstallMode.Pinned)
-            : this(projectRoot, fetcher, new MachineChoices(layout, selected, userScope, skips), linker, mode)
+            : this(projectRoot, fetcher, new MachineChoices(layout, selected, userScope, installAnyway), linker, mode)
         {
         }
 
-        /// <param name="choices">This machine's layout, folder selection, user-scope copies and skips (see <see cref="MachineChoices.Read"/>).</param>
+        /// <param name="choices">This machine's layout, folder selection, user-scope copies and install-anyway choices (see <see cref="MachineChoices.Read"/>).</param>
         /// <param name="mode">
         /// Defaults to <see cref="InstallMode.Pinned"/>, the behaviour without install modes. The project's own choice
         /// (default Latest) is in <see cref="ProjectSyncSettings"/>; callers pass it here and to the fetcher.
@@ -87,7 +87,7 @@ namespace Hissal.AgentSkillsSync
         public InstallPlan Plan(Lockfile lockfile) =>
             PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout, prefsRoot: _prefsRoot), _strategy.PreviewCheck);
 
-        /// <summary>Plans with this sync's folder selection, user-scope copies and skips.</summary>
+        /// <summary>Plans with this sync's folder selection, user-scope copies and install-anyway choices.</summary>
         InstallPlan PlanWith(Lockfile lockfile, ProjectState project, IInstalledCopyCheck check) =>
             InstallPlanner.Plan(lockfile, project, _choices, check);
 

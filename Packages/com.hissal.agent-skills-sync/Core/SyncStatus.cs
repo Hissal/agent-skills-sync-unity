@@ -50,14 +50,14 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>Shorthand for <see cref="Read(string, MachineChoices)"/> with the choices given one by one.</summary>
         public static SyncStatus Read(string projectRoot, FolderLayout layout = null, IEnumerable<SkillsFolder> selected = null,
-            UserScopeState userScope = null, SkipChoices skips = null) =>
-            Read(projectRoot, new MachineChoices(layout, selected, userScope, skips));
+            UserScopeState userScope = null, InstallAnywayChoices installAnyway = null) =>
+            Read(projectRoot, new MachineChoices(layout, selected, userScope, installAnyway));
 
         /// <summary>
         /// Reads the project's status; null when there is no lockfile. An unusable lockfile reports
         /// no out-of-sync skills, so only a hash change surfaces it.
         /// </summary>
-        /// <param name="choices">This machine's layout, folder selection, user-scope copies and skips. A skipped skill does not count as out of sync.</param>
+        /// <param name="choices">This machine's layout, folder selection, user-scope copies and install-anyway choices. A skipped skill does not count as out of sync.</param>
         /// <param name="prefsRoot">The folder holding this machine's <see cref="LocalPrefs"/>; null = <paramref name="projectRoot"/>.</param>
         public static SyncStatus Read(string projectRoot, MachineChoices choices, string prefsRoot = null)
         {

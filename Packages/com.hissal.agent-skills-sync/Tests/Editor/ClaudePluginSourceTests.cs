@@ -454,10 +454,9 @@ namespace Hissal.AgentSkillsSync.Tests
 }");
             Install("superpowers@market", "tdd");
             var prefs = LocalPrefs.Load(_project);
-            SkipChoices.Set(prefs, Claude, "tdd", true);
             var both = new[] { Agents, Claude };
 
-            var plan = new SkillSync(_project, fetcher: null, selected: both, userScope: Scan(), skips: SkipChoices.From(prefs)).Plan();
+            var plan = new SkillSync(_project, fetcher: null, selected: both, userScope: Scan(), installAnyway: InstallAnywayChoices.From(prefs)).Plan();
 
             var skip = plan.Actions.Single(a => a.Kind == PlanActionKind.SkipUserScope);
             Assert.That(skip.Folder, Is.SameAs(Claude));
@@ -481,8 +480,7 @@ namespace Hissal.AgentSkillsSync.Tests
   }
 }");
             var prefs = LocalPrefs.Load(_project);
-            SkipChoices.Set(prefs, Claude, "tdd", true);
-            return new SkillSync(_project, fetcher: null, selected: new[] { Agents, Claude }, userScope: Scan(), skips: SkipChoices.From(prefs)).Plan();
+            return new SkillSync(_project, fetcher: null, selected: new[] { Agents, Claude }, userScope: Scan(), installAnyway: InstallAnywayChoices.From(prefs)).Plan();
         }
 
         [Test]

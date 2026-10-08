@@ -76,7 +76,7 @@ Open it from **Window → Agent Skills Sync**. From top to bottom:
 - **Skills locked in `skills-lock.json`**: each skill with its source repo and what Sync will do to it (to install,
   to update, to link, installed, left alone, skipped). Tags: `NEW SOURCE`, `differs from lock`, and
   `can't verify lock hash` / `hash not verifiable` (see [Install mode](#install-mode)). Under each skill there is
-  one row per selected folder, with its status there, any copy you already have at user scope, and a skip toggle.
+  one row per selected folder, with its status there, any copy you already have at user scope, and an install-anyway toggle.
 - **I trust these sources. Skills run with my agent's permissions.**: the consent box. **Sync** stays disabled until
   it is ticked and every new source is confirmed. Consent and confirmations are not saved: they reset on Refresh and
   after each sync.
@@ -132,7 +132,7 @@ skills it links there:
 - A lock entry with another source type (such as a `unity-package` skill) is not listed, since the tool neither
   installs nor links it. Whatever places it (a commit, the package itself) decides whether git tracks it.
 - The block depends only on `skills-lock.json` and the committed project-authored skills, never on one machine's
-  folder selection or skips. Every teammate's sync writes the same block, so it never shows up as a local change.
+  folder selection or install-anyway choices. Every teammate's sync writes the same block, so it never shows up as a local change.
 - What the tool installed **on this machine**, and therefore owns, is recorded in `UserSettings/AgentSkillsSync.json`.
   An entry it did not install is never modified, even when the block lists its name. On the first sync after
   upgrading from a version without that record, the names in the existing block count as the tool's.
@@ -171,21 +171,25 @@ plugins. The tool works out "enabled" from `enabledPlugins` in the project's `.c
 `/unity:ui` matches a project skill `ui`. For details, see
 [`docs/claude-code-plugins.md`](https://github.com/Hissal/agent-skills-sync-unity/blob/main/docs/claude-code-plugins.md).
 
-When it finds one, the skill's folder row says where ("you already have it at `~/.claude/skills`" or "provided by
-plugin `unity@…`") and offers **Skip the project copy in `<folder>` (use mine)**:
+When it finds one, the tool defaults to **use mine** for that skill in that folder. The row says
+"using yours (found in ...)" and offers **Install the project copy in `<folder>` anyway**.
 
-- A skip is per skill **and** per folder. Skipping the Claude link does not skip the `.agents` copy, and the reverse
-  is also true.
-- The choice is stored on this machine only (`UserSettings/AgentSkillsSync.json`) and applied on the next sync. The
-  sync removes the tool's link or copy from that folder only. Un-skipping installs it again.
-- The `.agents/skills` copy stays while a selected `.claude/skills` folder still links to it. The row then says
-  "kept: another selected folder links to it".
-- A skip only takes effect while your user-scope copy is found. If the copy disappears, the project copy is installed
-  again, and your choice is kept for when the copy comes back.
-- **Differs warning.** If a user-scope copy you skip in favour of verifiably differs from the locked version, the row
-  and the sync summary warn that the agents reading that folder don't run what your teammates run. The tool cannot
-  tell whether your copy is ahead or behind. It gives no warning when the difference can't be checked: a skills.sh
-  hash, or a copy with non-ASCII file names.
+- The default and the override are per skill and per folder. A Claude user-scope copy does not affect `.agents`
+  unless a copy is found for that folder too.
+- An install-anyway choice is stored on this machine only in `UserSettings/AgentSkillsSync.json` and applied on
+  the next sync. Clearing it withdraws the tool's managed link or copy from that folder. Foreign entries stay untouched.
+- The `.agents/skills` project copy stays while another selected folder needs to link to it. Its row explains why.
+- If the user-scope copy disappears, the next sync installs the project copy again regardless of stored choices.
+  The install-anyway choice is kept for when a user-scope copy returns.
+- A user-scope copy that verifiably differs from the lock still defaults to use mine. The row and sync summary warn
+  that agents reading that folder don't run what your teammates run. The tool cannot tell whether your copy is
+  ahead or behind. It gives no warning when the difference can't be checked, such as a skills.sh hash or non-ASCII
+  file names.
+
+Upgrading changes the default for everyone who has a detected user-scope copy, including contributors who previously
+un-skipped a skill. Legacy `skippedSkills` choices are ignored and removed on the next prefs save. The first sync
+withdraws managed project copies and links where they are no longer needed. Choose install anyway before syncing
+to retain them. The committed `.gitignore` blocks do not change because of these machine choices.
 
 ## Install mode
 
@@ -274,5 +278,5 @@ In each Unity project's `.claude/settings.json` (committed):
 
 Use the plugin id that `/plugin` shows on your machine, if it differs. Project settings override user settings, so
 the plugin loads only in those projects. The tool reads the same settings: in a project that enables the plugin, its
-skills count as user-scope copies for `.claude/skills`, and you can skip project skills of the same name. The tool
+skills count as user-scope copies for `.claude/skills`, and project skills of the same name default to use mine. The tool
 does not change plugin settings itself.

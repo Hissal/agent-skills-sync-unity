@@ -24,8 +24,8 @@ namespace Hissal.AgentSkillsSync
         Unlink,
 
         /// <summary>
-        /// Leave the project copy or link out of a folder because the contributor skips it there in favour of a
-        /// user-scope copy the folder's agents already read. Changes nothing by itself; a managed entry there goes
+        /// Leave the project copy or link out of a folder because the folder's agents already have a
+        /// user-scope copy. Changes nothing by itself; a managed entry there goes
         /// through its own Unlink or Remove.
         /// </summary>
         SkipUserScope,
@@ -150,7 +150,7 @@ namespace Hissal.AgentSkillsSync
         /// <summary>
         /// Per folder whose <c>.gitignore</c> block the sync writes (a folder this machine keeps entries in, or one
         /// whose block exists), the sorted names the block lists: every locked <c>github</c> skill, plus project-authored
-        /// skills in link folders. The block is committed, so it never depends on this machine's selection or skips.
+        /// skills in link folders. The block is committed, so it never depends on this machine's selection or install-anyway choices.
         /// </summary>
         public IReadOnlyDictionary<SkillsFolder, IReadOnlyList<string>> IgnoredNames { get; }
     }

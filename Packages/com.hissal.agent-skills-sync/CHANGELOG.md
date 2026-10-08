@@ -5,6 +5,15 @@ All notable changes to this package are documented here. Entries after 0.1.0 are
 [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/) titles of merged pull requests. The package
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- BREAKING CHANGE: locked skills with a detected user-scope copy now default to use mine per folder.
+  Choose "Install the project copy in <folder> anyway" to override it. Legacy `skippedSkills` prefs are ignored
+  and removed on save. Previously un-skipped skills also switch to use mine; the next sync withdraws managed
+  project copies and links that are no longer needed.
+
 ## [0.1.0](https://github.com/Hissal/agent-skills-sync-unity/releases/tag/v0.1.0) (2026-10-08)
 
 ### Added
