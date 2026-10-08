@@ -23,12 +23,13 @@ them to `SkillSync`, which runs the rest: `SkillSync.Run` does it all, `SkillSyn
    (`PlanActionKind`), deciding whether a managed copy is current through an `IInstalledCopyCheck`.
 4. **Fetch and verify.** For each action that needs a fetch, the `ISkillFetcher` downloads the skill and
    `SkillFolderHash` hashes it. `InstallModeStrategy` (picked by `InstallMode`) decides what to fetch, whether a
-   changed source is refused, and which check plans step 5. Any failure throws `SyncAbortedException` (wrapping
-   `SkillFetchException`s) before anything on disk changes. `LockVerification` compares copies with the lock.
+   changed source is refused, and which check plans step 5. Every `SkillFetchException` is collected and thrown
+   as one `SyncAbortedException` before anything on disk changes. `LockVerification` compares copies with the lock.
 5. **Apply.** `PlanExecutor` copies canonical skills, links them into link folders through an `ILinkCreator`, writes
    each folder's `ManagedStateFile` block and records managed skills in `LocalPrefs`. Returns a `SyncSummary`.
 
-`SyncStatus` is the cheap, offline cousin of steps 1–3 (names and links only, no skill-folder hashing) for the startup check.
+`SyncStatus` is the cheap, offline cousin of steps 1–3 (names and links only; it hashes no project copy, only
+user-scope copies a skip checks against the lock) for the startup check.
 
 ## State
 
