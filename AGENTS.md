@@ -22,7 +22,7 @@ Host project at `.` with the embedded package at `Packages/com.hissal.agent-skil
 
 ### Code map
 
-Before exploring the package code, read `docs/code-map.md`: the order a sync runs in, where state lives, the test seams and the Editor side.
+Before exploring the package code, read `docs/code-map.md`.
 
 ### Releases
 
