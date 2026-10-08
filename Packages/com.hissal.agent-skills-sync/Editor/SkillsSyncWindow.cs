@@ -41,25 +41,13 @@ namespace Hissal.AgentSkillsSync.Editor
         readonly HashSet<string> _confirmedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>The Unity project folder: holds this machine's local prefs and the committed project settings.</summary>
-        internal static string UnityProjectRoot => Path.GetDirectoryName(Application.dataPath);
+        internal static string UnityProjectRoot => SkillsSyncService.UnityProjectRoot;
 
         /// <summary>
         /// The folder holding <c>skills-lock.json</c> (see <see cref="Lockfile.FindRoot"/>), where the skills folders are
         /// installed; the Unity project folder when no lock is found.
         /// </summary>
-        internal static string SkillsRoot => Lockfile.FindRoot(UnityProjectRoot) ?? UnityProjectRoot;
-
-        /// <summary>Reads the lockfile <see cref="Lockfile.FindRoot"/> finds.</summary>
-        /// <exception cref="LockfileException">There is none, or it is unusable.</exception>
-        static Lockfile LoadLockfile()
-        {
-            var unityRoot = UnityProjectRoot;
-            if (Lockfile.FindRoot(unityRoot) == null)
-                throw new LockfileException(
-                    $"No {Lockfile.FileName} found in the Unity project folder ({unityRoot}) or the folder above it " +
-                    $"({Path.GetDirectoryName(unityRoot)}).");
-            return Lockfile.Load(SkillsRoot);
-        }
+        internal static string SkillsRoot => SkillsSyncService.SkillsRoot;
 
         static FolderLayout Layout => FolderLayout.Default;
 
@@ -139,16 +127,16 @@ namespace Hissal.AgentSkillsSync.Editor
 
             try
             {
-                _installMode = ProjectSyncSettings.Load(UnityProjectRoot).InstallMode;
+                var service = new SkillsSyncService(UnityProjectRoot);
+                _installMode = service.Mode;
                 ShowMode();
 
-                var lockfile = LoadLockfile();
-                var sync = new SkillSync(SkillsRoot, fetcher: null, choices: choices, mode: _installMode, prefsRoot: UnityProjectRoot);
-                var plan = sync.Plan(lockfile);
+                var lockfile = service.Lock;
+                var plan = service.Plan();
                 var differs = _installMode == InstallMode.Latest
-                    ? new HashSet<string>(sync.InstalledDiffersFromLock(lockfile))
+                    ? new HashSet<string>(service.InstalledDiffersFromLock())
                     : new HashSet<string>();
-                var newSources = SourceConsent.NewSources(lockfile, LocalPrefs.Load(UnityProjectRoot));
+                var newSources = service.NewSources;
                 var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
                 foreach (var skill in lockfile.Skills)
                 {
@@ -395,34 +383,22 @@ namespace Hissal.AgentSkillsSync.Editor
             if (!_consent.value) return;
             _failures = new Dictionary<string, SkillFetchException>();
 
-            SyncSummary summary = null;
-            Lockfile lockfile = null;
-            MachineChoices choices = null;
             try
             {
                 // Re-check against the lockfile as it is now: it may have gained a source since the window listed it.
-                lockfile = LoadLockfile();
-                if (HasUnconfirmedSources(lockfile))
-                {
-                    ShowSummary("The lockfile has a new source you have not confirmed. Review it and sync again.", HelpBoxMessageType.Warning);
-                    Refresh();
-                    return;
-                }
-
-                // The consent note described the mode the window listed; a mode changed since (a pull) needs a fresh look.
-                var mode = ProjectSyncSettings.Load(UnityProjectRoot).InstallMode;
-                if (mode != _installMode)
-                {
-                    ShowSummary($"The install mode changed to {mode} since the window listed the skills. Review it and sync again.", HelpBoxMessageType.Warning);
-                    Refresh();
-                    return;
-                }
-
+                var service = new SkillsSyncService(UnityProjectRoot);
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
-                choices = Choices();
-                // Run the very instance that passed the check, never a fresh read of the file.
-                summary = new SkillSync(SkillsRoot, new GitHubSkillFetcher(mode: mode), choices, mode: mode, prefsRoot: UnityProjectRoot).Run(lockfile);
+                var summary = service.Run(_confirmedSources, expectedMode: _installMode);
                 ShowSummary(SyncText.Describe(summary), summary.UserScopeDiffers.Count > 0 ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info);
+            }
+            catch (Exception e) when (e is SourceConsentException || e is InstallModeChangedException)
+            {
+                ShowSummary(e.Message, HelpBoxMessageType.Warning);
+            }
+            catch (SyncStateSaveException e)
+            {
+                ShowSummary(SyncText.Describe(e.Summary) + "\nWarning: " + e.Message, HelpBoxMessageType.Warning);
+                Debug.LogException(e.InnerException);
             }
             catch (SyncAbortedException e)
             {
@@ -440,36 +416,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 EditorUtility.ClearProgressBar();
             }
 
-            // Kept out of the sync's try: the sync already changed the project, so failing here must not read as "Sync failed".
-            if (summary != null)
-            {
-                try
-                {
-                    RecordSynced(lockfile, choices);
-                }
-                catch (Exception e) when (e is LockfileException || e is IOException || e is UnauthorizedAccessException)
-                {
-                    ShowSummary(SyncText.Describe(summary) + "\nWarning: the sync finished, but saving the out-of-sync notification state failed: "
-                        + e.Message, HelpBoxMessageType.Warning);
-                    Debug.LogException(e);
-                }
-            }
-
             Refresh();
-        }
-
-        /// <summary>
-        /// Remembers the synced lockfile so the startup check stays quiet until something changes,
-        /// its sources so they are not flagged as new again, and the folder selection synced into (which
-        /// confirms an autofilled one). Only after a successful sync.
-        /// </summary>
-        static void RecordSynced(Lockfile lockfile, MachineChoices choices)
-        {
-            var prefs = LocalPrefs.Load(UnityProjectRoot);
-            FolderSelection.Save(prefs, Layout, choices.Selected, UserEnvironment.Current);
-            StartupCheck.RecordSynced(prefs, SyncStatus.Read(SkillsRoot, choices, UnityProjectRoot));
-            SourceConsent.RecordSynced(prefs, lockfile);
-            prefs.Save();
         }
 
         void ShowStatus(string message, HelpBoxMessageType type)

@@ -1,0 +1,20 @@
+{
+    "name": "Hissal.AgentSkillsSync.Pipeline",
+    "rootNamespace": "Hissal.AgentSkillsSync.Pipeline",
+    "references": [
+        "GUID:721d9098d5914dba8e97a2a358f8b81d",
+        "GUID:a1c688987a464305bf4062804a34d99d",
+        "GUID:b522baaf20314499ba2deea8dd838496"
+    ],
+    "includePlatforms": ["Editor"],
+    "autoReferenced": false,
+    "defineConstraints": ["AGENT_SKILLS_SYNC_PIPELINE"],
+    "versionDefines": [
+        {
+            "name": "com.unity.pipeline",
+            "expression": "0.8.0-exp.1",
+            "define": "AGENT_SKILLS_SYNC_PIPELINE"
+        }
+    ],
+    "noEngineReferences": false
+}
