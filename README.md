@@ -206,8 +206,14 @@ from the Unity editor process. For the sources behind this table, see
 ### Skills you already have at user scope
 
 For each selected folder, the tool looks for skills with the same name that the folder's agents already load from
-user scope: the folders in the table above, and for `.claude/skills` the skills of installed, enabled Claude Code
-plugins. The tool works out "enabled" from `enabledPlugins` in the project's `.claude/settings.local.json`, then
+user scope: the folders in the table above, Codex plugins for `.agents/skills`, and Claude Code plugins for
+`.claude/skills`. A Codex plugin must be installed in `<CODEX_HOME>/plugins/cache` and configured in
+`<CODEX_HOME>/config.toml`, with `CODEX_HOME` defaulting to `~/.codex`. A configured plugin defaults to enabled
+unless `enabled = false`; the project's `.codex/config.toml` can override that setting. The row names it as
+"provided by Codex plugin `<name>@<marketplace>`". Cache-version selection and detection limits are in
+[`docs/codex-plugins.md`](https://github.com/Hissal/agent-skills-sync-unity/blob/main/docs/codex-plugins.md).
+
+For Claude Code, the tool works out "enabled" from `enabledPlugins` in the project's `.claude/settings.local.json`, then
 `.claude/settings.json`, then your user `settings.json`. A plugin skill matches by its folder name, so the plugin's
 `/unity:ui` matches a project skill `ui`. For details, see
 [`docs/claude-code-plugins.md`](https://github.com/Hissal/agent-skills-sync-unity/blob/main/docs/claude-code-plugins.md).
@@ -220,6 +226,10 @@ When it finds one, the tool defaults to **use mine** for that skill in that fold
 - An install-anyway choice is stored on this machine only in `UserSettings/AgentSkillsSync.json` and applied on
   the next sync. Clearing it withdraws the tool's managed link or copy from that folder. Foreign entries stay untouched.
 - The `.agents/skills` project copy stays while another selected folder needs to link to it. Its row explains why.
+- A shared folder's install-anyway toggle names agents that would lose the skill if you skip the project copy.
+  A Codex plugin covers Codex alone; other agents reading `.agents/skills` still need a copy. Plain user-scope
+  folders can also cover only some agents. Check **Install anyway** to provide the skill for those agents.
+  No warning appears when the copies found cover every agent listed for that folder.
 - If the user-scope copy disappears, the next sync installs the project copy again regardless of stored choices.
   The install-anyway choice is kept for when a user-scope copy returns.
 - A user-scope copy that verifiably differs from the lock still defaults to use mine. The row and sync summary warn

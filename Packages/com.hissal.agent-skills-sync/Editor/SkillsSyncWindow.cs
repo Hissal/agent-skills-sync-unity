@@ -251,6 +251,9 @@ namespace Hissal.AgentSkillsSync.Editor
                 toggle.SetValueWithoutNotify(installAnywayStored);
                 toggle.RegisterValueChangedCallback(e => SaveInstallAnyway(folder, skill.Name, e.newValue));
                 container.Add(toggle);
+                var coverage = SyncText.SkipCoverageMessage(folder, copies);
+                if (coverage.Length > 0)
+                    container.Add(new HelpBox(coverage, HelpBoxMessageType.Warning));
             }
             return container;
         }
