@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { documentedNames, inlineCode, missingNames, sourceWords } from "./names.mjs";
+import { EXCEPTIONS, documentedNames, inlineCode, missingNames, sourceWords } from "./names.mjs";
 
 const MAIN = fileURLToPath(new URL("./main.mjs", import.meta.url));
 
@@ -60,6 +60,13 @@ test("an exception matches the whole documented name; an unlisted name fails", (
   ]);
 });
 
+test("each real exception is an identifier-shaped name with a reason", () => {
+  for (const [name, reason] of EXCEPTIONS) {
+    assert.equal(documentedNames(`\`${name}\``).size, 1, `${name} is never checked, so it needs no exception`);
+    assert.ok(reason.trim(), `${name} has no reason`);
+  }
+});
+
 function run(files, args) {
   const root = mkdtempSync(join(tmpdir(), "code-map-"));
   try {
@@ -83,10 +90,16 @@ test("the command passes a valid map and fails a renamed name with exit 1", () =
   assert.match(failed.stderr, /`SkillSync\.Plan`: `SkillSync`/);
 });
 
-test("the command fails with exit 2 on missing or empty input", () => {
+test("the command fails with exit 2 on missing, unreadable or empty input", () => {
   const source = { "pkg/A.cs": "class A {}" };
-  assert.match(run(source, ["missing.md", "pkg"]).stderr, /can't read the code map missing\.md/);
-  assert.equal(run(source, ["missing.md", "pkg"]).status, 2);
+  const noMap = run(source, ["missing.md", "pkg"]);
+  assert.equal(noMap.status, 2);
+  assert.match(noMap.stderr, /can't read the code map missing\.md/);
+
+  // A folder where the map should be: it exists, but reading it fails.
+  const unreadableMap = run({ "map.md/A.md": "`A`", ...source }, ["map.md", "pkg"]);
+  assert.equal(unreadableMap.status, 2);
+  assert.match(unreadableMap.stderr, /can't read the code map map\.md/);
 
   const noPackage = run({ "map.md": "`A`" }, ["map.md", "missing"]);
   assert.equal(noPackage.status, 2);

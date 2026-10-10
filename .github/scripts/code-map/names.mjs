@@ -8,8 +8,10 @@
 // A C# name, optionally dotted: `SkillSync`, `SkillSync.Plan`. Other inline code (paths, files, wildcards) is skipped.
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
 
-// Identifier-shaped names the map uses that aren't the package's own. Each matches a whole documented name, before
-// it is split into segments; any other name the source doesn't contain fails the check.
+// Identifier-shaped names the map uses that aren't the package's own. Their words happen to occur in the source today
+// (in comments, strings and other names), but nothing keeps them there, so dropping one shouldn't fail the check.
+// Each matches a whole documented name, before it is split into segments; any other name the source doesn't contain
+// fails the check.
 export const EXCEPTIONS = new Map([
   ["skills", "the skills CLI, which writes skills-lock.json"],
   ["com.unity.pipeline", "the Unity package ID that enables the Pipeline command"],

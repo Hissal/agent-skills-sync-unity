@@ -1,8 +1,9 @@
 # Code map
 
 How a sync flows through `Packages/com.hissal.agent-skills-sync`. Terms are in [GLOSSARY.md](../GLOSSARY.md);
-each type's doc comment holds the detail. CI checks that each name in backticks still occurs in the package source
-(`.github/scripts/code-map/`); it doesn't check what the map says about them.
+each type's doc comment holds the detail. CI checks that each C#-shaped name in backticks, other than a few
+listed external names, still occurs in the package source (`.github/scripts/code-map/`); it doesn't check what the
+map says about them.
 
 ## A sync, in order
 
