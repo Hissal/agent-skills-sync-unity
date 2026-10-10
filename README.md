@@ -40,7 +40,7 @@ To pin a version, put its tag in place of `latest`:
 
 <!-- x-release-please-start-version -->
 ```
-https://github.com/Hissal/agent-skills-sync-unity.git?path=Packages/com.hissal.agent-skills-sync#v0.1.0
+https://github.com/Hissal/agent-skills-sync-unity.git?path=Packages/com.hissal.agent-skills-sync#v0.2.0
 ```
 <!-- x-release-please-end -->
 

@@ -14,6 +14,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and removed on save. Previously un-skipped skills also switch to use mine; the next sync withdraws managed
   project copies and links that are no longer needed.
 
+## [0.2.0](https://github.com/Hissal/agent-skills-sync-unity/compare/v0.1.0...v0.2.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* default to the user-scope skill copy ([#53](https://github.com/Hissal/agent-skills-sync-unity/issues/53))
+
+### Added
+
+* add a unity cli command to sync agent skills ([#65](https://github.com/Hissal/agent-skills-sync-unity/issues/65)) ([2add8f4](https://github.com/Hissal/agent-skills-sync-unity/commit/2add8f4f59ad474bf0fb93c7c56605242019acfd))
+* default to the user-scope skill copy ([#53](https://github.com/Hissal/agent-skills-sync-unity/issues/53)) ([e1a85f5](https://github.com/Hissal/agent-skills-sync-unity/commit/e1a85f5b74eedfb28ca0a2a8a578f1921f53773a))
+* detect codex plugin skills and warn about shared-folder skips ([#70](https://github.com/Hissal/agent-skills-sync-unity/issues/70)) ([74e4d1e](https://github.com/Hissal/agent-skills-sync-unity/commit/74e4d1eae1290d6d77bc4227ae8470ba6f17e18e))
+
 ## [0.1.0](https://github.com/Hissal/agent-skills-sync-unity/releases/tag/v0.1.0) (2026-10-08)
 
 ### Added
