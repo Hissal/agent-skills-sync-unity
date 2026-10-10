@@ -168,6 +168,7 @@ Packages/packages-lock.json linguist-generated
 *.spp                   binary
 
 # Text files that should always use LF line endings
+*.sh text eol=lf
 *.dic text eol=lf
 *.aff text eol=lf
 *.txt text eol=lf
