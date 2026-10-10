@@ -26,3 +26,13 @@ handle each precedence and default rule it states, or record why one is skipped.
 
 Why: these rules are easy to miss without the source to hand. In #26, the fallback to `defaultEnabled` read only the
 plugin manifest, but Claude Code's plugin reference says the marketplace entry's value overrides it.
+
+## Claims from the code
+
+Check a doc's claim about how code behaves against the current code it describes, including the callers and
+exception paths involved. An earlier comment, PR or doc is a lead to check, not proof.
+
+Why: a claim copied from an earlier source repeats that source's mistakes. In #63, an example taken from an old review
+comment said `enabledPlugins` takes the whole value from the highest-precedence settings file, but Claude Code merges
+it by plugin ID, as `ClaudePluginSource` and `docs/claude-code-plugins.md` already did
+([review finding](https://github.com/Hissal/agent-skills-sync-unity/pull/63#discussion_r4222347561)).

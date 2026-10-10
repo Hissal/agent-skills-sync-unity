@@ -1,0 +1,30 @@
+name: Code map
+
+# Fails when docs/code-map.md names a C# type or member that no longer occurs in the package source, for example
+# after a rename. It checks names only; review checks what the map says about them (CODING_STANDARDS.md).
+on:
+  pull_request:
+    paths:
+      - docs/**
+      - Packages/**
+      - .github/scripts/code-map/**
+      - .github/workflows/code-map.yml
+
+permissions:
+  contents: read
+
+jobs:
+  names:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+
+      - name: Test
+        run: node --test .github/scripts/code-map/names.test.mjs
+
+      - name: Check names
+        run: node .github/scripts/code-map/main.mjs
