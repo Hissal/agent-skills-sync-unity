@@ -7,6 +7,70 @@ namespace Hissal.AgentSkillsSync.Tests
 {
     public class LockfileTests
     {
+        [Test]
+        public void ManagedState_UnsafeRecordedName_IsIgnored()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "AgentSkillsSyncTests", Guid.NewGuid().ToString("N"));
+            try
+            {
+                ManagedStateFile.Write(root, new[] { "tdd" });
+                var path = Path.Combine(root, ManagedStateFile.FileName);
+                File.WriteAllText(path, File.ReadAllText(path).Replace("/tdd", "/../../Assets\n/bad:name\n/tdd"));
+
+                Assert.That(ManagedStateFile.Read(root), Is.EqualTo(new[] { "tdd" }));
+            }
+            finally
+            {
+                TempDirectory.Delete(root);
+            }
+        }
+
+        [TestCase("../../Assets")]
+        [TestCase("C:\\Assets")]
+        public void PlanAction_UnsafeName_RejectsEveryStringFactory(string name)
+        {
+            var folder = FolderLayout.Default.Canonical;
+            Assert.That(() => PlanAction.Link(name, folder, folder), Throws.TypeOf<LockfileException>());
+            Assert.That(() => PlanAction.Remove(name, folder), Throws.TypeOf<LockfileException>());
+            Assert.That(() => PlanAction.Unlink(name, folder), Throws.TypeOf<LockfileException>());
+        }
+
+        [TestCase(null)]
+        [TestCase("")]
+        [TestCase(".")]
+        [TestCase("..")]
+        [TestCase("../../Assets")]
+        [TestCase("/absolute")]
+        [TestCase("C:\\Assets")]
+        [TestCase("bad\\name")]
+        [TestCase("bad:name")]
+        [TestCase("bad*name")]
+        [TestCase("bad?name")]
+        [TestCase("bad\"name")]
+        [TestCase("bad<name")]
+        [TestCase("bad>name")]
+        [TestCase("bad|name")]
+        [TestCase("bad\u001fname")]
+        [TestCase("trailing.")]
+        [TestCase("trailing ")]
+        public void Construct_UnsafeName_RejectsBothSkillTypes(string name)
+        {
+            Assert.That(() => new LockedSkill(name, "owner/repo", "github", null, null),
+                Throws.TypeOf<LockfileException>().With.Message.Contains("safe skill folder name"));
+            Assert.That(() => new UnsupportedSkill(name, "unity-package"),
+                Throws.TypeOf<LockfileException>().With.Message.Contains("safe skill folder name"));
+        }
+
+        [TestCase("code-review")]
+        [TestCase("a..b")]
+        [TestCase(".hidden")]
+        [TestCase("two words")]
+        public void Construct_SafeName_PreservesBothSkillNames(string name)
+        {
+            Assert.That(new LockedSkill(name, "owner/repo", "github", null, null).Name, Is.EqualTo(name));
+            Assert.That(new UnsupportedSkill(name, "unity-package").Name, Is.EqualTo(name));
+        }
+
         const string ValidLock = @"{
   ""version"": 1,
   ""skills"": {

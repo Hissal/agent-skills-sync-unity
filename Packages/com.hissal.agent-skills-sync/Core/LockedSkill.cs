@@ -5,6 +5,7 @@ namespace Hissal.AgentSkillsSync
     {
         public LockedSkill(string name, string source, string sourceType, string skillPath, string computedHash, string reference = null)
         {
+            SkillName.Validate(name);
             Name = name;
             Source = source;
             SourceType = sourceType;

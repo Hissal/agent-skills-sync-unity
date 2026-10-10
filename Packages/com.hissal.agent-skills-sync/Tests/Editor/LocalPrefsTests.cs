@@ -6,6 +6,16 @@ namespace Hissal.AgentSkillsSync.Tests
 {
     public class LocalPrefsTests
     {
+        [Test]
+        public void ManagedSkills_UnsafeRecordedName_IsIgnored()
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(PrefsPath));
+            File.WriteAllText(PrefsPath,
+                @"{ ""managedSkills"": { "".agents/skills"": [""../../Assets"", ""tdd"", """", ""bad:name""] } }");
+
+            Assert.That(LocalPrefs.Load(_project).ManagedSkills[".agents/skills"], Is.EqualTo(new[] { "tdd" }));
+        }
+
         string _project;
 
         string PrefsPath => Path.Combine(_project, "UserSettings", "AgentSkillsSync.json");

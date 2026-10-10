@@ -25,7 +25,7 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// The names listed in <paramref name="folderPath"/>'s block; empty when there is no file or
-        /// the file has no block (a <c>.gitignore</c> the tool never wrote to).
+        /// the file has no block (a <c>.gitignore</c> the tool never wrote to). Unsafe folder names are ignored.
         /// </summary>
         public static IReadOnlyList<string> Read(string folderPath)
         {
@@ -40,7 +40,7 @@ namespace Hissal.AgentSkillsSync
                 .Select(line => line.Trim())
                 .Where(line => line.Length > 0 && !line.StartsWith("#", StringComparison.Ordinal))
                 .Select(line => line.Trim('/'))
-                .Where(name => name.Length > 0)
+                .Where(SkillName.IsSafe)
                 .ToList();
         }
 

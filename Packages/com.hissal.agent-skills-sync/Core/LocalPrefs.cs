@@ -155,6 +155,7 @@ namespace Hissal.AgentSkillsSync
         /// Per skills folder (<see cref="SkillsFolder.RelativePath"/>), the names of the entries this machine's syncs
         /// created there and still manage; null until the first sync records it (the scanner then falls back to the
         /// names in each folder's <c>.gitignore</c> block). Written by <see cref="PlanExecutor"/>.
+        /// Unsafe folder names in the stored record are ignored.
         /// </summary>
         /// <remarks>The names are relative to <see cref="ManagedSkillsRoot"/>; read them through <see cref="ManagedSkillsFor"/>.</remarks>
         public IReadOnlyDictionary<string, IReadOnlyList<string>> ManagedSkills
@@ -168,7 +169,7 @@ namespace Hissal.AgentSkillsSync
                     var names = new List<string>();
                     if (folder.Value is List<object> items)
                         foreach (var item in items)
-                            if (item is string s) names.Add(s);
+                            if (item is string s && SkillName.IsSafe(s)) names.Add(s);
                     result[folder.Key] = names;
                 }
                 return result;

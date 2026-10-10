@@ -10,6 +10,8 @@ Editor, which hands their results to the `SkillSync` constructor.
 
 1. **Read the lock.** _Caller:_ `Lockfile.FindRoot` finds it. `Lockfile` loads `skills-lock.json` into `LockedSkill`s;
    `LockfileException` when it is missing or unusable. `LockfileHash` hashes it for the startup check.
+   `SkillName` owns the folder-name rule; `LockedSkill`, `UnsupportedSkill` and `PlanAction` enforce it on construction.
+   Managed names read from prefs and `.gitignore` blocks are filtered by the same rule.
 2. **Scan what is there.**
    - `ProjectScanner` reads each skills folder of the `FolderLayout` (default `FolderLayout.Default`, a list of
      `SkillsFolder`s) into a `ProjectState` of `FolderState`s.
