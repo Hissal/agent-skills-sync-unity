@@ -228,7 +228,7 @@ When it finds one, the tool defaults to **use mine** for that skill in that fold
 - The `.agents/skills` project copy stays while another selected folder needs to link to it. Its row explains why.
 - A shared folder's install-anyway toggle names agents that would lose the skill if you skip the project copy.
   A Codex plugin covers Codex alone; other agents reading `.agents/skills` still need a copy. Plain user-scope
-  folders can also cover only some agents. Keep **Install anyway** checked to provide the skill for those agents.
+  folders can also cover only some agents. Check **Install anyway** to provide the skill for those agents.
   No warning appears when the copies found cover every agent listed for that folder.
 - If the user-scope copy disappears, the next sync installs the project copy again regardless of stored choices.
   The install-anyway choice is kept for when a user-scope copy returns.

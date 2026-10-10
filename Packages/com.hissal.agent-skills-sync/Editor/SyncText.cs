@@ -69,7 +69,7 @@ namespace Hissal.AgentSkillsSync.Editor
             }).Distinct();
             return string.Join(". ", providers) + ". " + string.Join(", ", missing) +
                    $" read {folder.RelativePath} and would not have it if you skip the project copy. " +
-                   "Keep Install anyway checked to provide it for them. A project copy kept for another selected folder still serves them.";
+                   "Check Install anyway to provide it for them. A project copy kept for another selected folder still serves them.";
         }
 
         static IEnumerable<string> AgentNames(string agents) => (agents ?? "").Split(',')
