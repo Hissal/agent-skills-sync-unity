@@ -77,12 +77,7 @@ namespace Hissal.AgentSkillsSync
             var unsupported = new List<UnsupportedSkill>();
             foreach (var entry in skillsObject)
             {
-                // Every name is checked, unsupported ones too, so no list the tool acts on ever holds an unsafe name.
-                if (!IsSafeFolderName(entry.Key))
-                    throw new LockfileException(
-                        $"Skill name {Describe(entry.Key)} in {FileName} is not a safe skill folder name. " +
-                        "A skill name must be a single folder name: no path separators, no \".\" or \"..\", no drive or root, " +
-                        "no characters that are invalid in file names, and no trailing dot or space.");
+                SkillName.Validate(entry.Key);
                 if (!(entry.Value is List<KeyValuePair<string, object>> skill))
                     throw new LockfileException($"Skill \"{entry.Key}\" in {FileName} must be a JSON object.");
                 if (!(Get(skill, "sourceType") is string sourceType) || sourceType.Length == 0)
@@ -132,21 +127,6 @@ namespace Hissal.AgentSkillsSync
             foreach (var part in reference.Split('/'))
                 if (part.Length == 0 || part[0] == '.' || part.EndsWith(".lock", StringComparison.Ordinal)) return false;
             return !reference.EndsWith(".", StringComparison.Ordinal);
-        }
-
-        // The name becomes the last component of paths under the skills folders and the fetch cache, so it must
-        // not be able to point anywhere else. Checked against Windows' rules on every OS so a lock that works
-        // on one machine works on all of them.
-        static readonly char[] UnsafeNameChars = { '/', '\\', ':', '*', '?', '"', '<', '>', '|' };
-
-        static bool IsSafeFolderName(string name)
-        {
-            if (string.IsNullOrEmpty(name) || name == "." || name == "..") return false;
-            if (name.IndexOfAny(UnsafeNameChars) >= 0) return false;
-            foreach (var c in name)
-                if (c < 0x20) return false;
-            var last = name[name.Length - 1];
-            return last != '.' && last != ' ';
         }
 
         static object Get(List<KeyValuePair<string, object>> obj, string key)

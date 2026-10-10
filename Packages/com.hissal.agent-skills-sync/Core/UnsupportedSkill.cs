@@ -8,6 +8,7 @@ namespace Hissal.AgentSkillsSync
     {
         public UnsupportedSkill(string name, string sourceType)
         {
+            SkillName.Validate(name);
             Name = name;
             SourceType = sourceType;
         }

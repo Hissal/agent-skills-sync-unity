@@ -44,6 +44,7 @@ namespace Hissal.AgentSkillsSync
         PlanAction(PlanActionKind kind, LockedSkill skill, string skillName, SkillsFolder folder, SkillsFolder linkTarget,
             IReadOnlyList<UserScopeCopy> userScopeCopies = null)
         {
+            Hissal.AgentSkillsSync.SkillName.Validate(skillName);
             UserScopeCopies = userScopeCopies ?? new UserScopeCopy[0];
             Kind = kind;
             Skill = skill;
