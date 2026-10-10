@@ -7,6 +7,49 @@ namespace Hissal.AgentSkillsSync.Tests
 {
     public class LockfileTests
     {
+        [TestCase("CON")]
+        [TestCase("PRN")]
+        [TestCase("AUX")]
+        [TestCase("NUL")]
+        [TestCase("COM1")]
+        [TestCase("COM2")]
+        [TestCase("COM3")]
+        [TestCase("COM4")]
+        [TestCase("COM5")]
+        [TestCase("COM6")]
+        [TestCase("COM7")]
+        [TestCase("COM8")]
+        [TestCase("COM9")]
+        [TestCase("LPT1")]
+        [TestCase("LPT2")]
+        [TestCase("LPT3")]
+        [TestCase("LPT4")]
+        [TestCase("LPT5")]
+        [TestCase("LPT6")]
+        [TestCase("LPT7")]
+        [TestCase("LPT8")]
+        [TestCase("LPT9")]
+        [TestCase("COM\u00b9")]
+        [TestCase("COM\u00b2")]
+        [TestCase("COM\u00b3")]
+        [TestCase("LPT\u00b9")]
+        [TestCase("LPT\u00b2")]
+        [TestCase("LPT\u00b3")]
+        public void Construct_WindowsDeviceName_RejectsCaseAndExtensionVariants(string device)
+        {
+            foreach (var name in new[] { device, device.ToLowerInvariant(), device + ".txt", device.ToLowerInvariant() + ".tar.gz" })
+            {
+                Assert.That(() => new LockedSkill(name, "owner/repo", "github", null, null),
+                    Throws.TypeOf<LockfileException>(), name);
+                Assert.That(() => new UnsupportedSkill(name, "unity-package"),
+                    Throws.TypeOf<LockfileException>(), name);
+                Assert.That(() => PlanAction.Remove(name, FolderLayout.Default.Canonical),
+                    Throws.TypeOf<LockfileException>(), name);
+                Assert.That(() => Lockfile.Parse(ValidLock.Replace("code-review", name)),
+                    Throws.TypeOf<LockfileException>(), name);
+            }
+        }
+
         [Test]
         public void ManagedState_UnsafeRecordedName_IsIgnored()
         {
@@ -65,6 +108,12 @@ namespace Hissal.AgentSkillsSync.Tests
         [TestCase("a..b")]
         [TestCase(".hidden")]
         [TestCase("two words")]
+        [TestCase("CONsole")]
+        [TestCase("CON-skill.txt")]
+        [TestCase("COM0")]
+        [TestCase("COM10")]
+        [TestCase("LPT0")]
+        [TestCase("LPT10")]
         public void Construct_SafeName_PreservesBothSkillNames(string name)
         {
             Assert.That(new LockedSkill(name, "owner/repo", "github", null, null).Name, Is.EqualTo(name));
