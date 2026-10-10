@@ -20,18 +20,18 @@ namespace Hissal.AgentSkillsSync
     public static class UserScopeScanner
     {
         /// <summary>
-        /// The sources <see cref="Scan"/> uses when given none: the layout's locations and installed Claude Code plugins,
-        /// the latter read without a project (user settings only; see <see cref="DefaultSourcesFor"/>).
+        /// The sources <see cref="Scan"/> uses when given none: the layout's locations and installed Claude Code and Codex
+        /// plugins, read without a project (user settings only; see <see cref="DefaultSourcesFor"/>).
         /// </summary>
         public static IReadOnlyList<IUserScopeSource> DefaultSources { get; } =
-            new IUserScopeSource[] { UserScopeLocationSource.Instance, ClaudePluginSource.WithoutProject };
+            new IUserScopeSource[] { UserScopeLocationSource.Instance, ClaudePluginSource.WithoutProject, new CodexPluginSource() };
 
         /// <summary>
-        /// <see cref="DefaultSources"/> for one project: plugins enabled or disabled in its <c>.claude/settings*.json</c>
-        /// and installed at its project or local scope count too.
+        /// <see cref="DefaultSources"/> for one project: Claude plugins use its settings and install records;
+        /// Codex plugins also read its <c>.codex/config.toml</c> enabled overrides.
         /// </summary>
         public static IReadOnlyList<IUserScopeSource> DefaultSourcesFor(string projectRoot) =>
-            new IUserScopeSource[] { UserScopeLocationSource.Instance, new ClaudePluginSource(projectRoot) };
+            new IUserScopeSource[] { UserScopeLocationSource.Instance, new ClaudePluginSource(projectRoot), new CodexPluginSource(projectRoot) };
 
         /// <summary>Asks every source about every folder in <paramref name="folders"/> (normally the selected ones).</summary>
         /// <param name="sources">Where to look; null = <see cref="DefaultSources"/>.</param>

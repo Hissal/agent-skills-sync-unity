@@ -51,7 +51,30 @@ namespace Hissal.AgentSkillsSync.Editor
 
         /// <summary>Where a user-scope copy comes from, as the end of "you already have it ...".</summary>
         public static string Where(UserScopeCopy copy) =>
-            copy.Plugin != null ? $"provided by plugin {copy.Plugin}" : $"at {copy.FoundIn}";
+            copy.Plugin != null ? $"provided by {(copy.Agents == "Codex" ? "Codex " : "")}plugin {copy.Plugin}" : $"at {copy.FoundIn}";
+
+        /// <summary>Names agents left without a skill if its shared-folder project copy is skipped.</summary>
+        public static string SkipCoverageMessage(SkillsFolder folder, IReadOnlyList<UserScopeCopy> copies)
+        {
+            if (copies.Count == 0) return "";
+            var covered = new HashSet<string>(copies.SelectMany(c => AgentNames(c.Agents)));
+            var missing = folder.UserScopeLocations.SelectMany(l => AgentNames(l.Agents)).Distinct()
+                .Where(agent => !covered.Contains(agent)).ToList();
+            if (missing.Count == 0) return "";
+            var providers = copies.Where(c => !string.IsNullOrEmpty(c.Agents)).Select(c =>
+            {
+                var agents = AgentNames(c.Agents).ToList();
+                return string.Join(", ", agents) + (agents.Count == 1 ? " has it" : " have it") +
+                       (c.Plugin == null ? $" (at {c.FoundIn})" : $" (plugin {c.Plugin})");
+            }).Distinct();
+            return string.Join(". ", providers) + ". " + string.Join(", ", missing) +
+                   $" read {folder.RelativePath} and would not have it if you skip the project copy. " +
+                   "Keep Install anyway checked to provide it for them. A project copy kept for another selected folder still serves them.";
+        }
+
+        static IEnumerable<string> AgentNames(string agents) => (agents ?? "").Split(',')
+            .Select(a => a.Trim()).Where(a => a.Length > 0 && !a.StartsWith("as /", System.StringComparison.Ordinal))
+            .Select(a => a.Replace(" (synced from Claude.ai)", "").Replace(" (legacy)", ""));
 
         /// <summary>The warning for a skipped skill whose user-scope copy differs from the lock.</summary>
         public static string DiffersMessage(PlanAction warning) =>

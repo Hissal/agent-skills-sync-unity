@@ -16,7 +16,7 @@ namespace Hissal.AgentSkillsSync
         /// <param name="path">Absolute path of the copy's folder.</param>
         /// <param name="foundIn">Where it was found, for display (e.g. <c>~/.codex/skills</c>, or a plugin's name).</param>
         /// <param name="agents">Who reads it there, for display.</param>
-        /// <param name="plugin">The Claude Code plugin id providing it (<c>unity@unity-agent-plugin</c>); null when not from a plugin.</param>
+        /// <param name="plugin">The plugin id providing it (<c>unity@unity-agent-plugin</c>); null when not from a plugin.</param>
         public UserScopeCopy(SkillsFolder folder, string skillName, string path, string foundIn, string agents = null, string plugin = null)
         {
             Folder = folder ?? throw new ArgumentNullException(nameof(folder));
@@ -27,7 +27,7 @@ namespace Hissal.AgentSkillsSync
             Plugin = plugin;
         }
 
-        /// <summary>The Claude Code plugin id (<c>name@marketplace</c>) providing this copy, or null when it is not from a plugin.</summary>
+        /// <summary>The plugin id (<c>name@marketplace</c>) providing this copy, or null when it is not from a plugin.</summary>
         public string Plugin { get; }
 
         /// <summary>The project skills folder whose agents see this copy.</summary>

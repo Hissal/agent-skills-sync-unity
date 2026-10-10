@@ -18,7 +18,8 @@ Editor, which hands their results to the `SkillSync` constructor.
    - `ProjectScanner` reads each skills folder of the `FolderLayout` (default `FolderLayout.Default`, a list of
      `SkillsFolder`s) into a `ProjectState` of `FolderState`s.
    - _Caller,_ in `MachineChoices.Read`: `UserScopeScanner` asks each `IUserScopeSource` (`UserScopeLocationSource`
-     for folders like `~/.codex/skills`, `ClaudePluginSource` for Claude Code plugins) for user-scope copies, giving
+     for folders like `~/.codex/skills`, `ClaudePluginSource` for Claude Code plugins, `CodexPluginSource` for Codex
+     plugins) for user-scope copies, giving
      a `UserScopeState` of `UserScopeCopy`s.
      `MachineChoices` bundles this machine's layout, `FolderSelection`, `UserScopeState` and `InstallAnywayChoices`.
 3. **Plan.** `InstallPlanner` turns lock + `ProjectState` + `MachineChoices` into an `InstallPlan` of `PlanAction`s
