@@ -24,14 +24,18 @@ def summarize(report):
         return 1
 
     print(f"total / passed / failed: {total} / {passed} / {failed}")
-    failing_tests = [test for test in root.iter("test-case") if test.get("result") == "Failed"]
-    for test in failing_tests:
+    failing_results = [test for test in root.iter()
+                       if test.tag in ("test-case", "test-suite") and test.get("result") == "Failed"]
+    for test in failing_results:
+        # Parent suites can inherit failure without having their own diagnostic.
+        if test.tag == "test-suite" and test.find("failure") is None:
+            continue
         print(test.get("fullname", test.get("name", "<unnamed test>")))
         print(test.findtext("failure/message", "<no failure message>"))
     if total == 0:
         print("No tests matched; zero tests is not a passing run.", file=sys.stderr)
         return 1
-    return int(failed > 0 or bool(failing_tests) or root.get("result") == "Failed")
+    return int(failed > 0 or bool(failing_results) or root.get("result") == "Failed")
 
 
 def main(args=None):

@@ -67,6 +67,36 @@ class EditModeCommandTests(unittest.TestCase):
                 self.assertNotEqual(result, 0)
                 self.assertIn("No valid NUnit results report", output)
 
+    def test_suite_failures_print_full_name_and_message(self):
+        for suite_type, message in (
+                ("TestFixture", "OneTimeSetUp failed"),
+                ("TestFixture", "OneTimeTearDown failed"),
+                ("Assembly", "Assembly initialization failed")):
+            with self.subTest(suite_type=suite_type, message=message):
+                result, output = self.run_command(f'''
+                    <test-run total="1" passed="0" failed="1" result="Failed">
+                      <test-suite fullname="Example.Parent" result="Failed">
+                        <test-suite type="{suite_type}" fullname="Example.FailingSuite" result="Failed">
+                          <failure><message>{message}</message></failure>
+                        </test-suite>
+                      </test-suite>
+                    </test-run>''')
+                self.assertNotEqual(result, 0)
+                self.assertIn("Example.FailingSuite", output)
+                self.assertIn(message, output)
+                self.assertNotIn("<no failure message>", output)
+
+    def test_failed_suite_overrides_inconsistent_summary(self):
+        result, output = self.run_command('''
+            <test-run total="1" passed="1" failed="0" result="Passed">
+              <test-suite fullname="Example.FailingSuite" result="Failed">
+                <failure><message>OneTimeTearDown failed</message></failure>
+              </test-suite>
+            </test-run>''')
+        self.assertNotEqual(result, 0)
+        self.assertIn("Example.FailingSuite", output)
+        self.assertIn("OneTimeTearDown failed", output)
+
     def test_cli_failure_overrides_passing_xml(self):
         result, output = self.run_command(
             '<test-run total="1" passed="1" failed="0" result="Passed"/>', exit_code=6)
