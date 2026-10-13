@@ -37,6 +37,7 @@ namespace Hissal.AgentSkillsSync.Editor
             var prefs = LocalPrefs.Load(unityRoot);
             Choices = MachineChoices.Read(Root, prefs, _environment, groups: Groups);
             NewSources = SourceConsent.NewSources(Lock, prefs, Choices.Skills);
+            NewSkills = SeenSkills.New(prefs, Lock, Choices.Skills);
         }
 
         internal string Root { get; }
@@ -44,6 +45,9 @@ namespace Hissal.AgentSkillsSync.Editor
         internal InstallMode Mode { get; }
         internal MachineChoices Choices { get; }
         internal IReadOnlyList<string> NewSources { get; }
+
+        /// <summary>The locked skills this machine leaves out by default that the contributor has not seen yet (<see cref="SeenSkills"/>).</summary>
+        internal IReadOnlyList<string> NewSkills { get; }
 
         /// <summary>The project's skill groups, which give each locked skill without a stored choice its default.</summary>
         internal SkillGroups Groups { get; }
@@ -59,7 +63,8 @@ namespace Hissal.AgentSkillsSync.Editor
 
         /// <summary>
         /// Syncs only after every new source is confirmed. The window also passes the mode it showed,
-        /// so a changed project setting requires another review. Records consent only on success.
+        /// so a changed project setting requires another review. Records consent only on success, and
+        /// marks every locked skill seen (<see cref="StartupCheck.RecordSynced"/>) from either entry point.
         /// </summary>
         internal SyncSummary Run(IEnumerable<string> confirmedSources, InstallMode? expectedMode = null)
         {

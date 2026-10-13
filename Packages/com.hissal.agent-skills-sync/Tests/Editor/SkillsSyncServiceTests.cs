@@ -151,6 +151,48 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(service.Run(service.NewSources).Installed, Is.EquivalentTo(new[] { "tdd", "review" }));
         }
 
+        const string TddOnlyLock = @"{
+  ""version"": 1,
+  ""skills"": {
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" }
+  }
+}";
+
+        [Test]
+        public void Run_FirstEverSync_SeedsEveryLockedSkillAsSeen()
+        {
+            WriteSettings(ReviewOptional);
+            var service = Service();
+            Assert.That(service.NewSkills, Is.Empty);
+
+            service.Run(service.NewSources);
+
+            Assert.That(LocalPrefs.Load(_project).SeenSkills, Is.EqualTo(new[] { "review", "tdd" }));
+            Assert.That(Service().NewSkills, Is.Empty);
+        }
+
+        [Test]
+        public void NewSkills_OptionalSkillLockedSinceTheLastSync_IsNewUntilTheNextSync()
+        {
+            WriteSettings(ReviewOptional);
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), TddOnlyLock);
+            var first = Service();
+            first.Run(first.NewSources);
+
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), Lock);
+            var service = Service();
+
+            Assert.That(service.NewSkills, Is.EqualTo(new[] { "review" }));
+            Assert.That(StartupCheck.NewSkills(SyncStatus.Read(_project, service.Choices, _project), LocalPrefs.Load(_project)),
+                Is.EqualTo(new[] { "review" }));
+
+            Assert.That(service.Run(Array.Empty<string>()).NothingChanged, Is.True);
+
+            Assert.That(LocalPrefs.Load(_project).SeenSkills, Does.Contain("review"));
+            Assert.That(Service().NewSkills, Is.Empty);
+            Assert.That(StartupCheck.ShouldNotify(SyncStatus.Read(_project, Service().Choices, _project), LocalPrefs.Load(_project)), Is.False);
+        }
+
         [Test]
         public void Run_SkillMovedToAGroupNotSelectedByDefault_RemovesItAndNamesItInTheSummary()
         {

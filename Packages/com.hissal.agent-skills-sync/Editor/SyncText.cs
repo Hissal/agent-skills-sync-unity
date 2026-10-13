@@ -40,8 +40,27 @@ namespace Hissal.AgentSkillsSync.Editor
                 : "not installed (not selected by default)";
         }
 
-        /// <summary>The startup notification: why the project is out of sync, and the offer to open the sync window.</summary>
+        /// <summary>
+        /// The startup notification: why the project is out of sync, which new optional skills were locked, or both,
+        /// and the offer to open the sync window. Names only the parts <see cref="StartupCheck"/> notifies for.
+        /// </summary>
         public static string StartupMessage(SyncStatus status, LocalPrefs prefs)
+        {
+            var newSkills = StartupCheck.NewSkills(status, prefs);
+            var one = newSkills.Count == 1;
+            var added = newSkills.Count == 0 ? null
+                : $"{(one ? "A new optional skill was" : "New optional skills were")} locked: {string.Join(", ", newSkills)}. " +
+                  $"This machine does not install {(one ? "it" : "them")} unless you select {(one ? "it" : "them")}.";
+            if (added != null && !StartupCheck.OutOfSync(status, prefs))
+                return added + $"\n\nOpen the sync window to review {(one ? "it" : "them")}? If you choose Not Now, " +
+                       $"you won't be told about {(one ? "it" : "them")} again. You can turn this notice off in the sync window.";
+
+            return OutOfSyncReason(status, prefs) + (added == null ? "" : " " + added) +
+                   "\n\nOpen the sync window to review and sync them? If you choose Not Now, " +
+                   "you won't be asked again until something changes.";
+        }
+
+        static string OutOfSyncReason(SyncStatus status, LocalPrefs prefs)
         {
             string reason;
             if (prefs.LastSyncedLockHash == null)
@@ -59,8 +78,7 @@ namespace Hissal.AgentSkillsSync.Editor
                               $"{string.Join(", ", status.ToRemove)}.");
                 reason = string.Join(" ", parts);
             }
-            return reason + "\n\nOpen the sync window to review and sync them? If you choose Not Now, " +
-                   "you won't be asked again until something changes.";
+            return reason;
         }
 
         /// <summary>

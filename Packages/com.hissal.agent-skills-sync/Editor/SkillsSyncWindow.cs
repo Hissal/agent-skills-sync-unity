@@ -20,6 +20,8 @@ namespace Hissal.AgentSkillsSync.Editor
     /// listed in one collapsible section per group, in file order, with ungrouped skills in a trailing "Other" section.
     /// A section's own checkbox selects or deselects all its skills; a skill in several groups is listed in each, and
     /// every row of it shows the one stored choice.
+    /// A skill locked since the contributor last looked that this machine leaves out by default is tagged NEW until they
+    /// sync or choose for it; a toggle (stored in local prefs) turns the startup notice about such skills off.
     /// Each selected skill lists its status per selected folder; where that folder's agents already have the skill at user scope,
     /// the row names where it was found and offers an install-anyway toggle (stored in local prefs at once, applied on Sync).
     /// The project's install mode (Latest or Pinned) is shown and edited here, and saved to the committed project settings.
@@ -34,6 +36,7 @@ namespace Hissal.AgentSkillsSync.Editor
         VisualElement _newSources;
         EnumField _mode;
         HelpBox _modeHelp;
+        Toggle _notifyNewSkills;
         Label _consentNote;
         VisualElement _skillList;
         Toggle _consent;
@@ -98,6 +101,15 @@ namespace Hissal.AgentSkillsSync.Editor
             _modeHelp = new HelpBox("", HelpBoxMessageType.Info);
             scroll.Add(_modeHelp);
 
+            _notifyNewSkills = new Toggle("Tell me at editor start when a new optional skill is locked")
+            {
+                tooltip = "An optional skill is one this machine does not install unless you select it. " +
+                          "Stored on this machine only.",
+                style = { marginTop = 4 },
+            };
+            _notifyNewSkills.RegisterValueChangedCallback(e => SaveNotifyNewSkills(e.newValue));
+            scroll.Add(_notifyNewSkills);
+
             _newSources = new VisualElement { style = { marginTop = 4 } };
             scroll.Add(_newSources);
             _skillList = new VisualElement { style = { marginTop = 4 } };
@@ -137,6 +149,7 @@ namespace Hissal.AgentSkillsSync.Editor
             var choices = Choices();
             var selected = choices.Selected;
             ShowFolders(selected);
+            _notifyNewSkills.SetValueWithoutNotify(LocalPrefs.Load(UnityProjectRoot).NotifyNewSkills);
 
             try
             {
@@ -152,6 +165,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 var newSources = service.NewSources;
                 var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
                 var skills = service.Choices.Skills;
+                var newSkills = new HashSet<string>(service.NewSkills, StringComparer.Ordinal);
                 _groups = service.Groups;
                 var sections = service.Sections;
                 var unknown = SyncText.UnknownGroupSkillsMessage(sections);
@@ -169,7 +183,7 @@ namespace Hissal.AgentSkillsSync.Editor
                             : SyncText.PendingLabel(plan, name);
                         rows.Add(SkillRow(skill, pending, _installMode, install && isNew.Contains(skill.Source), differs.Contains(name),
                             install && _failures.TryGetValue(name, out var failure) ? failure : null,
-                            install, value => SaveSkillsSelected(new[] { name }, value)));
+                            install, value => SaveSkillsSelected(new[] { name }, value), newSkills.Contains(name)));
                         // A skill this machine does not install is in no folder, so it has no per-folder status.
                         if (!install) continue;
                         foreach (var folder in selected)
@@ -352,13 +366,33 @@ namespace Hissal.AgentSkillsSync.Editor
             return row;
         }
 
-        /// <summary>Stores the install choice for each skill against its own default, so only deviations are kept.</summary>
+        void SaveNotifyNewSkills(bool notify)
+        {
+            try
+            {
+                var prefs = LocalPrefs.Load(UnityProjectRoot);
+                prefs.NotifyNewSkills = notify;
+                prefs.Save();
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                ShowSummary("Saving the new-skill notice setting failed: " + e.Message, HelpBoxMessageType.Error);
+                Debug.LogException(e);
+            }
+            Refresh();
+        }
+
+        /// <summary>
+        /// Stores the install choice for each skill against its own default, so only deviations are kept. A skill the
+        /// contributor chose for is no longer new, whatever they chose.
+        /// </summary>
         void SaveSkillsSelected(IReadOnlyList<string> skillNames, bool selected)
         {
             try
             {
                 var prefs = LocalPrefs.Load(UnityProjectRoot);
                 SkillSelection.Set(prefs, skillNames, selected, _groups.IsSelectedByDefault);
+                SeenSkills.Mark(prefs, skillNames);
                 prefs.Save();
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
@@ -370,8 +404,9 @@ namespace Hissal.AgentSkillsSync.Editor
         }
 
         /// <param name="install">Whether this machine installs the skill: the row's checkbox. <paramref name="setInstall"/> stores a change.</param>
+        /// <param name="newSkill">Whether the skill is new to the contributor (see <see cref="SeenSkills"/>): tagged NEW.</param>
         static VisualElement SkillRow(LockedSkill skill, string pending, InstallMode mode, bool newSource, bool differsFromLock,
-            SkillFetchException failure, bool install, Action<bool> setInstall)
+            SkillFetchException failure, bool install, Action<bool> setInstall, bool newSkill)
         {
             var container = new VisualElement { style = { marginBottom = 2 } };
             var row = new VisualElement { style = { flexDirection = FlexDirection.Row } };
@@ -387,6 +422,12 @@ namespace Hissal.AgentSkillsSync.Editor
             row.Add(toggle);
             row.Add(new Label(skill.Name) { style = { width = 200, unityFontStyleAndWeight = FontStyle.Bold } });
             row.Add(new Label(skill.Source) { style = { flexGrow = 1 } });
+            if (newSkill)
+                row.Add(new Label("NEW")
+                {
+                    tooltip = "Locked since you last synced. This machine does not install it unless you check it.",
+                    style = { unityFontStyleAndWeight = FontStyle.Bold, color = new Color(0.3f, 0.7f, 0.3f), marginRight = 8 },
+                });
             if (newSource) row.Add(new Label("NEW SOURCE") { style = { unityFontStyleAndWeight = FontStyle.Bold, color = new Color(0.9f, 0.6f, 0.1f), marginRight = 8 } });
             if (failure == null && !LockVerification.CanVerify(skill))
                 row.Add(mode == InstallMode.Pinned
