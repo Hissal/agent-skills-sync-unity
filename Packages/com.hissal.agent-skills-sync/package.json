@@ -1,6 +1,6 @@
 {
   "name": "com.hissal.agent-skills-sync",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "displayName": "Agent Skills Sync",
   "description": "Editor tool that installs a project's locked agent skills (skills-lock.json) into .agents/skills and .claude/skills, detecting skills contributors already have at user scope.",
   "unity": "6000.3",
