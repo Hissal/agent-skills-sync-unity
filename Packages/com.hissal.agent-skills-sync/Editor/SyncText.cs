@@ -63,6 +63,29 @@ namespace Hissal.AgentSkillsSync.Editor
                    "you won't be asked again until something changes.";
         }
 
+        /// <summary>
+        /// The warning for skill groups listing names the lock does not have, one sentence per group; empty when none does.
+        /// </summary>
+        public static string UnknownGroupSkillsMessage(IReadOnlyList<SkillGroupSection> sections)
+        {
+            var groups = sections.Where(s => s.Unknown.Count > 0).ToList();
+            if (groups.Count == 0) return "";
+            var many = groups.Sum(s => s.Unknown.Count) > 1;
+            return string.Join(" ", groups.Select(s =>
+                       $"Group \"{s.Name}\" lists {(s.Unknown.Count > 1 ? "skills that are" : "a skill that is")} not in " +
+                       $"{Lockfile.FileName}: {string.Join(", ", s.Unknown)}.")) +
+                   $" Sync ignores {(many ? "them" : "it")}; fix or remove the {(many ? "names" : "name")} in {ProjectSyncSettings.RelativePath}.";
+        }
+
+        /// <summary>The row of a lock entry a skill group lists but this tool does not install.</summary>
+        public static string UnsupportedInGroupLabel(UnsupportedSkill skill) =>
+            $"not installable by this tool ({skill.SourceType} source)";
+
+        /// <summary>A group section's header: its name, how many of its skills this machine installs, and its default.</summary>
+        public static string GroupHeader(SkillGroupSection section, SkillSelection skills) =>
+            $"{section.Name ?? "Other"}  ({section.Skills.Count(s => skills.IsSelected(s.Name))} of {section.Skills.Count} selected; " +
+            $"{(section.SelectedByDefault ? "selected" : "not selected")} by default)";
+
         /// <summary>Names the lock entries whose source type this tool does not install, and says it leaves them alone.</summary>
         public static string UnsupportedMessage(IReadOnlyList<UnsupportedSkill> unsupported) =>
             "Not installed by this tool (only \"github\" sources are; these are left to whatever installs them): " +

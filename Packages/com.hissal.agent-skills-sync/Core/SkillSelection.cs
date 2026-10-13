@@ -52,13 +52,23 @@ namespace Hissal.AgentSkillsSync
         /// equal to <paramref name="selectedByDefault"/> is not stored, so the skill follows its default again.
         /// Applies on the next sync. Call <see cref="LocalPrefs.Save"/> after.
         /// </summary>
-        public static void Set(LocalPrefs prefs, string skillName, bool selected, bool selectedByDefault = true)
+        public static void Set(LocalPrefs prefs, string skillName, bool selected, bool selectedByDefault = true) =>
+            Set(prefs, new[] { skillName }, selected, _ => selectedByDefault);
+
+        /// <summary>
+        /// Like <see cref="Set(LocalPrefs, string, bool, bool)"/> for several skills at once, such as a whole skill group,
+        /// each against its own default (<see cref="SkillGroups.IsSelectedByDefault"/>).
+        /// </summary>
+        public static void Set(LocalPrefs prefs, IEnumerable<string> skillNames, bool selected, Func<string, bool> selectedByDefault)
         {
             var optedOut = new HashSet<string>(prefs.OptedOutSkills, StringComparer.Ordinal);
             var optedIn = new HashSet<string>(prefs.OptedInSkills, StringComparer.Ordinal);
-            optedOut.Remove(skillName);
-            optedIn.Remove(skillName);
-            if (selected != selectedByDefault) (selected ? optedIn : optedOut).Add(skillName);
+            foreach (var skillName in skillNames)
+            {
+                optedOut.Remove(skillName);
+                optedIn.Remove(skillName);
+                if (selected != selectedByDefault(skillName)) (selected ? optedIn : optedOut).Add(skillName);
+            }
             prefs.OptedOutSkills = optedOut.ToList();
             prefs.OptedInSkills = optedIn.ToList();
         }

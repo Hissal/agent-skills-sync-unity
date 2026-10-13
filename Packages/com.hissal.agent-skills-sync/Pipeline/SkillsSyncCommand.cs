@@ -55,6 +55,7 @@ namespace Hissal.AgentSkillsSync.Pipeline
                 installed = summary.Installed,
                 updated = summary.Updated,
                 removed = summary.Removed,
+                noLongerSelectedByDefault = summary.NoLongerSelectedByDefault,
                 skipped = summary.Skipped,
                 skippedForUserScope = summary.SkippedForUserScope,
                 linked = summary.Linked,

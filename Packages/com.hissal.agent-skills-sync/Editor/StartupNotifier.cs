@@ -35,7 +35,8 @@ namespace Hissal.AgentSkillsSync.Editor
                 var prefs = LocalPrefs.Load(unityRoot);
                 OfferNewFolders(prefs, layout, environment);
 
-                var status = SyncStatus.Read(skillsRoot, MachineChoices.Read(skillsRoot, prefs, environment, layout), unityRoot);
+                var groups = ProjectSyncSettings.Load(unityRoot).Groups;
+                var status = SyncStatus.Read(skillsRoot, MachineChoices.Read(skillsRoot, prefs, environment, layout, groups), unityRoot);
                 if (!StartupCheck.ShouldNotify(status, prefs)) return;
 
                 if (EditorUtility.DisplayDialog(
@@ -51,7 +52,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 StartupCheck.RecordDeclined(prefs, status);
                 prefs.Save();
             }
-            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is ProjectSyncSettingsException)
             {
                 Debug.LogWarning("Agent Skills Sync: startup check failed: " + e.Message);
             }

@@ -16,7 +16,10 @@ namespace Hissal.AgentSkillsSync.Editor
     /// The skills folders to install into are chosen at the top and stored in local prefs as soon as they change;
     /// until then they are pre-selected by autofill, and nothing is installed before Sync.
     /// Each skill has an install checkbox (stored in local prefs at once, applied on Sync); unchecking it opts this machine
-    /// out of the skill, which then shows no folder rows.
+    /// out of the skill, which then shows no folder rows. When the project settings define skill groups, the skills are
+    /// listed in one collapsible section per group, in file order, with ungrouped skills in a trailing "Other" section.
+    /// A section's own checkbox selects or deselects all its skills; a skill in several groups is listed in each, and
+    /// every row of it shows the one stored choice.
     /// Each selected skill lists its status per selected folder; where that folder's agents already have the skill at user scope,
     /// the row names where it was found and offers an install-anyway toggle (stored in local prefs at once, applied on Sync).
     /// The project's install mode (Latest or Pinned) is shown and edited here, and saved to the committed project settings.
@@ -41,6 +44,10 @@ namespace Hissal.AgentSkillsSync.Editor
         IReadOnlyDictionary<string, SkillFetchException> _failures = new Dictionary<string, SkillFetchException>();
         Lockfile _lockfile;
         SkillSelection _skills = SkillSelection.All;
+        SkillGroups _groups = SkillGroups.None;
+        // Group sections the contributor collapsed, kept across refreshes (null = the ungrouped section).
+        readonly HashSet<string> _collapsed = new HashSet<string>(StringComparer.Ordinal);
+        bool _ungroupedCollapsed;
         readonly HashSet<string> _confirmedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>The Unity project folder: holds this machine's local prefs and the committed project settings.</summary>
@@ -54,7 +61,10 @@ namespace Hissal.AgentSkillsSync.Editor
 
         static FolderLayout Layout => FolderLayout.Default;
 
-        /// <summary>This machine's folder selection, user-scope copies, install-anyway choices and skill selection, as stored now.</summary>
+        /// <summary>
+        /// This machine's folder selection, user-scope copies and install-anyway choices, as stored now. Its skill
+        /// selection lacks the project's group defaults: read that from the <see cref="SkillsSyncService"/>.
+        /// </summary>
         static MachineChoices Choices() =>
             MachineChoices.Read(SkillsRoot, LocalPrefs.Load(UnityProjectRoot), UserEnvironment.Current, Layout);
 
@@ -141,20 +151,32 @@ namespace Hissal.AgentSkillsSync.Editor
                     : new HashSet<string>();
                 var newSources = service.NewSources;
                 var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
-                foreach (var skill in lockfile.Skills)
+                var skills = service.Choices.Skills;
+                _groups = service.Groups;
+                var sections = service.Sections;
+                var unknown = SyncText.UnknownGroupSkillsMessage(sections);
+                if (unknown.Length > 0) _skillList.Add(new HelpBox(unknown, HelpBoxMessageType.Warning));
+                foreach (var section in sections)
                 {
-                    var name = skill.Name;
-                    var install = service.Choices.Skills.IsSelected(name);
-                    var pending = !install ? SyncText.OptedOutLabel(plan, name)
-                        : selected.Count == 0 ? "not installed (no folder selected)"
-                        : SyncText.PendingLabel(plan, name);
-                    _skillList.Add(SkillRow(skill, pending, _installMode, install && isNew.Contains(skill.Source), differs.Contains(name),
-                        install && _failures.TryGetValue(name, out var failure) ? failure : null,
-                        install, value => SaveSkillSelected(name, value)));
-                    // An opted-out skill is installed in no folder, so it has no per-folder status.
-                    if (!install) continue;
-                    foreach (var folder in selected)
-                        _skillList.Add(FolderRow(skill, folder, plan, choices));
+                    // Without groups the list stays flat, as it was before groups existed.
+                    var rows = _groups.Groups.Count == 0 ? _skillList : GroupSection(section, skills);
+                    foreach (var skill in section.Skills)
+                    {
+                        var name = skill.Name;
+                        var install = skills.IsSelected(name);
+                        var pending = !install ? SyncText.UnselectedLabel(plan, name, skills)
+                            : selected.Count == 0 ? "not installed (no folder selected)"
+                            : SyncText.PendingLabel(plan, name);
+                        rows.Add(SkillRow(skill, pending, _installMode, install && isNew.Contains(skill.Source), differs.Contains(name),
+                            install && _failures.TryGetValue(name, out var failure) ? failure : null,
+                            install, value => SaveSkillsSelected(new[] { name }, value)));
+                        // A skill this machine does not install is in no folder, so it has no per-folder status.
+                        if (!install) continue;
+                        foreach (var folder in selected)
+                            rows.Add(FolderRow(skill, folder, plan, choices));
+                    }
+                    foreach (var unsupported in section.Unsupported)
+                        rows.Add(UnsupportedRow(unsupported));
                 }
                 ShowNewSources(newSources);
                 if (lockfile.Unsupported.Count > 0)
@@ -215,7 +237,7 @@ namespace Hissal.AgentSkillsSync.Editor
             {
                 new ProjectSyncSettings(mode).Save(UnityProjectRoot);
             }
-            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is ProjectSyncSettingsException)
             {
                 ShowStatus($"Could not save {ProjectSyncSettings.RelativePath}: {e.Message}", HelpBoxMessageType.Error);
                 _mode.SetValueWithoutNotify(_installMode);
@@ -285,12 +307,58 @@ namespace Hissal.AgentSkillsSync.Editor
             Refresh();
         }
 
-        void SaveSkillSelected(string skillName, bool selected)
+        /// <summary>
+        /// A collapsible section for one skill group (or the ungrouped skills), added to the skill list. Its checkbox is
+        /// checked when this machine installs every skill of the section, mixed when only some, and sets them all at once.
+        /// </summary>
+        /// <returns>The element the section's skill rows go into.</returns>
+        VisualElement GroupSection(SkillGroupSection section, SkillSelection skills)
+        {
+            var names = section.Skills.Select(s => s.Name).ToList();
+            var selectedCount = names.Count(skills.IsSelected);
+            var row = new VisualElement { style = { flexDirection = FlexDirection.Row, alignItems = Align.FlexStart, marginTop = 2 } };
+            var all = new Toggle
+            {
+                tooltip = "Install every skill of this group on this machine, or none of them. Stored on this machine only; applies on the next Sync.",
+                showMixedValue = selectedCount > 0 && selectedCount < names.Count,
+                style = { marginRight = 4 },
+            };
+            all.SetValueWithoutNotify(names.Count > 0 && selectedCount == names.Count);
+            all.SetEnabled(names.Count > 0);
+            all.RegisterValueChangedCallback(e => SaveSkillsSelected(names, e.newValue));
+            row.Add(all);
+
+            var collapsed = section.Name == null ? _ungroupedCollapsed : _collapsed.Contains(section.Name);
+            var foldout = new Foldout { text = SyncText.GroupHeader(section, skills), value = !collapsed, style = { flexGrow = 1 } };
+            foldout.RegisterValueChangedCallback(e =>
+            {
+                // Rows inside the foldout raise their own change events, which bubble up to it.
+                if (e.target != foldout) return;
+                if (section.Name == null) _ungroupedCollapsed = !e.newValue;
+                else if (e.newValue) _collapsed.Remove(section.Name);
+                else _collapsed.Add(section.Name);
+            });
+            row.Add(foldout);
+            _skillList.Add(row);
+            return foldout;
+        }
+
+        /// <summary>A lock entry a group lists but this tool does not install: named, with no checkbox.</summary>
+        static VisualElement UnsupportedRow(UnsupportedSkill skill)
+        {
+            var row = new VisualElement { style = { flexDirection = FlexDirection.Row, marginBottom = 2, marginLeft = 20 } };
+            row.Add(new Label(skill.Name) { style = { width = 200, unityFontStyleAndWeight = FontStyle.Bold } });
+            row.Add(new Label(SyncText.UnsupportedInGroupLabel(skill)) { style = { flexGrow = 1 } });
+            return row;
+        }
+
+        /// <summary>Stores the install choice for each skill against its own default, so only deviations are kept.</summary>
+        void SaveSkillsSelected(IReadOnlyList<string> skillNames, bool selected)
         {
             try
             {
                 var prefs = LocalPrefs.Load(UnityProjectRoot);
-                SkillSelection.Set(prefs, skillName, selected);
+                SkillSelection.Set(prefs, skillNames, selected, _groups.IsSelectedByDefault);
                 prefs.Save();
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
@@ -310,7 +378,8 @@ namespace Hissal.AgentSkillsSync.Editor
             var toggle = new Toggle
             {
                 tooltip = "Install this skill on this machine. Stored on this machine only; applies on the next Sync. " +
-                          "Uncheck to opt out: Sync then removes the tool's copy and links of it.",
+                          "Uncheck to opt out: Sync then removes the tool's copy and links of it. " +
+                          "Unchecked without a choice of yours when the project's groups do not select it by default.",
                 style = { marginRight = 4 },
             };
             toggle.SetValueWithoutNotify(install);

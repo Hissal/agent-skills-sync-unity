@@ -115,6 +115,25 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Set_WholeGroup_StoresOnlyTheChoicesThatDifferFromEachSkillsDefault()
+        {
+            // ui-uitk is also recommended, so its default is selected; shaders is only in art.
+            var groups = new SkillGroups(new[] { Group("recommended", true, "tdd", "ui-uitk"), Group("art", false, "ui-uitk", "shaders") });
+            var prefs = Prefs(optedOut: new[] { "ui-uitk" });
+
+            SkillSelection.Set(prefs, new[] { "ui-uitk", "shaders" }, true, groups.IsSelectedByDefault);
+
+            Assert.That(prefs.OptedInSkills, Is.EqualTo(new[] { "shaders" }));
+            Assert.That(prefs.OptedOutSkills, Is.Empty);
+
+            SkillSelection.Set(prefs, new[] { "ui-uitk", "shaders" }, false, groups.IsSelectedByDefault);
+
+            Assert.That(prefs.OptedInSkills, Is.Empty);
+            Assert.That(prefs.OptedOutSkills, Is.EqualTo(new[] { "ui-uitk" }));
+            Assert.That(SkillSelection.From(prefs, groups.IsSelectedByDefault).IsSelected("tdd"), Is.True, "not in the group toggled");
+        }
+
+        [Test]
         public void Plan_SkillInSeveralGroups_IsInstalledOnce()
         {
             var groups = new SkillGroups(new[] { Group("recommended", true, "tdd"), Group("programming", true, "tdd") });

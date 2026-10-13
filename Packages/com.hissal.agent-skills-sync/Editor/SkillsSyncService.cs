@@ -6,7 +6,7 @@ using UnityEngine;
 namespace Hissal.AgentSkillsSync.Editor
 {
     /// <summary>
-    /// Loads one sync's lock, mode and machine choices. Both entry points check consent against this
+    /// Loads one sync's lock, mode, skill groups and machine choices. Both entry points check consent against this
     /// snapshot and run it unchanged. Construction and planning are offline and never save state.
     /// </summary>
     internal sealed class SkillsSyncService
@@ -31,10 +31,11 @@ namespace Hissal.AgentSkillsSync.Editor
                     $"({Path.GetDirectoryName(unityRoot)}).");
             Lock = Lockfile.Load(Root);
             // Validate settings even when the invocation overrides the mode.
-            var projectMode = ProjectSyncSettings.Load(unityRoot).InstallMode;
-            Mode = modeOverride ?? projectMode;
+            var settings = ProjectSyncSettings.Load(unityRoot);
+            Mode = modeOverride ?? settings.InstallMode;
+            Groups = settings.Groups;
             var prefs = LocalPrefs.Load(unityRoot);
-            Choices = MachineChoices.Read(Root, prefs, _environment);
+            Choices = MachineChoices.Read(Root, prefs, _environment, groups: Groups);
             NewSources = SourceConsent.NewSources(Lock, prefs, Choices.Skills);
         }
 
@@ -43,6 +44,12 @@ namespace Hissal.AgentSkillsSync.Editor
         internal InstallMode Mode { get; }
         internal MachineChoices Choices { get; }
         internal IReadOnlyList<string> NewSources { get; }
+
+        /// <summary>The project's skill groups, which give each locked skill without a stored choice its default.</summary>
+        internal SkillGroups Groups { get; }
+
+        /// <summary>The lock as the window lists it: one section per group, then the ungrouped skills.</summary>
+        internal IReadOnlyList<SkillGroupSection> Sections => Groups.Sections(Lock);
 
         SkillSync Sync(ISkillFetcher fetcher) =>
             new SkillSync(Root, fetcher, Choices, mode: Mode, prefsRoot: _unityRoot);
