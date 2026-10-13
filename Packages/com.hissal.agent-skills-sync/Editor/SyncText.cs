@@ -22,6 +22,88 @@ namespace Hissal.AgentSkillsSync.Editor
             return "installed";
         }
 
+        /// <summary>The row status of a skill this machine opted out of: whether Sync still has a managed copy or link to remove.</summary>
+        public static string OptedOutLabel(InstallPlan plan, string skillName) =>
+            plan.Actions.Any(a => a.SkillName == skillName && a.Withdraws)
+                ? "opted out (removed on Sync)"
+                : "not installed (opted out)";
+
+        /// <summary>
+        /// The row status of a skill this machine does not install: opted out of, or left out by its default alone, and
+        /// whether Sync still has a managed copy or link to remove.
+        /// </summary>
+        public static string UnselectedLabel(InstallPlan plan, string skillName, SkillSelection skills)
+        {
+            if (skills.IsOptedOut(skillName)) return OptedOutLabel(plan, skillName);
+            return plan.Actions.Any(a => a.SkillName == skillName && a.Withdraws)
+                ? "not selected by default (removed on Sync)"
+                : "not installed (not selected by default)";
+        }
+
+        /// <summary>
+        /// The startup notification: why the project is out of sync, which new optional skills were locked, or both,
+        /// and the offer to open the sync window. Names only the parts <see cref="StartupCheck"/> notifies for.
+        /// </summary>
+        public static string StartupMessage(SyncStatus status, LocalPrefs prefs)
+        {
+            var newSkills = StartupCheck.NewSkills(status, prefs);
+            var one = newSkills.Count == 1;
+            var added = newSkills.Count == 0 ? null
+                : $"{(one ? "A new optional skill was" : "New optional skills were")} locked: {string.Join(", ", newSkills)}. " +
+                  $"This machine does not install {(one ? "it" : "them")} unless you select {(one ? "it" : "them")}.";
+            if (added != null && !StartupCheck.OutOfSync(status, prefs))
+                return added + $"\n\nOpen the sync window to review {(one ? "it" : "them")}? If you choose Not Now, " +
+                       $"you won't be told about {(one ? "it" : "them")} again. You can turn this notice off in the sync window.";
+
+            return OutOfSyncReason(status, prefs) + (added == null ? "" : " " + added) +
+                   "\n\nOpen the sync window to review and sync them? If you choose Not Now, " +
+                   "you won't be asked again until something changes.";
+        }
+
+        static string OutOfSyncReason(SyncStatus status, LocalPrefs prefs)
+        {
+            string reason;
+            if (prefs.LastSyncedLockHash == null)
+                reason = "This project's agent skills have not been synced on this machine yet.";
+            else if (StartupCheck.LockChanged(status, prefs))
+                reason = $"{Lockfile.FileName} changed since the last sync.";
+            else
+            {
+                // A skill only waiting for removal is not missing: the project or the contributor stopped selecting it.
+                var missing = status.OutOfSyncSkills.Except(status.ToRemove).ToList();
+                var parts = new List<string>();
+                if (missing.Count > 0) parts.Add($"Some locked skills are missing: {string.Join(", ", missing)}.");
+                if (status.ToRemove.Count > 0)
+                    parts.Add("Some installed skills are no longer selected and will be removed on the next sync: " +
+                              $"{string.Join(", ", status.ToRemove)}.");
+                reason = string.Join(" ", parts);
+            }
+            return reason;
+        }
+
+        /// <summary>
+        /// The warning for skill groups listing names the lock does not have, one sentence per group; empty when none does.
+        /// </summary>
+        public static string UnknownGroupSkillsMessage(IReadOnlyList<SkillGroupSection> sections)
+        {
+            var groups = sections.Where(s => s.Unknown.Count > 0).ToList();
+            if (groups.Count == 0) return "";
+            var many = groups.Sum(s => s.Unknown.Count) > 1;
+            return string.Join(" ", groups.Select(s =>
+                       $"Group \"{s.Name}\" lists {(s.Unknown.Count > 1 ? "skills that are" : "a skill that is")} not in " +
+                       $"{Lockfile.FileName}: {string.Join(", ", s.Unknown)}.")) +
+                   $" Sync ignores {(many ? "them" : "it")}; fix or remove the {(many ? "names" : "name")} in {ProjectSyncSettings.RelativePath}.";
+        }
+
+        /// <summary>The row of a lock entry a skill group lists but this tool does not install.</summary>
+        public static string UnsupportedInGroupLabel(UnsupportedSkill skill) =>
+            $"not installable by this tool ({skill.SourceType} source)";
+
+        /// <summary>A group section's header: its name, how many of its skills this machine installs, and its default.</summary>
+        public static string GroupHeader(SkillGroupSection section, SkillSelection skills) =>
+            $"{section.Name ?? "Other"}  ({section.Skills.Count(s => skills.IsSelected(s.Name))} of {section.Skills.Count} selected; " +
+            $"{(section.SelectedByDefault ? "selected" : "not selected")} by default)";
+
         /// <summary>Names the lock entries whose source type this tool does not install, and says it leaves them alone.</summary>
         public static string UnsupportedMessage(IReadOnlyList<UnsupportedSkill> unsupported) =>
             "Not installed by this tool (only \"github\" sources are; these are left to whatever installs them): " +
@@ -113,6 +195,9 @@ namespace Hissal.AgentSkillsSync.Editor
             Line(text, "Installed", summary.Installed);
             Line(text, "Updated", summary.Updated);
             Line(text, "Removed", summary.Removed);
+            if (summary.NoLongerSelectedByDefault.Count > 0)
+                text.AppendLine($"Removed because no longer selected by default ({summary.NoLongerSelectedByDefault.Count}): " +
+                                $"{string.Join(", ", summary.NoLongerSelectedByDefault)}. Check a skill in the list to keep it installed.");
             Line(text, "Skipped (not managed by the tool)", summary.Skipped);
             if (summary.SkippedForUserScope.Count > 0)
                 text.AppendLine($"Skipped in favour of your user-scope copy ({summary.SkippedForUserScope.Count}): {string.Join(", ", summary.SkippedForUserScope)}");

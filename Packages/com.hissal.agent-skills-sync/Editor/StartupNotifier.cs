@@ -8,8 +8,10 @@ namespace Hissal.AgentSkillsSync.Editor
     /// <summary>
     /// Once per editor session (not per domain reload), first offers to add each skills folder whose
     /// user-scope home appeared since the selection was made (declining is remembered per folder), then
-    /// checks whether the project's skills are out of sync and, if so, offers to open the sync window.
-    /// Declining keeps it quiet until something changes. With no folder selected it never notifies.
+    /// checks whether the project's skills are out of sync or a new optional skill was locked and, if so, offers to
+    /// open the sync window in one dialog. Declining keeps each part quiet until it changes. With no folder selected
+    /// it never notifies. Prefs an earlier version wrote are seeded here (<see cref="StartupCheck.Seed"/>), so upgrading
+    /// announces neither the skills already locked nor a later lock change this machine does not install.
     /// </summary>
     [InitializeOnLoad]
     static class StartupNotifier
@@ -35,12 +37,14 @@ namespace Hissal.AgentSkillsSync.Editor
                 var prefs = LocalPrefs.Load(unityRoot);
                 OfferNewFolders(prefs, layout, environment);
 
-                var status = SyncStatus.Read(skillsRoot, MachineChoices.Read(skillsRoot, prefs, environment, layout), unityRoot);
+                var groups = ProjectSyncSettings.Load(unityRoot).Groups;
+                var status = SyncStatus.Read(skillsRoot, MachineChoices.Read(skillsRoot, prefs, environment, layout, groups), unityRoot);
+                if (StartupCheck.Seed(prefs, status)) prefs.Save();
                 if (!StartupCheck.ShouldNotify(status, prefs)) return;
 
                 if (EditorUtility.DisplayDialog(
                         "Agent Skills Sync",
-                        Describe(status, prefs),
+                        SyncText.StartupMessage(status, prefs),
                         "Open Sync Window",
                         "Not Now"))
                 {
@@ -51,7 +55,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 StartupCheck.RecordDeclined(prefs, status);
                 prefs.Save();
             }
-            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is ProjectSyncSettingsException)
             {
                 Debug.LogWarning("Agent Skills Sync: startup check failed: " + e.Message);
             }
@@ -73,17 +77,6 @@ namespace Hissal.AgentSkillsSync.Editor
                 else FolderSelection.Decline(prefs, folder);
                 prefs.Save();
             }
-        }
-
-        static string Describe(SyncStatus status, LocalPrefs prefs)
-        {
-            var reason = prefs.LastSyncedLockHash == null
-                ? "This project's agent skills have not been synced on this machine yet."
-                : status.LockHash != prefs.LastSyncedLockHash
-                ? $"{Lockfile.FileName} changed since the last sync."
-                : $"Some locked skills are missing: {string.Join(", ", status.OutOfSyncSkills)}.";
-            return reason + "\n\nOpen the sync window to review and install them? If you choose Not Now, " +
-                   "you won't be asked again until something changes.";
         }
     }
 }

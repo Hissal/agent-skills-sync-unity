@@ -6,7 +6,7 @@ using UnityEngine;
 namespace Hissal.AgentSkillsSync.Editor
 {
     /// <summary>
-    /// Loads one sync's lock, mode and machine choices. Both entry points check consent against this
+    /// Loads one sync's lock, mode, skill groups and machine choices. Both entry points check consent against this
     /// snapshot and run it unchanged. Construction and planning are offline and never save state.
     /// </summary>
     internal sealed class SkillsSyncService
@@ -31,11 +31,13 @@ namespace Hissal.AgentSkillsSync.Editor
                     $"({Path.GetDirectoryName(unityRoot)}).");
             Lock = Lockfile.Load(Root);
             // Validate settings even when the invocation overrides the mode.
-            var projectMode = ProjectSyncSettings.Load(unityRoot).InstallMode;
-            Mode = modeOverride ?? projectMode;
+            var settings = ProjectSyncSettings.Load(unityRoot);
+            Mode = modeOverride ?? settings.InstallMode;
+            Groups = settings.Groups;
             var prefs = LocalPrefs.Load(unityRoot);
-            Choices = MachineChoices.Read(Root, prefs, _environment);
-            NewSources = SourceConsent.NewSources(Lock, prefs);
+            Choices = MachineChoices.Read(Root, prefs, _environment, groups: Groups);
+            NewSources = SourceConsent.NewSources(Lock, prefs, Choices.Skills);
+            NewSkills = SeenSkills.New(prefs, Lock, Choices.Skills);
         }
 
         internal string Root { get; }
@@ -44,6 +46,12 @@ namespace Hissal.AgentSkillsSync.Editor
         internal MachineChoices Choices { get; }
         internal IReadOnlyList<string> NewSources { get; }
 
+        /// <summary>The locked skills this machine leaves out by default that the contributor has not seen yet (<see cref="SeenSkills"/>).</summary>
+        internal IReadOnlyList<string> NewSkills { get; }
+
+        /// <summary>The project's skill groups, which give each locked skill without a stored choice its default.</summary>
+        internal SkillGroups Groups { get; }
+
         SkillSync Sync(ISkillFetcher fetcher) =>
             new SkillSync(Root, fetcher, Choices, mode: Mode, prefsRoot: _unityRoot);
 
@@ -51,15 +59,19 @@ namespace Hissal.AgentSkillsSync.Editor
         internal IReadOnlyList<string> InstalledDiffersFromLock() => Sync(null).InstalledDiffersFromLock(Lock);
 
         /// <summary>
-        /// Syncs only after every new source is confirmed. The window also passes the mode it showed,
-        /// so a changed project setting requires another review. Records consent only on success.
+        /// Syncs only after every new source is confirmed. The window also passes the mode and skill groups it
+        /// showed, so a changed project setting requires another review. Records consent only on success, and
+        /// marks every locked skill seen (<see cref="StartupCheck.RecordSynced"/>) from either entry point.
         /// </summary>
-        internal SyncSummary Run(IEnumerable<string> confirmedSources, InstallMode? expectedMode = null)
+        internal SyncSummary Run(IEnumerable<string> confirmedSources, InstallMode? expectedMode = null,
+            SkillGroups expectedGroups = null)
         {
-            var unconfirmed = SourceConsent.Unconfirmed(Lock, LocalPrefs.Load(_unityRoot), confirmedSources);
+            var unconfirmed = SourceConsent.Unconfirmed(Lock, LocalPrefs.Load(_unityRoot), confirmedSources, Choices.Skills);
             if (unconfirmed.Count > 0) throw new SourceConsentException(unconfirmed);
             if (expectedMode.HasValue && expectedMode.Value != Mode)
                 throw new InstallModeChangedException(Mode);
+            if (expectedGroups != null && !expectedGroups.SameAs(Groups))
+                throw new SkillGroupsChangedException();
 
             var summary = Sync(_fetcher(Mode)).Run(Lock);
             try
@@ -68,7 +80,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 var prefs = LocalPrefs.Load(_unityRoot);
                 FolderSelection.Save(prefs, Choices.Layout, Choices.Selected, _environment);
                 StartupCheck.RecordSynced(prefs, SyncStatus.Read(Root, Choices, _unityRoot));
-                SourceConsent.RecordSynced(prefs, Lock);
+                SourceConsent.RecordSynced(prefs, Lock, Choices.Skills);
                 prefs.Save();
             }
             catch (Exception e) when (e is LockfileException || e is IOException || e is UnauthorizedAccessException)
@@ -91,6 +103,12 @@ namespace Hissal.AgentSkillsSync.Editor
     {
         internal InstallModeChangedException(InstallMode mode)
             : base($"The install mode changed to {mode} since the window listed the skills. Review it and sync again.") { }
+    }
+
+    internal sealed class SkillGroupsChangedException : Exception
+    {
+        internal SkillGroupsChangedException()
+            : base("The project's skill groups changed since the window listed the skills. Review the list and sync again.") { }
     }
 
     /// <summary>The skills were synced, but consent and notification state could not be saved.</summary>

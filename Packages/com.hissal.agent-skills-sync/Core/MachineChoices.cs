@@ -5,7 +5,8 @@ namespace Hissal.AgentSkillsSync
 {
     /// <summary>
     /// What this machine brings to a sync besides the lockfile and the project: the folder layout, the skills folders
-    /// it installs into, the user-scope copies found for them, and the contributor's install-anyway choices. Planning, syncing
+    /// it installs into, the user-scope copies found for them, the contributor's install-anyway choices and the locked
+    /// skills it installs (the contributor's choices over the project's group defaults). Planning, syncing
     /// and the startup status all read the same choices, so build them once with <see cref="Read"/>.
     /// </summary>
     public sealed class MachineChoices
@@ -14,29 +15,37 @@ namespace Hissal.AgentSkillsSync
         /// <param name="selected">The folders this machine installs into (see <see cref="FolderSelection.Effective"/>); null = every folder in the layout.</param>
         /// <param name="userScope">The user-scope copies found (see <see cref="UserScopeScanner"/>); null = none.</param>
         /// <param name="installAnyway">The contributor's per-folder install-anyway choices (see <see cref="InstallAnywayChoices.From"/>); null = none.</param>
+        /// <param name="skills">The locked skills this machine installs (see <see cref="SkillSelection.From"/>); null = every one.</param>
         public MachineChoices(FolderLayout layout = null, IEnumerable<SkillsFolder> selected = null,
-            UserScopeState userScope = null, InstallAnywayChoices installAnyway = null)
+            UserScopeState userScope = null, InstallAnywayChoices installAnyway = null, SkillSelection skills = null)
         {
+            Skills = skills ?? SkillSelection.All;
             Layout = layout ?? FolderLayout.Default;
             Selected = selected?.ToList();
             UserScope = userScope ?? UserScopeState.Empty;
             InstallAnyway = installAnyway ?? InstallAnywayChoices.None;
         }
 
-        /// <summary>Every folder of the default layout selected, nothing found at user scope, no install-anyway overrides.</summary>
+        /// <summary>Every folder of the default layout and every locked skill selected, nothing found at user scope, no install-anyway overrides.</summary>
         public static MachineChoices Default { get; } = new MachineChoices();
 
         /// <summary>
-        /// This machine's choices for the project: the <see cref="FolderSelection.Effective"/> selection and install-anyway choices stored
+        /// This machine's choices for the project: the <see cref="FolderSelection.Effective"/> selection, install-anyway choices and skill selection stored
         /// in <paramref name="prefs"/>, and the user-scope copies <paramref name="environment"/> holds for that selection
         /// (from <see cref="UserScopeScanner.DefaultSourcesFor"/> the project).
         /// </summary>
-        public static MachineChoices Read(string projectRoot, LocalPrefs prefs, UserEnvironment environment, FolderLayout layout = null)
+        /// <param name="groups">
+        /// The project's skill groups (<see cref="ProjectSyncSettings.Groups"/>), which give each skill without a stored
+        /// choice its default; null = every skill is selected by default.
+        /// </param>
+        public static MachineChoices Read(string projectRoot, LocalPrefs prefs, UserEnvironment environment, FolderLayout layout = null,
+            SkillGroups groups = null)
         {
             layout = layout ?? FolderLayout.Default;
             var selected = FolderSelection.Effective(prefs, layout, environment);
             var userScope = UserScopeScanner.Scan(selected, environment, UserScopeScanner.DefaultSourcesFor(projectRoot));
-            return new MachineChoices(layout, selected, userScope, InstallAnywayChoices.From(prefs));
+            return new MachineChoices(layout, selected, userScope, InstallAnywayChoices.From(prefs),
+                SkillSelection.From(prefs, groups));
         }
 
         public FolderLayout Layout { get; }
@@ -49,5 +58,8 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>The contributor's per-folder install-anyway choices; never null.</summary>
         public InstallAnywayChoices InstallAnyway { get; }
+
+        /// <summary>Which locked skills this machine installs; never null.</summary>
+        public SkillSelection Skills { get; }
     }
 }

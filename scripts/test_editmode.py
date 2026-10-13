@@ -7,6 +7,11 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 
+def outcome(element):
+    # Unity appends the NUnit label to the result: Failed(Child), Failed(Error), Skipped(Ignored).
+    return (element.get("result") or "").split("(")[0]
+
+
 def summarize(report):
     # NUnit 3 format: https://docs.nunit.org/articles/nunit/technical-notes/usage/Test-Result-XML-Format.html
     try:
@@ -17,7 +22,7 @@ def summarize(report):
             raise ValueError("expected a test-run with nonnegative counts")
         if passed + failed > total:
             raise ValueError("passed and failed counts exceed total")
-        if root.get("result") not in ("Passed", "Failed", "Skipped", "Inconclusive", "Warning"):
+        if outcome(root) not in ("Passed", "Failed", "Skipped", "Inconclusive", "Warning"):
             raise ValueError("missing or unknown test-run result")
     except (OSError, ET.ParseError, KeyError, ValueError) as error:
         print(f"No valid NUnit results report: {error}", file=sys.stderr)
@@ -25,7 +30,7 @@ def summarize(report):
 
     print(f"total / passed / failed: {total} / {passed} / {failed}")
     failing_results = [test for test in root.iter()
-                       if test.tag in ("test-case", "test-suite") and test.get("result") == "Failed"]
+                       if test.tag in ("test-case", "test-suite") and outcome(test) == "Failed"]
     for test in failing_results:
         # Parent suites can inherit failure without having their own diagnostic.
         if test.tag == "test-suite" and test.find("failure") is None:
@@ -35,7 +40,7 @@ def summarize(report):
     if total == 0:
         print("No tests matched; zero tests is not a passing run.", file=sys.stderr)
         return 1
-    return int(failed > 0 or bool(failing_results) or root.get("result") == "Failed")
+    return int(failed > 0 or bool(failing_results) or outcome(root) == "Failed")
 
 
 def main(args=None):

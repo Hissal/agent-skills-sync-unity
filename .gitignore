@@ -45,3 +45,6 @@ Thumbs.db
 
 # Test results
 TestResults*.xml
+
+# Python
+__pycache__/

@@ -99,6 +99,126 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(Service().Run(Array.Empty<string>()).NothingChanged, Is.True);
         }
 
+        void WriteSettings(string json)
+        {
+            var path = Path.Combine(_project, "ProjectSettings", "AgentSkillsSync.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllText(path, json);
+        }
+
+        const string ReviewOptional = @"{ ""groups"": {
+            ""recommended"": { ""skills"": [""tdd""] },
+            ""optional"": { ""selectedByDefault"": false, ""skills"": [""review"", ""not-locked""] } } }";
+
+        [Test]
+        public void Run_GroupNotSelectedByDefault_SyncsOnlyTheSelectedGroupsAndAsksNoConsentForTheOther()
+        {
+            WriteSettings(ReviewOptional);
+            var service = Service();
+
+            Assert.That(service.NewSources, Is.EqualTo(new[] { "owner/skills" }));
+            var summary = service.Run(service.NewSources);
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(_github.Requested.Any(url => url.Contains("other/skills")), Is.False);
+            Assert.That(File.Exists(Path.Combine(_project, ".agents/skills/review/SKILL.md")), Is.False);
+            Assert.That(LocalPrefs.Load(_project).SyncedSources, Is.EqualTo(new[] { "owner/skills" }));
+            Assert.That(StartupCheck.ShouldNotify(SyncStatus.Read(_project, Service().Choices, _project), LocalPrefs.Load(_project)), Is.False);
+        }
+
+        [Test]
+        public void Sections_GroupListingANameThatIsNotLocked_WarnsAndTheSyncProceeds()
+        {
+            WriteSettings(ReviewOptional);
+            var service = Service();
+
+            var sections = service.Groups.Sections(service.Lock);
+            Assert.That(sections.Select(s => s.Name), Is.EqualTo(new[] { "recommended", "optional" }));
+            Assert.That(SyncText.UnknownGroupSkillsMessage(sections), Is.EqualTo(
+                "Group \"optional\" lists a skill that is not in skills-lock.json: not-locked. " +
+                "Sync ignores it; fix or remove the name in ProjectSettings/AgentSkillsSync.json."));
+            Assert.That(service.Run(service.NewSources).Installed, Is.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
+        public void Run_OptedInToAnOptionalGroupsSkill_InstallsItToo()
+        {
+            WriteSettings(ReviewOptional);
+            var prefs = LocalPrefs.Load(_project);
+            SkillSelection.Set(prefs, new[] { "review" }, true, Service().Groups);
+            prefs.Save();
+            var service = Service();
+
+            Assert.That(service.Run(service.NewSources).Installed, Is.EquivalentTo(new[] { "tdd", "review" }));
+        }
+
+        const string TddOnlyLock = @"{
+  ""version"": 1,
+  ""skills"": {
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" }
+  }
+}";
+
+        [Test]
+        public void Run_FirstEverSync_SeedsEveryLockedSkillAsSeen()
+        {
+            WriteSettings(ReviewOptional);
+            var service = Service();
+            Assert.That(service.NewSkills, Is.Empty);
+
+            service.Run(service.NewSources);
+
+            Assert.That(LocalPrefs.Load(_project).SeenSkills, Is.EqualTo(new[] { "review", "tdd" }));
+            Assert.That(Service().NewSkills, Is.Empty);
+        }
+
+        [Test]
+        public void NewSkills_OptionalSkillLockedSinceTheLastSync_IsNewUntilTheNextSync()
+        {
+            WriteSettings(ReviewOptional);
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), TddOnlyLock);
+            var first = Service();
+            first.Run(first.NewSources);
+
+            File.WriteAllText(Path.Combine(_project, Lockfile.FileName), Lock);
+            var service = Service();
+
+            Assert.That(service.NewSkills, Is.EqualTo(new[] { "review" }));
+            Assert.That(StartupCheck.NewSkills(SyncStatus.Read(_project, service.Choices, _project), LocalPrefs.Load(_project)),
+                Is.EqualTo(new[] { "review" }));
+
+            Assert.That(service.Run(Array.Empty<string>()).NothingChanged, Is.True);
+
+            Assert.That(LocalPrefs.Load(_project).SeenSkills, Does.Contain("review"));
+            Assert.That(Service().NewSkills, Is.Empty);
+            Assert.That(StartupCheck.ShouldNotify(SyncStatus.Read(_project, Service().Choices, _project), LocalPrefs.Load(_project)), Is.False);
+        }
+
+        [Test]
+        public void Run_SkillMovedToAGroupNotSelectedByDefault_RemovesItAndNamesItInTheSummary()
+        {
+            var first = Service();
+            first.Run(first.NewSources);
+            WriteSettings(ReviewOptional);
+
+            var summary = Service().Run(Array.Empty<string>());
+
+            Assert.That(summary.NoLongerSelectedByDefault, Is.EqualTo(new[] { "review" }));
+            Assert.That(SyncText.Describe(summary), Does.Contain("Removed because no longer selected by default (1): review."));
+            Assert.That(Directory.Exists(Path.Combine(_project, ".agents/skills/review")), Is.False);
+            Assert.That(File.Exists(Path.Combine(_project, ".agents/skills/tdd/SKILL.md")), Is.True);
+        }
+
+        [Test]
+        public void Constructor_SettingsWithAWrongType_FailsNamingTheKey()
+        {
+            WriteSettings(@"{ ""groups"": { ""optional"": { ""selectedByDefault"": ""no"" } } }");
+
+            var error = Assert.Throws<ProjectSyncSettingsException>(() => Service());
+
+            Assert.That(error.Message, Does.Contain("groups.optional.selectedByDefault"));
+        }
+
         [Test]
         public void Run_Offline_AbortsWithoutRecordingConsentOrChangingProject()
         {
@@ -119,6 +239,27 @@ namespace Hissal.AgentSkillsSync.Tests
             var service = Service();
             Assert.Throws<InstallModeChangedException>(() => service.Run(service.NewSources, InstallMode.Latest));
             Assert.That(_github.Requested, Is.Empty);
+        }
+
+        [Test]
+        public void Run_GroupsChangedSinceWindowPreview_RequiresReviewBeforeFetching()
+        {
+            var shown = ProjectSyncSettings.Load(_project).Groups;
+            WriteSettings(ReviewOptional);
+            var service = Service();
+
+            Assert.Throws<SkillGroupsChangedException>(() => service.Run(service.NewSources, expectedGroups: shown));
+            Assert.That(_github.Requested, Is.Empty);
+        }
+
+        [Test]
+        public void Run_GroupsSameAsWindowPreview_Syncs()
+        {
+            WriteSettings(ReviewOptional);
+            var shown = ProjectSyncSettings.Load(_project).Groups;
+            var service = Service();
+
+            Assert.DoesNotThrow(() => service.Run(service.NewSources, expectedGroups: shown));
         }
 
         [Test]
@@ -223,6 +364,68 @@ namespace Hissal.AgentSkillsSync.Tests
             File.Delete(Path.Combine(_project, Lockfile.FileName));
             var error = Assert.Throws<LockfileException>(() => Service());
             Assert.That(error.Message, Does.Contain(_project).And.Contain(_root));
+        }
+
+        void SetSkillSelected(string skill, bool selected)
+        {
+            var prefs = LocalPrefs.Load(_project);
+            SkillSelection.Set(prefs, new[] { skill }, selected);
+            prefs.Save();
+        }
+
+        [Test]
+        public void Run_OptedOutSkill_IsNeverFetchedNorAskedConsentForNorOutOfSync()
+        {
+            SetSkillSelected("review", false);
+            var service = Service();
+            Assert.That(service.NewSources, Is.EqualTo(new[] { "owner/skills" }));
+
+            var summary = service.Run(new[] { "owner/skills" });
+            var prefs = LocalPrefs.Load(_project);
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(_github.Requested.Any(url => url.Contains("other/skills")), Is.False);
+            Assert.That(Directory.Exists(Path.Combine(_project, ".agents/skills/review")), Is.False);
+            Assert.That(prefs.SyncedSources, Is.EqualTo(new[] { "owner/skills" }));
+            var status = SyncStatus.Read(_project, service.Choices);
+            Assert.That(status.OutOfSyncSkills, Is.Empty);
+            Assert.That(StartupCheck.ShouldNotify(status, prefs), Is.False);
+            Assert.That(Service().Run(Array.Empty<string>()).NothingChanged, Is.True);
+        }
+
+        [Test]
+        public void Run_SkillOptedBackIn_AsksConsentForItsSourceThenInstallsIt()
+        {
+            SetSkillSelected("review", false);
+            Service().Run(new[] { "owner/skills" });
+
+            SetSkillSelected("review", true);
+
+            Assert.That(Service().NewSources, Is.EqualTo(new[] { "other/skills" }));
+            Assert.That(Assert.Throws<SourceConsentException>(() => Service().Run(Array.Empty<string>())).Sources,
+                Is.EqualTo(new[] { "other/skills" }));
+            Assert.That(Service().Run(new[] { "other/skills" }).Installed, Is.EqualTo(new[] { "review" }));
+            Assert.That(File.Exists(Path.Combine(_project, ".agents/skills/review/SKILL.md")), Is.True);
+        }
+
+        [Test]
+        public void Run_OptOutOfAnInstalledSkill_RemovesItAndKeepsItInTheGitignoreBlock()
+        {
+            var service = Service();
+            service.Run(service.NewSources);
+            var block = File.ReadAllText(Path.Combine(_project, ".agents/skills/.gitignore"));
+            var requests = _github.Requested.Count;
+
+            SetSkillSelected("review", false);
+            var summary = Service(InstallMode.Pinned).Run(Array.Empty<string>());
+
+            Assert.That(summary.Removed, Is.EqualTo(new[] { "review" }));
+            Assert.That(Directory.Exists(Path.Combine(_project, ".agents/skills/review")), Is.False);
+            Assert.That(File.Exists(Path.Combine(_project, ".agents/skills/tdd/SKILL.md")), Is.True);
+            Assert.That(File.ReadAllText(Path.Combine(_project, ".agents/skills/.gitignore")), Is.EqualTo(block));
+            Assert.That(block, Does.Contain("review"));
+            Assert.That(LocalPrefs.Load(_project).ManagedSkills[".agents/skills"], Is.EqualTo(new[] { "tdd" }));
+            Assert.That(_github.Requested.Count, Is.EqualTo(requests));
         }
     }
 }

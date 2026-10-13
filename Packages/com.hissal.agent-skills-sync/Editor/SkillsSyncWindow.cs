@@ -15,7 +15,14 @@ namespace Hissal.AgentSkillsSync.Editor
     /// A failed sync marks each skill that could not be fetched or verified with its error.
     /// The skills folders to install into are chosen at the top and stored in local prefs as soon as they change;
     /// until then they are pre-selected by autofill, and nothing is installed before Sync.
-    /// Each skill lists its status per selected folder; where that folder's agents already have the skill at user scope,
+    /// Each skill has an install checkbox (stored in local prefs at once, applied on Sync); unchecking it opts this machine
+    /// out of the skill, which then shows no folder rows. When the project settings define skill groups, the skills are
+    /// listed in one collapsible section per group, in file order, with ungrouped skills in a trailing "Other" section.
+    /// A section's own checkbox selects or deselects all its skills; a skill in several groups is listed in each, and
+    /// every row of it shows the one stored choice.
+    /// A skill locked since the contributor last looked that this machine leaves out by default is tagged NEW until they
+    /// sync or choose for it; a toggle (stored in local prefs) turns the startup notice about such skills off.
+    /// Each selected skill lists its status per selected folder; where that folder's agents already have the skill at user scope,
     /// the row names where it was found and offers an install-anyway toggle (stored in local prefs at once, applied on Sync).
     /// The project's install mode (Latest or Pinned) is shown and edited here, and saved to the committed project settings.
     /// </summary>
@@ -29,6 +36,7 @@ namespace Hissal.AgentSkillsSync.Editor
         VisualElement _newSources;
         EnumField _mode;
         HelpBox _modeHelp;
+        Toggle _notifyNewSkills;
         Label _consentNote;
         VisualElement _skillList;
         Toggle _consent;
@@ -38,6 +46,12 @@ namespace Hissal.AgentSkillsSync.Editor
         InstallMode _installMode;
         IReadOnlyDictionary<string, SkillFetchException> _failures = new Dictionary<string, SkillFetchException>();
         Lockfile _lockfile;
+        SkillSelection _skills = SkillSelection.All;
+        SkillGroups _groups = SkillGroups.None;
+        // Names of the group sections the contributor collapsed, kept across refreshes.
+        readonly HashSet<string> _collapsed = new HashSet<string>(StringComparer.Ordinal);
+        // The same for the ungrouped section, which has no name.
+        bool _ungroupedCollapsed;
         readonly HashSet<string> _confirmedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>The Unity project folder: holds this machine's local prefs and the committed project settings.</summary>
@@ -51,9 +65,12 @@ namespace Hissal.AgentSkillsSync.Editor
 
         static FolderLayout Layout => FolderLayout.Default;
 
-        /// <summary>This machine's folder selection, user-scope copies and install-anyway choices, as stored now.</summary>
-        static MachineChoices Choices() =>
-            MachineChoices.Read(SkillsRoot, LocalPrefs.Load(UnityProjectRoot), UserEnvironment.Current, Layout);
+        /// <summary>
+        /// The skills folders this machine installs into, as stored now: shown even when the lock or the project
+        /// settings cannot be read. Every other machine choice comes from the <see cref="SkillsSyncService"/>.
+        /// </summary>
+        static IReadOnlyList<SkillsFolder> SelectedFolders() =>
+            FolderSelection.Effective(LocalPrefs.Load(UnityProjectRoot), Layout, UserEnvironment.Current);
 
         [MenuItem("Window/Agent Skills Sync")]
         public static void Open() => GetWindow<SkillsSyncWindow>(Title).Show();
@@ -84,6 +101,15 @@ namespace Hissal.AgentSkillsSync.Editor
             scroll.Add(_mode);
             _modeHelp = new HelpBox("", HelpBoxMessageType.Info);
             scroll.Add(_modeHelp);
+
+            _notifyNewSkills = new Toggle("Tell me at editor start when a new optional skill is locked")
+            {
+                tooltip = "An optional skill is one this machine does not install unless you select it. " +
+                          "Stored on this machine only.",
+                style = { marginTop = 4 },
+            };
+            _notifyNewSkills.RegisterValueChangedCallback(e => SaveNotifyNewSkills(e.newValue));
+            scroll.Add(_notifyNewSkills);
 
             _newSources = new VisualElement { style = { marginTop = 4 } };
             scroll.Add(_newSources);
@@ -121,9 +147,9 @@ namespace Hissal.AgentSkillsSync.Editor
             ShowStatus(null, HelpBoxMessageType.None);
             ShowLockPath();
 
-            var choices = Choices();
-            var selected = choices.Selected;
+            var selected = SelectedFolders();
             ShowFolders(selected);
+            _notifyNewSkills.SetValueWithoutNotify(LocalPrefs.Load(UnityProjectRoot).NotifyNewSkills);
 
             try
             {
@@ -138,19 +164,41 @@ namespace Hissal.AgentSkillsSync.Editor
                     : new HashSet<string>();
                 var newSources = service.NewSources;
                 var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
-                foreach (var skill in lockfile.Skills)
+                var choices = service.Choices;
+                var skills = choices.Skills;
+                var newSkills = new HashSet<string>(service.NewSkills, StringComparer.Ordinal);
+                _groups = service.Groups;
+                var sections = _groups.Sections(lockfile);
+                var unknown = SyncText.UnknownGroupSkillsMessage(sections);
+                if (unknown.Length > 0) _skillList.Add(new HelpBox(unknown, HelpBoxMessageType.Warning));
+                foreach (var section in sections)
                 {
-                    _skillList.Add(SkillRow(skill, selected.Count == 0 ? "not installed (no folder selected)" : SyncText.PendingLabel(plan, skill.Name),
-                        _installMode, isNew.Contains(skill.Source), differs.Contains(skill.Name),
-                        _failures.TryGetValue(skill.Name, out var failure) ? failure : null));
-                    foreach (var folder in selected)
-                        _skillList.Add(FolderRow(skill, folder, plan, choices));
+                    // Without groups the list stays flat, as it was before groups existed.
+                    var rows = _groups.Groups.Count == 0 ? _skillList : GroupSection(section, skills);
+                    foreach (var skill in section.Skills)
+                    {
+                        var name = skill.Name;
+                        var install = skills.IsSelected(name);
+                        var pending = !install ? SyncText.UnselectedLabel(plan, name, skills)
+                            : selected.Count == 0 ? "not installed (no folder selected)"
+                            : SyncText.PendingLabel(plan, name);
+                        rows.Add(SkillRow(skill, pending, _installMode, install && isNew.Contains(skill.Source), differs.Contains(name),
+                            install && _failures.TryGetValue(name, out var failure) ? failure : null,
+                            install, value => SaveSkillsSelected(new[] { name }, value), newSkills.Contains(name)));
+                        // A skill this machine does not install is in no folder, so it has no per-folder status.
+                        if (!install) continue;
+                        foreach (var folder in selected)
+                            rows.Add(FolderRow(skill, folder, plan, choices));
+                    }
+                    foreach (var unsupported in section.Unsupported)
+                        rows.Add(UnsupportedRow(unsupported));
                 }
                 ShowNewSources(newSources);
                 if (lockfile.Unsupported.Count > 0)
                     _skillList.Add(new HelpBox(SyncText.UnsupportedMessage(lockfile.Unsupported), HelpBoxMessageType.Info));
 
                 _lockfile = lockfile;
+                _skills = skills;
 
                 var removals = plan.Actions.Where(a => a.Kind == PlanActionKind.Remove).Select(a => a.SkillName).Distinct().ToList();
                 if (removals.Count > 0)
@@ -204,7 +252,7 @@ namespace Hissal.AgentSkillsSync.Editor
             {
                 new ProjectSyncSettings(mode).Save(UnityProjectRoot);
             }
-            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is ProjectSyncSettingsException)
             {
                 ShowStatus($"Could not save {ProjectSyncSettings.RelativePath}: {e.Message}", HelpBoxMessageType.Error);
                 _mode.SetValueWithoutNotify(_installMode);
@@ -274,13 +322,113 @@ namespace Hissal.AgentSkillsSync.Editor
             Refresh();
         }
 
+        /// <summary>
+        /// A collapsible section for one skill group (or the ungrouped skills), added to the skill list. Its checkbox is
+        /// checked when this machine installs every skill of the section, mixed when only some, and sets them all at once.
+        /// </summary>
+        /// <returns>The element the section's skill rows go into.</returns>
+        VisualElement GroupSection(SkillGroupSection section, SkillSelection skills)
+        {
+            var names = section.Skills.Select(s => s.Name).ToList();
+            var selectedCount = names.Count(skills.IsSelected);
+            var row = new VisualElement { style = { flexDirection = FlexDirection.Row, alignItems = Align.FlexStart, marginTop = 2 } };
+            var all = new Toggle
+            {
+                tooltip = "Install every skill of this group on this machine, or none of them. Stored on this machine only; applies on the next Sync.",
+                showMixedValue = selectedCount > 0 && selectedCount < names.Count,
+                style = { marginRight = 4 },
+            };
+            all.SetValueWithoutNotify(names.Count > 0 && selectedCount == names.Count);
+            all.SetEnabled(names.Count > 0);
+            all.RegisterValueChangedCallback(e => SaveSkillsSelected(names, e.newValue));
+            row.Add(all);
+
+            var collapsed = section.Name == null ? _ungroupedCollapsed : _collapsed.Contains(section.Name);
+            var foldout = new Foldout { text = SyncText.GroupHeader(section, skills), value = !collapsed, style = { flexGrow = 1 } };
+            foldout.RegisterValueChangedCallback(e =>
+            {
+                // Rows inside the foldout raise their own change events, which bubble up to it.
+                if (e.target != foldout) return;
+                if (section.Name == null) _ungroupedCollapsed = !e.newValue;
+                else if (e.newValue) _collapsed.Remove(section.Name);
+                else _collapsed.Add(section.Name);
+            });
+            row.Add(foldout);
+            _skillList.Add(row);
+            return foldout;
+        }
+
+        /// <summary>A lock entry a group lists but this tool does not install: named, with no checkbox.</summary>
+        static VisualElement UnsupportedRow(UnsupportedSkill skill)
+        {
+            var row = new VisualElement { style = { flexDirection = FlexDirection.Row, marginBottom = 2, marginLeft = 20 } };
+            row.Add(new Label(skill.Name) { style = { width = 200, unityFontStyleAndWeight = FontStyle.Bold } });
+            row.Add(new Label(SyncText.UnsupportedInGroupLabel(skill)) { style = { flexGrow = 1 } });
+            return row;
+        }
+
+        void SaveNotifyNewSkills(bool notify)
+        {
+            try
+            {
+                var prefs = LocalPrefs.Load(UnityProjectRoot);
+                prefs.NotifyNewSkills = notify;
+                prefs.Save();
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                ShowSummary("Saving the new-skill notice setting failed: " + e.Message, HelpBoxMessageType.Error);
+                Debug.LogException(e);
+            }
+            Refresh();
+        }
+
+        /// <summary>
+        /// Stores the install choice for each skill against its own default, so only deviations are kept. A skill the
+        /// contributor chose for is no longer new, whatever they chose.
+        /// </summary>
+        void SaveSkillsSelected(IReadOnlyList<string> skillNames, bool selected)
+        {
+            try
+            {
+                var prefs = LocalPrefs.Load(UnityProjectRoot);
+                SkillSelection.Set(prefs, skillNames, selected, _groups);
+                SeenSkills.Mark(prefs, skillNames);
+                prefs.Save();
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                ShowSummary("Saving the skill choice failed: " + e.Message, HelpBoxMessageType.Error);
+                Debug.LogException(e);
+            }
+            Refresh();
+        }
+
+        /// <param name="install">Whether this machine installs the skill: the row's checkbox. <paramref name="setInstall"/> stores a change.</param>
+        /// <param name="newSkill">Whether the skill is new to the contributor (see <see cref="SeenSkills"/>): tagged NEW.</param>
         static VisualElement SkillRow(LockedSkill skill, string pending, InstallMode mode, bool newSource, bool differsFromLock,
-            SkillFetchException failure)
+            SkillFetchException failure, bool install, Action<bool> setInstall, bool newSkill)
         {
             var container = new VisualElement { style = { marginBottom = 2 } };
             var row = new VisualElement { style = { flexDirection = FlexDirection.Row } };
+            var toggle = new Toggle
+            {
+                tooltip = "Install this skill on this machine. Stored on this machine only; applies on the next Sync. " +
+                          "Uncheck to opt out: Sync then removes the tool's copy and links of it. " +
+                          "Unchecked without a choice of yours when the project's groups do not select it by default.",
+                style = { marginRight = 4 },
+            };
+            toggle.SetValueWithoutNotify(install);
+            toggle.RegisterValueChangedCallback(e => setInstall(e.newValue));
+            row.Add(toggle);
             row.Add(new Label(skill.Name) { style = { width = 200, unityFontStyleAndWeight = FontStyle.Bold } });
             row.Add(new Label(skill.Source) { style = { flexGrow = 1 } });
+            if (newSkill)
+                row.Add(new Label("NEW")
+                {
+                    tooltip = "A newly locked optional skill you have not reviewed yet. This machine does not install it unless you check it.",
+                    style = { unityFontStyleAndWeight = FontStyle.Bold, color = new Color(0.3f, 0.7f, 0.3f), marginRight = 8 },
+                });
             if (newSource) row.Add(new Label("NEW SOURCE") { style = { unityFontStyleAndWeight = FontStyle.Bold, color = new Color(0.9f, 0.6f, 0.1f), marginRight = 8 } });
             if (failure == null && !LockVerification.CanVerify(skill))
                 row.Add(mode == InstallMode.Pinned
@@ -376,7 +524,7 @@ namespace Hissal.AgentSkillsSync.Editor
         }
 
         bool HasUnconfirmedSources(Lockfile lockfile) =>
-            SourceConsent.Unconfirmed(lockfile, LocalPrefs.Load(UnityProjectRoot), _confirmedSources).Count > 0;
+            SourceConsent.Unconfirmed(lockfile, LocalPrefs.Load(UnityProjectRoot), _confirmedSources, _skills).Count > 0;
 
         void UpdateSyncButton() =>
             _syncButton.SetEnabled(_canSync && _consent.value && _lockfile != null && !HasUnconfirmedSources(_lockfile));
@@ -391,10 +539,10 @@ namespace Hissal.AgentSkillsSync.Editor
                 // Re-check against the lockfile as it is now: it may have gained a source since the window listed it.
                 var service = new SkillsSyncService(UnityProjectRoot);
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
-                var summary = service.Run(_confirmedSources, expectedMode: _installMode);
+                var summary = service.Run(_confirmedSources, expectedMode: _installMode, expectedGroups: _groups);
                 ShowSummary(SyncText.Describe(summary), summary.UserScopeDiffers.Count > 0 ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info);
             }
-            catch (Exception e) when (e is SourceConsentException || e is InstallModeChangedException)
+            catch (Exception e) when (e is SourceConsentException || e is InstallModeChangedException || e is SkillGroupsChangedException)
             {
                 ShowSummary(e.Message, HelpBoxMessageType.Warning);
             }

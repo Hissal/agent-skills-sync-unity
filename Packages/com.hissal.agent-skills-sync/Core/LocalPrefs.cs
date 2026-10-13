@@ -23,6 +23,7 @@ namespace Hissal.AgentSkillsSync
 
         const string VersionKey = "version";
         const string LastSyncedLockHashKey = "lastSyncedLockHash";
+        const string LastSyncedSelectedSkillsHashKey = "lastSyncedSelectedSkillsHash";
         const string DeclinedStateKey = "declinedState";
         const string SyncedSourcesKey = "syncedSources";
         const string SelectedFoldersKey = "selectedFolders";
@@ -30,6 +31,11 @@ namespace Hissal.AgentSkillsSync
         const string ManagedSkillsKey = "managedSkills";
         const string ManagedSkillsRootKey = "managedSkillsRoot";
         const string InstallAnywaySkillsKey = "installAnywaySkills";
+        const string OptedOutSkillsKey = "optedOutSkills";
+        const string OptedInSkillsKey = "optedInSkills";
+        const string LastSyncedDefaultSkillsKey = "lastSyncedDefaultSkills";
+        const string SeenSkillsKey = "seenSkills";
+        const string NotifyNewSkillsKey = "notifyNewSkills";
 
         readonly string _path;
         readonly List<KeyValuePair<string, object>> _members;
@@ -70,6 +76,16 @@ namespace Hissal.AgentSkillsSync
         {
             get => GetString(LastSyncedLockHashKey);
             set => Set(LastSyncedLockHashKey, value);
+        }
+
+        /// <summary>
+        /// The <see cref="SyncStatus.SelectedSkillsHash"/> as it was at the last successful sync; null in prefs written
+        /// before it was recorded, where only <see cref="LastSyncedLockHash"/> tells whether the lock changed.
+        /// </summary>
+        public string LastSyncedSelectedSkillsHash
+        {
+            get => GetString(LastSyncedSelectedSkillsHashKey);
+            set => Set(LastSyncedSelectedSkillsHashKey, value);
         }
 
         /// <summary>
@@ -149,6 +165,60 @@ namespace Hissal.AgentSkillsSync
                 }
                 Set(InstallAnywaySkillsKey, members.Count == 0 ? null : members);
             }
+        }
+
+        /// <summary>
+        /// Sorted names of the skills the contributor opted out of on this machine, whatever their default. Never null;
+        /// the member is left out while there are none. Like every skill name list here, stored items that are not
+        /// safe skill names (<see cref="SkillName"/>) are ignored. Use <see cref="SkillSelection"/> rather than this directly.
+        /// </summary>
+        public IReadOnlyList<string> OptedOutSkills
+        {
+            get => GetSortedNames(OptedOutSkillsKey);
+            set => SetSortedNames(OptedOutSkillsKey, value);
+        }
+
+        /// <summary>
+        /// Sorted names of the skills the contributor opted in to on this machine though their default is not to install
+        /// them. Never null; the member is left out while there are none. Use <see cref="SkillSelection"/> rather than this directly.
+        /// </summary>
+        public IReadOnlyList<string> OptedInSkills
+        {
+            get => GetSortedNames(OptedInSkillsKey);
+            set => SetSortedNames(OptedInSkillsKey, value);
+        }
+
+        /// <summary>
+        /// Sorted names of the locked skills the last successful sync on this machine selected by their default alone,
+        /// with no opt-in; null in prefs written before they were recorded. Kept when empty, which is not null. Tells a
+        /// removal caused by a changed default from one caused by the contributor's own choice.
+        /// Use <see cref="SkillSelection"/> rather than this directly.
+        /// </summary>
+        public IReadOnlyList<string> LastSyncedDefaultSkills
+        {
+            get => Get(LastSyncedDefaultSkillsKey) is List<object> ? GetSortedNames(LastSyncedDefaultSkillsKey) : null;
+            set => SetStringList(LastSyncedDefaultSkillsKey, value == null ? null : new SortedSet<string>(value, StringComparer.Ordinal));
+        }
+
+        /// <summary>
+        /// Sorted names of the locked skills the contributor has already been shown; null in prefs written before they
+        /// were recorded, and before the first sync or startup check seeds them. Kept when empty, which is not null.
+        /// Use <see cref="Hissal.AgentSkillsSync.SeenSkills"/> rather than this directly.
+        /// </summary>
+        public IReadOnlyList<string> SeenSkills
+        {
+            get => Get(SeenSkillsKey) is List<object> ? GetSortedNames(SeenSkillsKey) : null;
+            set => SetStringList(SeenSkillsKey, value == null ? null : new SortedSet<string>(value, StringComparer.Ordinal));
+        }
+
+        /// <summary>
+        /// Whether the startup check tells the contributor about a newly locked skill this machine does not install.
+        /// On unless turned off; only "off" is stored.
+        /// </summary>
+        public bool NotifyNewSkills
+        {
+            get => !(Get(NotifyNewSkillsKey) is bool notify) || notify;
+            set => Set(NotifyNewSkillsKey, value ? null : (object)false);
         }
 
         /// <summary>
@@ -236,6 +306,17 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Stores the strings as an array member; null removes it.</summary>
         void SetStringList(string key, IEnumerable<string> values) =>
             Set(key, values == null ? null : new List<object>(values));
+
+        /// <summary>The sorted, distinct skill names of an array member; items that are not safe skill names are ignored.</summary>
+        IReadOnlyList<string> GetSortedNames(string key) =>
+            new List<string>(new SortedSet<string>(GetStringList(key).Where(SkillName.IsSafe), StringComparer.Ordinal));
+
+        /// <summary>Stores the distinct names as a sorted array member; null or none removes it.</summary>
+        void SetSortedNames(string key, IEnumerable<string> names)
+        {
+            var sorted = new SortedSet<string>(names ?? new string[0], StringComparer.Ordinal);
+            SetStringList(key, sorted.Count == 0 ? null : sorted);
+        }
 
         object Get(string key)
         {

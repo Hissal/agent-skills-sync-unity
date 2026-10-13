@@ -8,6 +8,8 @@ namespace Hissal.AgentSkillsSync
     /// One sync of a project: read the lock, scan the folders, plan, fetch everything the plan needs (Install and Update), then apply it.
     /// Fetching (and hash verification) finishes before the first filesystem change, so a failed fetch (offline, or a
     /// source changed since it was locked) leaves the project untouched. Every skill is attempted so all failures are reported.
+    /// A finished sync records in <see cref="LocalPrefs"/> which skills it selected by their default alone, so the next
+    /// one can tell a removal caused by a changed default (<see cref="SyncSummary.NoLongerSelectedByDefault"/>).
     /// </summary>
     /// <remarks>
     /// The <see cref="InstallMode"/> decides what a source that changed since it was locked means.
@@ -32,7 +34,7 @@ namespace Hissal.AgentSkillsSync
         {
         }
 
-        /// <param name="choices">This machine's layout, folder selection, user-scope copies and install-anyway choices (see <see cref="MachineChoices.Read"/>).</param>
+        /// <param name="choices">This machine's layout, folder selection, user-scope copies, install-anyway choices and skill selection (see <see cref="MachineChoices.Read"/>).</param>
         /// <param name="mode">
         /// Defaults to <see cref="InstallMode.Pinned"/>, the behaviour without install modes. The project's own choice
         /// (default Latest) is in <see cref="ProjectSyncSettings"/>; callers pass it here and to the fetcher.
@@ -63,7 +65,7 @@ namespace Hissal.AgentSkillsSync
         public InstallPlan Plan() => Plan(Lockfile.Load(_projectRoot));
 
         /// <summary>
-        /// Locked skills whose managed canonical copy does not hash to the locked <c>computedHash</c> (as is or as a CRLF
+        /// Selected locked skills whose managed canonical copy does not hash to the locked <c>computedHash</c> (as is or as a CRLF
         /// checkout), in lock order. Skills where a mismatch can't tell are never listed: a skills.sh-hashed source
         /// (<see cref="LockVerification.CanVerify"/>) or a copy with non-ASCII paths.
         /// </summary>
@@ -76,7 +78,7 @@ namespace Hissal.AgentSkillsSync
             var layout = _choices.Layout;
             var canonical = ProjectScanner.Scan(_projectRoot, layout, prefsRoot: _prefsRoot).For(layout.Canonical);
             var canonicalPath = Paths.InProject(_projectRoot, layout.Canonical.RelativePath);
-            return lockfile.Skills
+            return _choices.Skills.SelectedIn(lockfile)
                 .Where(s => canonical.InstalledHash(s.Name) != null // a managed copy
                             && LockVerification.DiffersFromLock(s, Path.Combine(canonicalPath, s.Name)))
                 .Select(s => s.Name)
@@ -87,7 +89,7 @@ namespace Hissal.AgentSkillsSync
         public InstallPlan Plan(Lockfile lockfile) =>
             PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout, prefsRoot: _prefsRoot), _strategy.PreviewCheck);
 
-        /// <summary>Plans with this sync's folder selection, user-scope copies and install-anyway choices.</summary>
+        /// <summary>Plans with this sync's machine choices.</summary>
         InstallPlan PlanWith(Lockfile lockfile, ProjectState project, IInstalledCopyCheck check) =>
             InstallPlanner.Plan(lockfile, project, _choices, check);
 
@@ -133,7 +135,18 @@ namespace Hissal.AgentSkillsSync
             var applyCheck = _strategy.ApplyCheck(upstreamHashes);
             var plan = applyCheck == null ? toFetch : PlanWith(lockfile, project, applyCheck);
             var summary = _executor.Execute(_projectRoot, plan, fetched, _prefsRoot);
-            return differs == null ? summary : new SyncSummary(summary.Applied, summary.LinkMethods, differs);
+            // A removal of one of these was the project's doing, not the contributor's.
+            var noLongerSelectedByDefault = lockfile.Skills.Select(s => s.Name).Where(_choices.Skills.IsNoLongerSelectedByDefault).ToList();
+            RecordSyncedDefaults(lockfile);
+            return new SyncSummary(summary.Applied, summary.LinkMethods, differs, noLongerSelectedByDefault);
+        }
+
+        /// <summary>Reloads the prefs the executor just wrote and records which skills this sync selected by their default alone.</summary>
+        void RecordSyncedDefaults(Lockfile lockfile)
+        {
+            var prefs = LocalPrefs.Load(_prefsRoot ?? _projectRoot);
+            _choices.Skills.RecordSynced(prefs, lockfile);
+            prefs.Save();
         }
     }
 }
