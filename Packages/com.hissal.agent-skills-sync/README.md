@@ -73,12 +73,15 @@ Open it from **Window → Agent Skills Sync**. From top to bottom:
 - **Install mode**: Latest or Pinned, with a note on what the mode does (see [Install mode](#install-mode)).
 - **New sources**: a warning, and an "I trust the new source …" toggle for each source repo this machine has not
   synced before.
-- **Skills locked in `skills-lock.json`**: each skill with an install checkbox, its source repo and what Sync will
+- **Skills locked in `skills-lock.json`**: when the project defines [skill groups](#skill-groups), one collapsible
+  section per group with a checkbox that selects all its skills, then the ungrouped skills under **Other**. A warning
+  names any skill a group lists that is not locked. Each skill has an install checkbox, its source repo and what Sync will
   do to it (to install, to update, to link, installed, left alone, skipped). Tags: `NEW SOURCE`, `differs from lock`,
   and `can't verify lock hash` / `hash not verifiable` (see [Install mode](#install-mode)). Under each skill there is
   one row per selected folder, with its status there, any copy you already have at user scope, and an install-anyway
   toggle. A skill whose checkbox you cleared has no folder rows and reads "not installed (opted out)" (see
-  [Opting out of a skill](#opting-out-of-a-skill)).
+  [Opting out of a skill](#opting-out-of-a-skill)); one its groups leave out by default reads "not installed (not
+  selected by default)".
 - **I trust these sources. Skills run with my agent's permissions.**: the consent box. **Sync** stays disabled until
   it is ticked and every new source is confirmed. Consent and confirmations are not saved: they reset on Refresh and
   after each sync.
@@ -87,14 +90,17 @@ Open it from **Window → Agent Skills Sync**. From top to bottom:
 ### Startup check
 
 Once per editor session the tool checks the project. If `skills-lock.json` changed since the last sync on this
-machine, or locked skills are missing, it offers to open the sync window. **Not Now** keeps it quiet until something
+machine, locked skills are missing, or installed skills are waiting to be removed, it offers to open the sync window. **Not Now** keeps it quiet until something
 changes. Nothing is installed without the window's consent.
 
 - The check is cheap: it looks at folder names, links and the lockfile's hash, never at skill contents. An installed
   copy that differs from the lock is caught through the lockfile change that caused it; the window, which hashes
   every copy, shows the details.
-- Skills you opted out of don't count. Locking, updating or removing one does not make the check offer a sync; it
-  only does while the tool's copy of one is still waiting to be removed.
+- Skills this machine does not install (opted out of, or not selected by default) don't count. Locking, updating or
+  removing one does not make the check offer a sync; it only does while the tool's copy of one is still waiting to
+  be removed.
+- A change to the project's [skill groups](#skill-groups) that selects a skill you don't have, or stops selecting
+  one you have, makes the check offer a sync, naming the skills.
 - While no skills folder is selected, it does not offer a sync. It can still ask once whether to add a folder whose
   agent home appeared (see [Choosing skills folders](#choosing-skills-folders-per-machine)).
 
@@ -115,7 +121,7 @@ changes. Nothing is installed without the window's consent.
 3. Commit:
    - `skills-lock.json`;
    - the generated `.agents/skills/.gitignore` and `.claude/skills/.gitignore`;
-   - `ProjectSettings/AgentSkillsSync.json`, if you changed the install mode.
+   - `ProjectSettings/AgentSkillsSync.json`, if you changed the install mode or defined [skill groups](#skill-groups).
 
 Teammates install the package with the project, and the startup check offers them the sync.
 
@@ -197,11 +203,11 @@ to retain them. The committed `.gitignore` blocks do not change because of these
 
 ## Opting out of a skill
 
-Every locked skill is installed by default. To leave one out on this machine, clear its checkbox in the window's
-skill list.
+Every locked skill is installed by default, unless the project's [skill groups](#skill-groups) leave it out. To
+leave one out on this machine, clear its checkbox in the window's skill list.
 
 - **Per machine, per skill, all folders.** The choice is stored in `UserSettings/AgentSkillsSync.json`
-  (`optedOutSkills`) as soon as you change the checkbox, and applies on the next sync. It is never committed, so it
+  (`optedOutSkills`; `optedInSkills` for a skill you ticked that is not selected by default) as soon as you change the checkbox, and applies on the next sync. It is never committed, so it
   does not affect your teammates.
 - **The next sync removes the skill**: the tool's links to it first, then its copy in `.agents/skills`. A folder
   with the same name that the tool did not install is not touched.
@@ -211,6 +217,69 @@ skill list.
 - The committed `.gitignore` blocks still list the skill, so they stay the same on every machine.
 - This differs from **use mine** (see [above](#skills-you-already-have-at-user-scope)), which skips a skill in one
   folder because your agents already have their own copy of it.
+
+## Skill groups
+
+A project can sort its locked skills into **skill groups** and decide, per group, whether contributors install its
+skills by default. Typical use: a "recommended" group everyone gets, and optional groups ("art", "audio") each
+contributor picks from. Groups are defined in `ProjectSettings/AgentSkillsSync.json`, which you commit, next to
+`installMode`:
+
+```json
+{
+  "installMode": "latest",
+  "ungroupedSelectedByDefault": true,
+  "groups": {
+    "recommended": { "selectedByDefault": true, "skills": ["tdd", "code-review"] },
+    "art": { "selectedByDefault": false, "skills": ["ui-uitk"] }
+  }
+}
+```
+
+- `groups` is an object. Each key is a group name of your choice; the window lists the groups in file order.
+- `skills` lists skill names exactly as they are keyed in `skills-lock.json`. A missing `skills` is an empty group.
+- `selectedByDefault` says whether a contributor who made no choice installs the group's skills. Missing means
+  `true`.
+- `ungroupedSelectedByDefault` is the same for locked skills that no group lists. Missing means `true`, so a
+  project without groups installs every locked skill, as before.
+- A skill may be in several groups. It is installed once, and by default when **any** of its groups has
+  `selectedByDefault: true`.
+
+**To edit the groups** (by hand, or by asking your agent), change this file only; there is no group editor in the
+window, and `skills-lock.json` is never touched:
+
+- "Add skill X to group Y": append `"X"` to `groups.Y.skills`. If group `Y` does not exist, add
+  `"Y": { "selectedByDefault": true, "skills": ["X"] }` to `groups` (use `false` for an optional group).
+- "Move skill X from group Y to group Z": remove `"X"` from `groups.Y.skills` and append it to `groups.Z.skills`.
+- "Make group Y optional": set `groups.Y.selectedByDefault` to `false`.
+- Keep every other member of the file as it is, and check that `X` is a key of `skills` in `skills-lock.json`.
+
+What contributors see and get:
+
+- The window lists each group as a collapsible section, then the ungrouped skills under **Other**. The checkbox
+  beside a group's name selects or clears all its skills at once. A skill in several groups is listed in each, and
+  all its rows show the same checkbox state.
+- **A contributor's own choice always wins.** Ticking or clearing a skill's checkbox is stored on that machine (see
+  [Opting out of a skill](#opting-out-of-a-skill)) and holds whatever the groups say later. Only a choice that
+  differs from the skill's default is stored, so a skill you never touched keeps following the project.
+- **Changing a group's defaults adds or removes skills on contributors' next sync.** Defaults are read again on
+  every sync. Moving a skill into a selected-by-default group installs it for everyone who never chose. Moving it
+  out of every selected-by-default group, or setting `ungroupedSelectedByDefault` to `false`, **removes** the tool's
+  copy and links of it from every machine that never chose, on that machine's next sync. The window shows such a
+  skill as "not selected by default (removed on Sync)" beforehand, and the sync summary names it under "Removed
+  because no longer selected by default". A contributor who ticked the skill keeps it.
+- A skill that is not selected is never downloaded, needs no source confirmation and does not count as out of sync.
+  The generated `.gitignore` blocks list every locked skill whatever the groups say.
+
+Mistakes in the file:
+
+- Invalid JSON, or a member of the wrong type (`groups` that is not an object, a `selectedByDefault` that is not
+  `true` or `false`, a `skills` that is not a list of names, the same group name twice), is an error: the window
+  shows a message naming the member, such as `groups.art.selectedByDefault`, and nothing syncs until it is fixed.
+- A name in `skills` that `skills-lock.json` does not have (a typo, or a skill that was removed) is only a warning
+  in the window. The sync ignores the name and proceeds.
+- A listed lock entry with a source type the tool does not install shows in its group as "not installable by this
+  tool".
 
 ## Install mode
 
@@ -225,7 +294,7 @@ upstream has changed. It is set for the whole project in `ProjectSettings/AgentS
 ```
 
 When the file or the field is missing, the mode is **Latest**. Change it in the window's **Install mode** field,
-which writes the file.
+which writes the field and keeps the rest of the file.
 
 - **Latest** (default): installs each skill's current upstream copy. A skill whose upstream changed since it was
   locked is installed and marked **differs from lock** in the window and the sync summary. Every Latest sync

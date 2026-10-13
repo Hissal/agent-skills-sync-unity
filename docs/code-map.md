@@ -24,6 +24,8 @@ Editor, which hands their results to the `SkillSync` constructor.
      a `UserScopeState` of `UserScopeCopy`s.
      `MachineChoices` bundles this machine's layout, `FolderSelection`, `UserScopeState`, `InstallAnywayChoices`
      and `SkillSelection` (which locked skills it installs: the contributor's opt-out or opt-in, else the default).
+     The default comes from the project's `SkillGroups` (`SkillGroups.IsSelectedByDefault`), which the caller loads
+     with `ProjectSyncSettings` and hands to `MachineChoices.Read`.
 3. **Plan.** `InstallPlanner` turns lock + `ProjectState` + `MachineChoices` into an `InstallPlan` of `PlanAction`s
    (`PlanActionKind`), deciding whether a managed copy is current through an `IInstalledCopyCheck`. A skill
    `SkillSelection` leaves out gets no action but the withdrawal of its managed entries, so step 4 never fetches it.
@@ -32,17 +34,19 @@ Editor, which hands their results to the `SkillSync` constructor.
    changed source is refused, and which check plans step 5. Every `SkillFetchException` is collected and thrown
    as one `SyncAbortedException` before anything on disk changes. `LockVerification` compares copies with the lock.
 5. **Apply.** `PlanExecutor` copies canonical skills, links them into link folders through an `ILinkCreator`, writes
-   each folder's `ManagedStateFile` block and records managed skills in `LocalPrefs`. Returns a `SyncSummary`.
+   each folder's `ManagedStateFile` block and records managed skills in `LocalPrefs`. Returns a `SyncSummary`,
+   which names removals caused by a changed group default apart (`SyncSummary.NoLongerSelectedByDefault`).
 
 `SyncStatus` is the cheap, offline cousin of steps 1–3 (names and links only; it hashes no project copy, only
-user-scope copies a skip checks against the lock) for the startup check.
+user-scope copies a skip checks against the lock) for the startup check. `SyncStatus.ToRemove` tells skills only
+waiting for removal from missing ones.
 
 ## State
 
 | State | Where | Read by | Written by |
 | --- | --- | --- | --- |
 | `Lockfile` | `skills-lock.json` (committed, `skills` CLI format) | `SkillSync`, `SyncStatus`, Editor | never by this package |
-| `ProjectSyncSettings` (`InstallMode`) | `ProjectSettings/AgentSkillsSync.json` (committed) | `SkillsSyncWindow` | `SkillsSyncWindow` |
+| `ProjectSyncSettings` (`InstallMode`, `SkillGroups`) | `ProjectSettings/AgentSkillsSync.json` (committed) | `SkillsSyncService`, `StartupNotifier` | `SkillsSyncWindow` (`InstallMode` only; groups are edited in the file and kept by `ProjectSyncSettings.Save`) |
 | `LocalPrefs` | `UserSettings/AgentSkillsSync.json` (per machine) | the ↳ rows' readers, `ProjectScanner` | `PlanExecutor`, `SkillsSyncWindow`, `StartupNotifier` |
 | ↳ folder selection | `LocalPrefs.SelectedFolders` / declined offers | `FolderSelection` | `FolderSelection.Save` |
 | ↳ install anyway | `LocalPrefs.InstallAnywaySkills` | `InstallAnywayChoices` | `InstallAnywayChoices.Set` |
@@ -69,18 +73,20 @@ The `Record*`/`Set`/`Save` helpers change a loaded `LocalPrefs`; the caller then
 ## Editor side
 
 - `SkillsSyncService` — shared setup for the window and optional Pipeline `skills_sync` command: resolves roots,
-  loads one lock and mode, reads machine choices, checks source consent, runs that snapshot, then records consent
+  loads one lock, mode and `SkillGroups`, reads machine choices, checks source consent, runs that snapshot, then records consent
   and notification state. Planning is offline; the fetcher is created only after the consent and mode checks.
   Tests pass a temp user environment and a fetcher backed by `FakeGitHub`.
 - `SkillsSyncCommand` (`Pipeline/`) — parses invocation-only options and returns a structured plan or sync summary.
   Its Editor assembly is enabled by a package version define only when `com.unity.pipeline` is installed.
 - `SkillsSyncWindow` — the sync window: folder selection, plan preview, source consent (`SourceConsent`), install
-  mode, per-skill install checkboxes (`SkillSelection.Set`), install-anyway toggles, then `SkillsSyncService.Run`. `UnityProjectRoot` holds `LocalPrefs` and
+  mode, the skills in one section per `SkillGroupSection` (`SkillGroups.Sections`) with per-group and per-skill
+  install checkboxes (`SkillSelection.Set`), install-anyway toggles, then `SkillsSyncService.Run`. `SyncText` holds its texts. `UnityProjectRoot` holds `LocalPrefs` and
   `ProjectSyncSettings`; `SkillsRoot` holds `skills-lock.json` and the skills folders.
 - `StartupNotifier` — once per editor session: offers newly found folders (`FolderSelection.Offers`), reads
   `SyncStatus`, and asks `StartupCheck.ShouldNotify` whether to offer opening the window.
 - `StartupCheck` (Core) — the notify decision; `StartupNotifier` records declines, `SkillsSyncService` records syncs.
-  `StartupCheck.LockChanged` ignores a lock change that touches only skills this machine does not install.
+  `StartupCheck.LockChanged` ignores a lock change that touches only skills this machine does not install. A changed
+  group default moves no lock hash; it notifies through `SyncStatus.OutOfSyncSkills`.
 
 ## Tests
 
