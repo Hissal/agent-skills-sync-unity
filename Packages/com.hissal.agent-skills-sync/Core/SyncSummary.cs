@@ -6,9 +6,15 @@ namespace Hissal.AgentSkillsSync
     /// <summary>What a sync did, for the window's summary.</summary>
     public sealed class SyncSummary
     {
+        readonly HashSet<string> _unselectedByDefault;
+
+        /// <param name="unselectedByDefault">
+        /// Names of locked skills this machine leaves out by their default alone, with no opt-out; null = none.
+        /// </param>
         public SyncSummary(IReadOnlyList<PlanAction> applied, IReadOnlyDictionary<PlanAction, LinkMethod> linkMethods = null,
-            IReadOnlyList<string> differsFromLock = null)
+            IReadOnlyList<string> differsFromLock = null, IEnumerable<string> unselectedByDefault = null)
         {
+            _unselectedByDefault = new HashSet<string>(unselectedByDefault ?? Enumerable.Empty<string>(), System.StringComparer.Ordinal);
             Applied = applied;
             LinkMethods = linkMethods ?? new Dictionary<PlanAction, LinkMethod>();
             DiffersFromLock = differsFromLock ?? new List<string>();
@@ -20,6 +26,15 @@ namespace Hissal.AgentSkillsSync
         /// tell (skills.sh-hashed sources, non-ASCII paths) are not listed.
         /// </summary>
         public IReadOnlyList<string> DiffersFromLock { get; }
+
+        /// <summary>
+        /// Names of skills whose managed copy or links this sync deleted because the project's skill groups no longer
+        /// select them by default and the contributor made no choice (<see cref="SkillGroups"/>): never an opt-out.
+        /// Also listed in <see cref="Removed"/> or <see cref="Unlinked"/>.
+        /// </summary>
+        public IReadOnlyList<string> NoLongerSelectedByDefault =>
+            Applied.Where(a => (a.Kind == PlanActionKind.Remove || a.Kind == PlanActionKind.Unlink) && _unselectedByDefault.Contains(a.SkillName))
+                .Select(a => a.SkillName).Distinct().ToList();
 
         /// <summary>Every action applied, in order, including LeaveForeign (which changes nothing).</summary>
         public IReadOnlyList<PlanAction> Applied { get; }
@@ -38,7 +53,7 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Names of skills whose canonical copy was replaced with the fetched one.</summary>
         public IReadOnlyList<string> Updated => NamesOf(PlanActionKind.Update);
 
-        /// <summary>Names of skills whose managed copy or links were deleted (no longer locked, or no folder selected).</summary>
+        /// <summary>Names of skills whose managed copy or links were deleted (no longer locked, no longer selected, or no folder selected).</summary>
         public IReadOnlyList<string> Removed => NamesOf(PlanActionKind.Remove);
 
         /// <summary>Names of locked skills left alone in at least one folder because the entry there is not the tool's.</summary>

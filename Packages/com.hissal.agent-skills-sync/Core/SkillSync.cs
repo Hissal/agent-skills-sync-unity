@@ -133,7 +133,10 @@ namespace Hissal.AgentSkillsSync
             var applyCheck = _strategy.ApplyCheck(upstreamHashes);
             var plan = applyCheck == null ? toFetch : PlanWith(lockfile, project, applyCheck);
             var summary = _executor.Execute(_projectRoot, plan, fetched, _prefsRoot);
-            return differs == null ? summary : new SyncSummary(summary.Applied, summary.LinkMethods, differs);
+            // Left out by the default alone: a removal of one of these was the project's doing, not the contributor's.
+            var unselectedByDefault = lockfile.Skills.Select(s => s.Name)
+                .Where(name => !_choices.Skills.IsSelected(name) && !_choices.Skills.IsOptedOut(name));
+            return new SyncSummary(summary.Applied, summary.LinkMethods, differs, unselectedByDefault);
         }
     }
 }

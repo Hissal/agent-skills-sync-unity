@@ -395,6 +395,69 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(ShouldNotifyWithCodeReviewOptedOut(), Is.False);
         }
 
+        /// <summary>This machine made no choice; the project's groups leave code-review unselected by default.</summary>
+        static MachineChoices CodeReviewOffByDefault() =>
+            new MachineChoices(skills: new SkillSelection(selectedByDefault: name => name != "code-review"));
+
+        bool ShouldNotifyWith(MachineChoices choices) => StartupCheck.ShouldNotify(SyncStatus.Read(_project, choices), Prefs);
+
+        // A project settings change moves no lock hash, so these reach the check through the out-of-sync skills.
+        [Test]
+        public void ShouldNotify_DefaultStopsSelectingAnInstalledSkill_NotifiesUntilItIsRemoved()
+        {
+            InstallAll();
+            RecordSynced();
+
+            var status = SyncStatus.Read(_project, CodeReviewOffByDefault());
+
+            Assert.That(status.OutOfSyncSkills, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(status.ToRemove, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(StartupCheck.LockChanged(status, Prefs), Is.False, "the lockfile did not change");
+            Assert.That(ShouldNotifyWith(CodeReviewOffByDefault()), Is.True);
+        }
+
+        [Test]
+        public void ShouldNotify_DefaultStartsSelectingASkillThatIsNotInstalled_Notifies()
+        {
+            var layout = FolderLayout.Default;
+            var plan = InstallPlanner.Plan(Lockfile.Load(_project), ProjectScanner.Scan(_project, layout), CodeReviewOffByDefault());
+            new PlanExecutor().Execute(_project, plan, new Dictionary<string, string> { ["tdd"] = Path.Combine(FixturesRoot, "minimal") });
+            var prefs = Prefs;
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(_project, CodeReviewOffByDefault()));
+            prefs.Save();
+            Assert.That(ShouldNotifyWith(CodeReviewOffByDefault()), Is.False, "unselected by default and not installed is in sync");
+
+            var status = SyncStatus.Read(_project);
+
+            Assert.That(status.OutOfSyncSkills, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(status.ToRemove, Is.Empty);
+            Assert.That(ShouldNotify(), Is.True);
+        }
+
+        [Test]
+        public void ShouldNotify_DeclinedThenADefaultStopsSelectingAnInstalledSkill_NotifiesAgain()
+        {
+            InstallAll();
+            RecordSynced();
+            Unlink(".claude/skills/tdd");
+            RecordDeclined();
+            Assert.That(ShouldNotify(), Is.False);
+
+            Assert.That(ShouldNotifyWith(CodeReviewOffByDefault()), Is.True);
+        }
+
+        [Test]
+        public void Read_MissingSkill_IsNotListedAsToRemove()
+        {
+            InstallAll();
+            Unlink(".claude/skills/tdd");
+
+            var status = SyncStatus.Read(_project);
+
+            Assert.That(status.OutOfSyncSkills, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(status.ToRemove, Is.Empty);
+        }
+
         [Test]
         public void ShouldNotify_PrefsSyncedBeforeSkillSelectionExisted_StayQuietUntilTheLockChanges()
         {

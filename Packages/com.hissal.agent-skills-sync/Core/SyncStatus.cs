@@ -14,14 +14,16 @@ namespace Hissal.AgentSkillsSync
         /// <param name="noFolderSelected">The contributor selected no skills folder, so the check stays quiet.</param>
         /// <param name="selectedFolders">Relative paths of the skills folders the status was read for.</param>
         /// <param name="selectedSkillsHash">See <see cref="LockfileHash.OfSelected"/>; null when the lockfile is unusable.</param>
+        /// <param name="toRemove">The <paramref name="outOfSyncSkills"/> a sync would only remove or unlink; null = none.</param>
         public SyncStatus(string lockHash, IEnumerable<string> outOfSyncSkills, bool noFolderSelected = false,
-            IEnumerable<string> selectedFolders = null, string selectedSkillsHash = null)
+            IEnumerable<string> selectedFolders = null, string selectedSkillsHash = null, IEnumerable<string> toRemove = null)
         {
             LockHash = lockHash;
             SelectedSkillsHash = selectedSkillsHash;
             NoFolderSelected = noFolderSelected;
             OutOfSyncSkills = Sorted(outOfSyncSkills);
             SelectedFolders = Sorted(selectedFolders);
+            ToRemove = Sorted(toRemove).Where(OutOfSyncSkills.Contains).ToList();
         }
 
         static IReadOnlyList<string> Sorted(IEnumerable<string> names) =>
@@ -44,6 +46,12 @@ namespace Hissal.AgentSkillsSync
         /// <see cref="LockHash"/> instead.
         /// </summary>
         public IReadOnlyList<string> OutOfSyncSkills { get; }
+
+        /// <summary>
+        /// The sorted <see cref="OutOfSyncSkills"/> a sync would only take away from: every change is a removal or an
+        /// unlink, as for an installed skill that is no longer selected or locked. The others are missing somewhere.
+        /// </summary>
+        public IReadOnlyList<string> ToRemove { get; }
 
         /// <summary>True when no skills folder is selected: nothing is installed and the startup check never notifies.</summary>
         public bool NoFolderSelected { get; }
@@ -90,6 +98,7 @@ namespace Hissal.AgentSkillsSync
             var selection = choices.Selected;
             var noFolderSelected = selection != null && !layout.Folders.Any(f => selection.Any(s => s?.RelativePath == f.RelativePath));
             IEnumerable<string> outOfSync;
+            IEnumerable<string> toRemove = null;
             string selectedSkillsHash = null;
             try
             {
@@ -99,7 +108,11 @@ namespace Hissal.AgentSkillsSync
                 selectedSkillsHash = LockfileHash.OfSelected(lockfile, choices.Skills);
                 var plan = InstallPlanner.Plan(lockfile, project, choices, FixedCheck.AlwaysCurrent);
                 // A left-alone (foreign) entry is never synced, so it does not count as out of sync.
-                outOfSync = plan.Actions.Where(a => a.ChangesProject).Select(a => a.SkillName);
+                var changes = plan.Actions.Where(a => a.ChangesProject).ToList();
+                outOfSync = changes.Select(a => a.SkillName);
+                toRemove = changes.GroupBy(a => a.SkillName)
+                    .Where(g => g.All(a => a.Kind == PlanActionKind.Remove || a.Kind == PlanActionKind.Unlink))
+                    .Select(g => g.Key);
             }
             catch (LockfileException)
             {
@@ -108,7 +121,7 @@ namespace Hissal.AgentSkillsSync
             var selectedFolders = layout.Folders
                 .Where(f => selection == null || selection.Any(s => s?.RelativePath == f.RelativePath))
                 .Select(f => f.RelativePath);
-            return new SyncStatus(lockHash, outOfSync, noFolderSelected, selectedFolders, selectedSkillsHash);
+            return new SyncStatus(lockHash, outOfSync, noFolderSelected, selectedFolders, selectedSkillsHash, toRemove);
         }
     }
 }

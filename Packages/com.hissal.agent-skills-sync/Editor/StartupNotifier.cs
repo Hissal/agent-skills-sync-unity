@@ -40,7 +40,7 @@ namespace Hissal.AgentSkillsSync.Editor
 
                 if (EditorUtility.DisplayDialog(
                         "Agent Skills Sync",
-                        Describe(status, prefs),
+                        SyncText.StartupMessage(status, prefs),
                         "Open Sync Window",
                         "Not Now"))
                 {
@@ -73,17 +73,6 @@ namespace Hissal.AgentSkillsSync.Editor
                 else FolderSelection.Decline(prefs, folder);
                 prefs.Save();
             }
-        }
-
-        static string Describe(SyncStatus status, LocalPrefs prefs)
-        {
-            var reason = prefs.LastSyncedLockHash == null
-                ? "This project's agent skills have not been synced on this machine yet."
-                : StartupCheck.LockChanged(status, prefs)
-                ? $"{Lockfile.FileName} changed since the last sync."
-                : $"Some locked skills are missing: {string.Join(", ", status.OutOfSyncSkills)}.";
-            return reason + "\n\nOpen the sync window to review and install them? If you choose Not Now, " +
-                   "you won't be asked again until something changes.";
         }
     }
 }

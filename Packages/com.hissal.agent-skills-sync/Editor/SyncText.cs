@@ -28,6 +28,41 @@ namespace Hissal.AgentSkillsSync.Editor
                 ? "opted out (removed on Sync)"
                 : "not installed (opted out)";
 
+        /// <summary>
+        /// The row status of a skill this machine does not install: opted out of, or left out by its default alone, and
+        /// whether Sync still has a managed copy or link to remove.
+        /// </summary>
+        public static string UnselectedLabel(InstallPlan plan, string skillName, SkillSelection skills)
+        {
+            if (skills.IsOptedOut(skillName)) return OptedOutLabel(plan, skillName);
+            return plan.Actions.Any(a => a.SkillName == skillName && (a.Kind == PlanActionKind.Remove || a.Kind == PlanActionKind.Unlink))
+                ? "not selected by default (removed on Sync)"
+                : "not installed (not selected by default)";
+        }
+
+        /// <summary>The startup notification: why the project is out of sync, and the offer to open the sync window.</summary>
+        public static string StartupMessage(SyncStatus status, LocalPrefs prefs)
+        {
+            string reason;
+            if (prefs.LastSyncedLockHash == null)
+                reason = "This project's agent skills have not been synced on this machine yet.";
+            else if (StartupCheck.LockChanged(status, prefs))
+                reason = $"{Lockfile.FileName} changed since the last sync.";
+            else
+            {
+                // A skill only waiting for removal is not missing: the project or the contributor stopped selecting it.
+                var missing = status.OutOfSyncSkills.Except(status.ToRemove).ToList();
+                var parts = new List<string>();
+                if (missing.Count > 0) parts.Add($"Some locked skills are missing: {string.Join(", ", missing)}.");
+                if (status.ToRemove.Count > 0)
+                    parts.Add("Some installed skills are no longer selected and will be removed on the next sync: " +
+                              $"{string.Join(", ", status.ToRemove)}.");
+                reason = string.Join(" ", parts);
+            }
+            return reason + "\n\nOpen the sync window to review and sync them? If you choose Not Now, " +
+                   "you won't be asked again until something changes.";
+        }
+
         /// <summary>Names the lock entries whose source type this tool does not install, and says it leaves them alone.</summary>
         public static string UnsupportedMessage(IReadOnlyList<UnsupportedSkill> unsupported) =>
             "Not installed by this tool (only \"github\" sources are; these are left to whatever installs them): " +
@@ -119,6 +154,9 @@ namespace Hissal.AgentSkillsSync.Editor
             Line(text, "Installed", summary.Installed);
             Line(text, "Updated", summary.Updated);
             Line(text, "Removed", summary.Removed);
+            if (summary.NoLongerSelectedByDefault.Count > 0)
+                text.AppendLine($"Removed because no longer selected by default ({summary.NoLongerSelectedByDefault.Count}): " +
+                                $"{string.Join(", ", summary.NoLongerSelectedByDefault)}. Check a skill in the list to keep it installed.");
             Line(text, "Skipped (not managed by the tool)", summary.Skipped);
             if (summary.SkippedForUserScope.Count > 0)
                 text.AppendLine($"Skipped in favour of your user-scope copy ({summary.SkippedForUserScope.Count}): {string.Join(", ", summary.SkippedForUserScope)}");
