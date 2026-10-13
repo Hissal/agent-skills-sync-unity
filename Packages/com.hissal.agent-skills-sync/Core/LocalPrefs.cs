@@ -169,7 +169,8 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Sorted names of the skills the contributor opted out of on this machine, whatever their default. Never null;
-        /// the member is left out while there are none. Use <see cref="SkillSelection"/> rather than this directly.
+        /// the member is left out while there are none. Like every skill name list here, stored items that are not
+        /// safe skill names (<see cref="SkillName"/>) are ignored. Use <see cref="SkillSelection"/> rather than this directly.
         /// </summary>
         public IReadOnlyList<string> OptedOutSkills
         {
@@ -306,8 +307,9 @@ namespace Hissal.AgentSkillsSync
         void SetStringList(string key, IEnumerable<string> values) =>
             Set(key, values == null ? null : new List<object>(values));
 
+        /// <summary>The sorted, distinct skill names of an array member; items that are not safe skill names are ignored.</summary>
         IReadOnlyList<string> GetSortedNames(string key) =>
-            new List<string>(new SortedSet<string>(GetStringList(key), StringComparer.Ordinal));
+            new List<string>(new SortedSet<string>(GetStringList(key).Where(SkillName.IsSafe), StringComparer.Ordinal));
 
         /// <summary>Stores the distinct names as a sorted array member; null or none removes it.</summary>
         void SetSortedNames(string key, IEnumerable<string> names)

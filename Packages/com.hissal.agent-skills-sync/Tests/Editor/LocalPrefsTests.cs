@@ -20,6 +20,12 @@ namespace Hissal.AgentSkillsSync.Tests
 
         string PrefsPath => Path.Combine(_project, "UserSettings", "AgentSkillsSync.json");
 
+        void WritePrefs(string json)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(PrefsPath));
+            File.WriteAllText(PrefsPath, json);
+        }
+
         [SetUp]
         public void SetUp()
         {
@@ -90,6 +96,70 @@ namespace Hissal.AgentSkillsSync.Tests
             prefs.SeenSkills = new string[0];
             prefs.Save();
             Assert.That(LocalPrefs.Load(_project).SeenSkills, Is.Empty);
+        }
+
+        [Test]
+        public void LastSyncedDefaultSkills_Unset_IsNull()
+        {
+            Assert.That(LocalPrefs.Load(_project).LastSyncedDefaultSkills, Is.Null);
+        }
+
+        [Test]
+        public void LastSyncedDefaultSkills_SaveThenLoad_RoundTripsSortedAndKeepsAnEmptyList()
+        {
+            var prefs = LocalPrefs.Load(_project);
+            prefs.LastSyncedDefaultSkills = new[] { "tdd", "code-review", "tdd" };
+            prefs.Save();
+            Assert.That(LocalPrefs.Load(_project).LastSyncedDefaultSkills, Is.EqualTo(new[] { "code-review", "tdd" }));
+
+            prefs.LastSyncedDefaultSkills = new string[0];
+            prefs.Save();
+            Assert.That(LocalPrefs.Load(_project).LastSyncedDefaultSkills, Is.Empty);
+        }
+
+        [TestCase("\"tdd\"")]
+        [TestCase("3")]
+        [TestCase("true")]
+        [TestCase("null")]
+        [TestCase("{ \"tdd\": true }")]
+        public void SkillNameLists_WrongType_ReadAsUnset(string value)
+        {
+            WritePrefs($@"{{ ""optedOutSkills"": {value}, ""optedInSkills"": {value}, ""seenSkills"": {value}, ""lastSyncedDefaultSkills"": {value} }}");
+
+            var prefs = LocalPrefs.Load(_project);
+
+            Assert.That(prefs.OptedOutSkills, Is.Empty);
+            Assert.That(prefs.OptedInSkills, Is.Empty);
+            Assert.That(prefs.SeenSkills, Is.Null);
+            Assert.That(prefs.LastSyncedDefaultSkills, Is.Null);
+        }
+
+        [TestCase("optedOutSkills")]
+        [TestCase("optedInSkills")]
+        [TestCase("seenSkills")]
+        [TestCase("lastSyncedDefaultSkills")]
+        public void SkillNameLists_ItemsThatAreNotSafeSkillNames_AreIgnored(string member)
+        {
+            WritePrefs($@"{{ ""{member}"": [""tdd"", 3, null, true, [""art""], {{}}, """", ""../../Assets"", ""bad:name"", ""code-review""] }}");
+
+            var prefs = LocalPrefs.Load(_project);
+            var names = member == "optedOutSkills" ? prefs.OptedOutSkills
+                : member == "optedInSkills" ? prefs.OptedInSkills
+                : member == "seenSkills" ? prefs.SeenSkills
+                : prefs.LastSyncedDefaultSkills;
+
+            Assert.That(names, Is.EqualTo(new[] { "code-review", "tdd" }));
+        }
+
+        [TestCase("\"off\"")]
+        [TestCase("0")]
+        [TestCase("null")]
+        [TestCase("[false]")]
+        public void NotifyNewSkills_WrongType_IsOn(string value)
+        {
+            WritePrefs($@"{{ ""notifyNewSkills"": {value} }}");
+
+            Assert.That(LocalPrefs.Load(_project).NotifyNewSkills, Is.True);
         }
 
         [Test]
