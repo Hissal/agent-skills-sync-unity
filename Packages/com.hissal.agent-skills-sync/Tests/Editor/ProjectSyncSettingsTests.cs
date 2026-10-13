@@ -164,6 +164,42 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Load_GroupListingANameThatIsNotASafeSkillName_KeepsItForTheNotInTheLockWarning()
+        {
+            WriteSettings("{ \"groups\": { \"art\": { \"skills\": [\"ui-uitk\", \"../../Assets\", \"bad:name\", \"\"] } } }");
+
+            var groups = ProjectSyncSettings.Load(_project).Groups;
+
+            Assert.That(groups.Groups.Single().Skills, Is.EqualTo(new[] { "ui-uitk", "../../Assets", "bad:name", "" }));
+            var locked = new Lockfile(new[] { new LockedSkill("ui-uitk", "owner/repo", "github", "skills/ui-uitk/SKILL.md", "hash") }, new UnsupportedSkill[0]);
+            Assert.That(groups.Sections(locked).Single().Unknown, Is.EqualTo(new[] { "../../Assets", "bad:name", "" }));
+        }
+
+        [Test]
+        public void Save_ReplacesTheFileAndLeavesNoTempFileBehind()
+        {
+            WriteSettings(Grouped);
+
+            new ProjectSyncSettings(InstallMode.Latest).Save(_project);
+
+            Assert.That(Directory.GetFiles(Path.GetDirectoryName(SettingsPath)).Select(Path.GetFileName), Is.EqualTo(new[] { "AgentSkillsSync.json" }));
+            Assert.That(File.ReadAllBytes(SettingsPath).Take(3), Is.Not.EqualTo(new byte[] { 0xEF, 0xBB, 0xBF }), "no byte order mark");
+            Assert.That(ProjectSyncSettings.Load(_project).Groups.Groups.Count, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void Save_OverAStaleTempFile_StillSaves()
+        {
+            WriteSettings(Grouped);
+            File.WriteAllText(SettingsPath + ".tmp", "left by an interrupted save");
+
+            new ProjectSyncSettings(InstallMode.Pinned).Save(_project);
+
+            Assert.That(ProjectSyncSettings.Load(_project).InstallMode, Is.EqualTo(InstallMode.Pinned));
+            Assert.That(File.Exists(SettingsPath + ".tmp"), Is.False);
+        }
+
+        [Test]
         public void Save_OverAFileThatCannotBeRead_ThrowsAndLeavesItAlone()
         {
             WriteSettings("{ \"groups\": ");

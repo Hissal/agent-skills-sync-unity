@@ -120,7 +120,11 @@ namespace Hissal.AgentSkillsSync
             return value is bool flag ? flag : throw WrongType(prefix + key, "true or false");
         }
 
-        /// <summary>A group's <c>skills</c> list; empty when it is missing.</summary>
+        /// <summary>
+        /// A group's <c>skills</c> list; empty when it is missing. The names are only compared with the lock's, never
+        /// used as paths, so one that is not a safe skill name (<see cref="SkillName"/>) is kept: no lock entry can
+        /// have it, and the window reports it as not in the lock (<see cref="SkillGroupSection.Unknown"/>).
+        /// </summary>
         static IEnumerable<string> Names(List<KeyValuePair<string, object>> group, string key)
         {
             if (!TryGet(group, SkillsKey, out var value)) return Enumerable.Empty<string>();
@@ -153,8 +157,12 @@ namespace Hissal.AgentSkillsSync
             if (index < 0) settings.Insert(0, mode);
             else settings[index] = mode;
 
+            // Written beside the file, then swapped in, so a failed write never truncates the hand-written groups.
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            File.WriteAllText(path, JsonWriter.Write(settings), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            var temp = path + ".tmp";
+            File.WriteAllText(temp, JsonWriter.Write(settings), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            if (File.Exists(path)) File.Replace(temp, path, null);
+            else File.Move(temp, path);
         }
     }
 
