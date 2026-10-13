@@ -53,6 +53,8 @@ waiting for removal from missing ones.
 | ↳ skill selection | `LocalPrefs.OptedOutSkills` / `OptedInSkills` | `SkillSelection` | `SkillSelection.Set` |
 | ↳ synced sources | `LocalPrefs.SyncedSources` (selected skills' sources only) | `SourceConsent` | `SourceConsent.RecordSynced` |
 | ↳ last sync / decline | `LastSyncedLockHash`, `LastSyncedSelectedSkillsHash`, `DeclinedState` | `StartupCheck.ShouldNotify` | `StartupCheck.RecordSynced` / `RecordDeclined` |
+| ↳ seen skills | `LocalPrefs.SeenSkills` | `SeenSkills.New` | `SeenSkills.Seed` / `Mark` / `RecordSynced` |
+| ↳ new-skill notice | `LocalPrefs.NotifyNewSkills` | `StartupCheck.NewSkills` | `SkillsSyncWindow` |
 | ↳ managed skills | `LocalPrefs.ManagedSkills` | `ProjectScanner` | `PlanExecutor` |
 | `ManagedStateFile` | block in each skills folder's `.gitignore` (committed) | `ProjectScanner` | `PlanExecutor` |
 | `MachineChoices` | in memory, built by `MachineChoices.Read` from `LocalPrefs` + `UserEnvironment` | `SkillSync`, `SyncStatus` | — |
@@ -80,11 +82,19 @@ The `Record*`/`Set`/`Save` helpers change a loaded `LocalPrefs`; the caller then
   Its Editor assembly is enabled by a package version define only when `com.unity.pipeline` is installed.
 - `SkillsSyncWindow` — the sync window: folder selection, plan preview, source consent (`SourceConsent`), install
   mode, the skills in one section per `SkillGroupSection` (`SkillGroups.Sections`) with per-group and per-skill
-  install checkboxes (`SkillSelection.Set`), install-anyway toggles, then `SkillsSyncService.Run`. `SyncText` holds its texts. `UnityProjectRoot` holds `LocalPrefs` and
+  install checkboxes (`SkillSelection.Set`, then `SeenSkills.Mark`), a `NEW` tag on each of
+  `SkillsSyncService.NewSkills`, the new-skill notice toggle, install-anyway toggles, then `SkillsSyncService.Run`. `SyncText` holds its texts. `UnityProjectRoot` holds `LocalPrefs` and
   `ProjectSyncSettings`; `SkillsRoot` holds `skills-lock.json` and the skills folders.
 - `StartupNotifier` — once per editor session: offers newly found folders (`FolderSelection.Offers`), reads
-  `SyncStatus`, and asks `StartupCheck.ShouldNotify` whether to offer opening the window.
-- `StartupCheck` (Core) — the notify decision; `StartupNotifier` records declines, `SkillsSyncService` records syncs.
+  `SyncStatus`, seeds prefs that have no seen skills (`SeenSkills.Seed`), and asks `StartupCheck.ShouldNotify`
+  whether to offer opening the window. One dialog says both parts (`SyncText.StartupMessage`).
+- `StartupCheck` (Core) — the notify decision, in two parts: `StartupCheck.OutOfSync` (with the declined
+  fingerprint) and `StartupCheck.NewSkills` (the `SyncStatus.OptionalSkills` not yet seen, unless the notice is off).
+  `StartupNotifier` records declines, which also mark the named new skills seen; `SkillsSyncService` records syncs,
+  which mark every locked skill seen for the window and the Pipeline command alike.
+- `SeenSkills` (Core) — which locked skills the contributor has been shown. A skill is new when it is locked, left
+  out by its default alone (`SeenSkills.Optional`; never one they opted out of) and not seen. Prefs without the
+  list have no new skills until they are seeded with the whole lock.
   `StartupCheck.LockChanged` ignores a lock change that touches only skills this machine does not install. A changed
   group default moves no lock hash; it notifies through `SyncStatus.OutOfSyncSkills`.
 

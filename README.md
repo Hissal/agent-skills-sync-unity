@@ -71,12 +71,15 @@ Open it from **Window → Agent Skills Sync**. From top to bottom:
 - **Skills folders to install into on this machine**: one toggle per skills folder (see
   [Choosing skills folders](#choosing-skills-folders-per-machine)).
 - **Install mode**: Latest or Pinned, with a note on what the mode does (see [Install mode](#install-mode)).
+- **Tell me at editor start when a new optional skill is locked**: turns the
+  [new optional skill notice](#new-optional-skills) on or off for this machine.
 - **New sources**: a warning, and an "I trust the new source …" toggle for each source repo this machine has not
   synced before.
 - **Skills locked in `skills-lock.json`**: when the project defines [skill groups](#skill-groups), one collapsible
   section per group with a checkbox that selects all its skills, then the ungrouped skills under **Other**. A warning
   names any skill a group lists that is not locked. Each skill has an install checkbox, its source repo and what Sync will
-  do to it (to install, to update, to link, installed, left alone, skipped). Tags: `NEW SOURCE`, `differs from lock`,
+  do to it (to install, to update, to link, installed, left alone, skipped). Tags: `NEW` (see
+  [New optional skills](#new-optional-skills)), `NEW SOURCE`, `differs from lock`,
   and `can't verify lock hash` / `hash not verifiable` (see [Install mode](#install-mode)). Under each skill there is
   one row per selected folder, with its status there, any copy you already have at user scope, and an install-anyway
   toggle. A skill whose checkbox you cleared has no folder rows and reads "not installed (opted out)" (see
@@ -140,11 +143,30 @@ changes. Nothing is installed automatically; a sync needs consent in the window 
   every copy, shows the details.
 - Skills this machine does not install (opted out of, or not selected by default) don't count. Locking, updating or
   removing one does not make the check offer a sync; it only does while the tool's copy of one is still waiting to
-  be removed.
+  be removed. A newly locked one is announced once instead (see [New optional skills](#new-optional-skills)).
 - A change to the project's [skill groups](#skill-groups) that selects a skill you don't have, or stops selecting
   one you have, makes the check offer a sync, naming the skills.
 - While no skills folder is selected, it does not offer a sync. It can still ask once whether to add a folder whose
   agent home appeared (see [Choosing skills folders](#choosing-skills-folders-per-machine)).
+
+### New optional skills
+
+A locked skill this machine does not install unless you tick it is **optional**: the project's
+[skill groups](#skill-groups) leave it out by default. When the project locks a new one, the startup check tells you
+once, names it, and offers to open the sync window, where the skill is tagged `NEW`. Nothing is installed unless you
+tick the skill and sync.
+
+- A skill stops being new when you sync, tick or clear its checkbox, or choose **Not Now**. The names you have been
+  shown are stored on this machine in `UserSettings/AgentSkillsSync.json` (`seenSkills`).
+- If the project is also out of sync, the same dialog says both. **Not Now** then keeps each quiet until it changes:
+  another new optional skill is locked, or the out-of-sync state becomes a different one.
+- A skill you opted out of is never announced. A newly locked skill you install by default is not announced either:
+  it makes the project out of sync instead.
+- Skills that were already locked when you first sync, or when you update to a package version that has this notice,
+  are not announced.
+- **To turn the notice off**, clear **Tell me at editor start when a new optional skill is locked** in the sync
+  window. The setting is stored on this machine only (`"notifyNewSkills": false` in the same file), so it does not
+  affect your teammates. The `NEW` tag in the window stays.
 
 ## Set up a project
 
