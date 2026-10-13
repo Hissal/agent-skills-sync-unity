@@ -5,18 +5,20 @@ using System.Linq;
 namespace Hissal.AgentSkillsSync
 {
     /// <summary>
-    /// What the startup check needs to know about a project: the lockfile's hash and which skills a
-    /// sync would still change (install, link, remove or unlink). Read without fetching anything, and cheap enough
+    /// What the startup check needs to know about a project: the lockfile's hash, the hash of what this machine
+    /// installs from it, and which skills a sync would still change (install, link, remove or unlink). Read without fetching anything, and cheap enough
     /// for every editor start: it looks at names, links and the lockfile only, never at skill contents.
     /// </summary>
     public sealed class SyncStatus
     {
         /// <param name="noFolderSelected">The contributor selected no skills folder, so the check stays quiet.</param>
         /// <param name="selectedFolders">Relative paths of the skills folders the status was read for.</param>
+        /// <param name="selectedSkillsHash">See <see cref="LockfileHash.OfSelected"/>; null when the lockfile is unusable.</param>
         public SyncStatus(string lockHash, IEnumerable<string> outOfSyncSkills, bool noFolderSelected = false,
-            IEnumerable<string> selectedFolders = null)
+            IEnumerable<string> selectedFolders = null, string selectedSkillsHash = null)
         {
             LockHash = lockHash;
+            SelectedSkillsHash = selectedSkillsHash;
             NoFolderSelected = noFolderSelected;
             OutOfSyncSkills = Sorted(outOfSyncSkills);
             SelectedFolders = Sorted(selectedFolders);
@@ -29,8 +31,15 @@ namespace Hissal.AgentSkillsSync
         public string LockHash { get; }
 
         /// <summary>
-        /// Sorted names of skills a sync would change: locked skills missing in at least one skills folder (or behind
-        /// a broken link), and managed skills it would remove or unlink. Entries left alone as foreign do not count.
+        /// See <see cref="LockfileHash.OfSelected"/>: changes only when the lock changes for a skill this machine
+        /// installs, unlike <see cref="LockHash"/>. Null when the lockfile is unusable.
+        /// </summary>
+        public string SelectedSkillsHash { get; }
+
+        /// <summary>
+        /// Sorted names of skills a sync would change: selected locked skills missing in at least one skills folder (or
+        /// behind a broken link), and managed skills it would remove or unlink (no longer locked, or opted out of).
+        /// Entries left alone as foreign do not count.
         /// An installed copy is not hashed, so an outdated one is not listed: a lock change surfaces through
         /// <see cref="LockHash"/> instead.
         /// </summary>
@@ -45,8 +54,17 @@ namespace Hissal.AgentSkillsSync
         /// <summary>
         /// Identifies this status; a decline holds while the status keeps the same fingerprint. Includes the
         /// selected folders, so changing the selection (such as accepting an offered folder) lifts a decline.
+        /// Built on <see cref="SelectedSkillsHash"/>, so a lock change to a skill this machine does not install keeps it.
         /// </summary>
-        public string Fingerprint => LockHash + "|" + string.Join(",", OutOfSyncSkills) + "|" + string.Join(",", SelectedFolders);
+        public string Fingerprint => FingerprintOf(SelectedSkillsHash ?? LockHash);
+
+        /// <summary>
+        /// Whether <paramref name="fingerprint"/> identifies this status: its <see cref="Fingerprint"/>, or the form
+        /// built on <see cref="LockHash"/> that versions before skill selection recorded.
+        /// </summary>
+        public bool HasFingerprint(string fingerprint) => fingerprint == Fingerprint || fingerprint == FingerprintOf(LockHash);
+
+        string FingerprintOf(string hash) => hash + "|" + string.Join(",", OutOfSyncSkills) + "|" + string.Join(",", SelectedFolders);
 
         /// <summary>Shorthand for <see cref="Read(string, MachineChoices)"/> with the choices given one by one.</summary>
         public static SyncStatus Read(string projectRoot, FolderLayout layout = null, IEnumerable<SkillsFolder> selected = null,
@@ -57,7 +75,10 @@ namespace Hissal.AgentSkillsSync
         /// Reads the project's status; null when there is no lockfile. An unusable lockfile reports
         /// no out-of-sync skills, so only a hash change surfaces it.
         /// </summary>
-        /// <param name="choices">This machine's layout, folder selection, user-scope copies and install-anyway choices. A skipped skill does not count as out of sync.</param>
+        /// <param name="choices">
+        /// This machine's layout, folder selection, user-scope copies, install-anyway choices and skill selection. A skipped
+        /// skill does not count as out of sync, nor does an opted-out skill with no managed entry left.
+        /// </param>
         /// <param name="prefsRoot">The folder holding this machine's <see cref="LocalPrefs"/>; null = <paramref name="projectRoot"/>.</param>
         public static SyncStatus Read(string projectRoot, MachineChoices choices, string prefsRoot = null)
         {
@@ -69,11 +90,14 @@ namespace Hissal.AgentSkillsSync
             var selection = choices.Selected;
             var noFolderSelected = selection != null && !layout.Folders.Any(f => selection.Any(s => s?.RelativePath == f.RelativePath));
             IEnumerable<string> outOfSync;
+            string selectedSkillsHash = null;
             try
             {
                 // The quick scan has no hashes: any installed copy counts as current.
                 var project = ProjectScanner.Scan(projectRoot, layout, readContents: false, prefsRoot: prefsRoot);
-                var plan = InstallPlanner.Plan(Lockfile.Load(projectRoot), project, choices, FixedCheck.AlwaysCurrent);
+                var lockfile = Lockfile.Load(projectRoot);
+                selectedSkillsHash = LockfileHash.OfSelected(lockfile, choices.Skills);
+                var plan = InstallPlanner.Plan(lockfile, project, choices, FixedCheck.AlwaysCurrent);
                 // A left-alone (foreign) entry is never synced, so it does not count as out of sync.
                 outOfSync = plan.Actions.Where(a => a.ChangesProject).Select(a => a.SkillName);
             }
@@ -84,7 +108,7 @@ namespace Hissal.AgentSkillsSync
             var selectedFolders = layout.Folders
                 .Where(f => selection == null || selection.Any(s => s?.RelativePath == f.RelativePath))
                 .Select(f => f.RelativePath);
-            return new SyncStatus(lockHash, outOfSync, noFolderSelected, selectedFolders);
+            return new SyncStatus(lockHash, outOfSync, noFolderSelected, selectedFolders, selectedSkillsHash);
         }
     }
 }

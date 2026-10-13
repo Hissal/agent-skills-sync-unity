@@ -224,5 +224,67 @@ namespace Hissal.AgentSkillsSync.Tests
             var error = Assert.Throws<LockfileException>(() => Service());
             Assert.That(error.Message, Does.Contain(_project).And.Contain(_root));
         }
+
+        void SetSkillSelected(string skill, bool selected)
+        {
+            var prefs = LocalPrefs.Load(_project);
+            SkillSelection.Set(prefs, skill, selected);
+            prefs.Save();
+        }
+
+        [Test]
+        public void Run_OptedOutSkill_IsNeverFetchedNorAskedConsentForNorOutOfSync()
+        {
+            SetSkillSelected("review", false);
+            var service = Service();
+            Assert.That(service.NewSources, Is.EqualTo(new[] { "owner/skills" }));
+
+            var summary = service.Run(new[] { "owner/skills" });
+            var prefs = LocalPrefs.Load(_project);
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(_github.Requested.Any(url => url.Contains("other/skills")), Is.False);
+            Assert.That(Directory.Exists(Path.Combine(_project, ".agents/skills/review")), Is.False);
+            Assert.That(prefs.SyncedSources, Is.EqualTo(new[] { "owner/skills" }));
+            var status = SyncStatus.Read(_project, service.Choices);
+            Assert.That(status.OutOfSyncSkills, Is.Empty);
+            Assert.That(StartupCheck.ShouldNotify(status, prefs), Is.False);
+            Assert.That(Service().Run(Array.Empty<string>()).NothingChanged, Is.True);
+        }
+
+        [Test]
+        public void Run_SkillOptedBackIn_AsksConsentForItsSourceThenInstallsIt()
+        {
+            SetSkillSelected("review", false);
+            Service().Run(new[] { "owner/skills" });
+
+            SetSkillSelected("review", true);
+
+            Assert.That(Service().NewSources, Is.EqualTo(new[] { "other/skills" }));
+            Assert.That(Assert.Throws<SourceConsentException>(() => Service().Run(Array.Empty<string>())).Sources,
+                Is.EqualTo(new[] { "other/skills" }));
+            Assert.That(Service().Run(new[] { "other/skills" }).Installed, Is.EqualTo(new[] { "review" }));
+            Assert.That(File.Exists(Path.Combine(_project, ".agents/skills/review/SKILL.md")), Is.True);
+        }
+
+        [Test]
+        public void Run_OptOutOfAnInstalledSkill_RemovesItAndKeepsItInTheGitignoreBlock()
+        {
+            var service = Service();
+            service.Run(service.NewSources);
+            var block = File.ReadAllText(Path.Combine(_project, ".agents/skills/.gitignore"));
+            var requests = _github.Requested.Count;
+
+            SetSkillSelected("review", false);
+            var summary = Service(InstallMode.Pinned).Run(Array.Empty<string>());
+
+            Assert.That(summary.Removed, Is.EqualTo(new[] { "review" }));
+            Assert.That(Directory.Exists(Path.Combine(_project, ".agents/skills/review")), Is.False);
+            Assert.That(File.Exists(Path.Combine(_project, ".agents/skills/tdd/SKILL.md")), Is.True);
+            Assert.That(File.ReadAllText(Path.Combine(_project, ".agents/skills/.gitignore")), Is.EqualTo(block));
+            Assert.That(block, Does.Contain("review"));
+            Assert.That(LocalPrefs.Load(_project).ManagedSkills[".agents/skills"], Is.EqualTo(new[] { "tdd" }));
+            Assert.That(_github.Requested.Count, Is.EqualTo(requests));
+        }
     }
 }

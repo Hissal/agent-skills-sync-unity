@@ -23,6 +23,7 @@ namespace Hissal.AgentSkillsSync
 
         const string VersionKey = "version";
         const string LastSyncedLockHashKey = "lastSyncedLockHash";
+        const string LastSyncedSelectedSkillsHashKey = "lastSyncedSelectedSkillsHash";
         const string DeclinedStateKey = "declinedState";
         const string SyncedSourcesKey = "syncedSources";
         const string SelectedFoldersKey = "selectedFolders";
@@ -72,6 +73,16 @@ namespace Hissal.AgentSkillsSync
         {
             get => GetString(LastSyncedLockHashKey);
             set => Set(LastSyncedLockHashKey, value);
+        }
+
+        /// <summary>
+        /// The <see cref="SyncStatus.SelectedSkillsHash"/> as it was at the last successful sync; null in prefs written
+        /// before it was recorded, where only <see cref="LastSyncedLockHash"/> tells whether the lock changed.
+        /// </summary>
+        public string LastSyncedSelectedSkillsHash
+        {
+            get => GetString(LastSyncedSelectedSkillsHashKey);
+            set => Set(LastSyncedSelectedSkillsHashKey, value);
         }
 
         /// <summary>

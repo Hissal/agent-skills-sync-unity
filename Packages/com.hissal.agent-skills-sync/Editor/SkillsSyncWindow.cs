@@ -38,6 +38,7 @@ namespace Hissal.AgentSkillsSync.Editor
         InstallMode _installMode;
         IReadOnlyDictionary<string, SkillFetchException> _failures = new Dictionary<string, SkillFetchException>();
         Lockfile _lockfile;
+        SkillSelection _skills = SkillSelection.All;
         readonly HashSet<string> _confirmedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>The Unity project folder: holds this machine's local prefs and the committed project settings.</summary>
@@ -151,6 +152,7 @@ namespace Hissal.AgentSkillsSync.Editor
                     _skillList.Add(new HelpBox(SyncText.UnsupportedMessage(lockfile.Unsupported), HelpBoxMessageType.Info));
 
                 _lockfile = lockfile;
+                _skills = service.Choices.Skills;
 
                 var removals = plan.Actions.Where(a => a.Kind == PlanActionKind.Remove).Select(a => a.SkillName).Distinct().ToList();
                 if (removals.Count > 0)
@@ -376,7 +378,7 @@ namespace Hissal.AgentSkillsSync.Editor
         }
 
         bool HasUnconfirmedSources(Lockfile lockfile) =>
-            SourceConsent.Unconfirmed(lockfile, LocalPrefs.Load(UnityProjectRoot), _confirmedSources).Count > 0;
+            SourceConsent.Unconfirmed(lockfile, LocalPrefs.Load(UnityProjectRoot), _confirmedSources, _skills).Count > 0;
 
         void UpdateSyncButton() =>
             _syncButton.SetEnabled(_canSync && _consent.value && _lockfile != null && !HasUnconfirmedSources(_lockfile));

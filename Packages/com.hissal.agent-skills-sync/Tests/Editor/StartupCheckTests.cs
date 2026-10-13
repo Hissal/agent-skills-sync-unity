@@ -294,5 +294,136 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(SyncStatus.Read(_project, selected: selected).OutOfSyncSkills, Is.Empty);
             Assert.That(SyncStatus.Read(_project).OutOfSyncSkills, Is.EqualTo(new[] { "code-review", "tdd" }));
         }
+
+        /// <summary>The lock with code-review's hash replaced.</summary>
+        static string LockWithCodeReviewHash(string hash) => Lock.Replace(FakeGitHub.NestedHash, hash);
+
+        static MachineChoices OptedOut(params string[] names) => new MachineChoices(skills: new SkillSelection(optedOut: names));
+
+        /// <summary>Syncs with code-review opted out (only tdd is installed) and records it.</summary>
+        void SyncWithCodeReviewOptedOut()
+        {
+            var layout = FolderLayout.Default;
+            var plan = InstallPlanner.Plan(Lockfile.Load(_project), ProjectScanner.Scan(_project, layout), OptedOut("code-review"));
+            new PlanExecutor().Execute(_project, plan, new Dictionary<string, string> { ["tdd"] = Path.Combine(FixturesRoot, "minimal") });
+            var prefs = Prefs;
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(_project, OptedOut("code-review")));
+            prefs.Save();
+        }
+
+        bool ShouldNotifyWithCodeReviewOptedOut() =>
+            StartupCheck.ShouldNotify(SyncStatus.Read(_project, OptedOut("code-review")), Prefs);
+
+        void WriteLock(string json) => File.WriteAllText(Path.Combine(_project, Lockfile.FileName), json);
+
+        [Test]
+        public void Read_OptedOutSkillNotInstalled_IsNotOutOfSync()
+        {
+            SyncWithCodeReviewOptedOut();
+
+            Assert.That(SyncStatus.Read(_project, OptedOut("code-review")).OutOfSyncSkills, Is.Empty);
+            Assert.That(ShouldNotifyWithCodeReviewOptedOut(), Is.False);
+        }
+
+        [Test]
+        public void ShouldNotify_OnlyAnOptedOutSkillsLockEntryChanged_IsQuiet()
+        {
+            SyncWithCodeReviewOptedOut();
+
+            WriteLock(LockWithCodeReviewHash("changed-2"));
+
+            Assert.That(ShouldNotifyWithCodeReviewOptedOut(), Is.False);
+        }
+
+        [Test]
+        public void ShouldNotify_OptedOutSkillRemovedFromTheLockThenLockedAgain_IsQuiet()
+        {
+            SyncWithCodeReviewOptedOut();
+
+            WriteLock(@"{
+  ""version"": 1,
+  ""skills"": {
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" }
+  }
+}");
+            Assert.That(ShouldNotifyWithCodeReviewOptedOut(), Is.False);
+
+            WriteLock(Lock);
+            Assert.That(ShouldNotifyWithCodeReviewOptedOut(), Is.False);
+        }
+
+        [Test]
+        public void ShouldNotify_SelectedSkillsLockEntryChangedWhileAnotherIsOptedOut_Notifies()
+        {
+            SyncWithCodeReviewOptedOut();
+
+            WriteLock(LockWithTddHash("changed-2"));
+
+            Assert.That(ShouldNotifyWithCodeReviewOptedOut(), Is.True);
+        }
+
+        [Test]
+        public void ShouldNotify_OptedBackInToASkillThatIsNotInstalled_Notifies()
+        {
+            SyncWithCodeReviewOptedOut();
+
+            Assert.That(SyncStatus.Read(_project).OutOfSyncSkills, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(ShouldNotify(), Is.True);
+        }
+
+        [Test]
+        public void ShouldNotify_OptedOutOfAnInstalledSkill_NotifiesUntilItIsRemoved()
+        {
+            InstallAll();
+            RecordSynced();
+
+            Assert.That(SyncStatus.Read(_project, OptedOut("code-review")).OutOfSyncSkills, Is.EqualTo(new[] { "code-review" }));
+            Assert.That(ShouldNotifyWithCodeReviewOptedOut(), Is.True);
+        }
+
+        [Test]
+        public void ShouldNotify_DeclinedThenOnlyAnOptedOutSkillsLockEntryChanged_StaysQuiet()
+        {
+            SyncWithCodeReviewOptedOut();
+            Unlink(".claude/skills/tdd");
+            var prefs = Prefs;
+            StartupCheck.RecordDeclined(prefs, SyncStatus.Read(_project, OptedOut("code-review")));
+            prefs.Save();
+
+            WriteLock(LockWithCodeReviewHash("changed-2"));
+
+            Assert.That(ShouldNotifyWithCodeReviewOptedOut(), Is.False);
+        }
+
+        [Test]
+        public void ShouldNotify_PrefsSyncedBeforeSkillSelectionExisted_StayQuietUntilTheLockChanges()
+        {
+            InstallAll();
+            var prefs = Prefs;
+            prefs.LastSyncedLockHash = LockfileHash.Compute(_project);
+            prefs.Save();
+            Assert.That(File.ReadAllText(LocalPrefs.PathFor(_project)), Does.Not.Contain("Selected"));
+
+            Assert.That(ShouldNotify(), Is.False);
+
+            WriteLock(LockWithTddHash("changed-2"));
+            Assert.That(ShouldNotify(), Is.True);
+        }
+
+        [Test]
+        public void ShouldNotify_DeclineRecordedBeforeSkillSelectionExisted_StillHolds()
+        {
+            InstallAll();
+            Unlink(".claude/skills/tdd");
+            var prefs = Prefs;
+            prefs.LastSyncedLockHash = LockfileHash.Compute(_project);
+            prefs.DeclinedState = LockfileHash.Compute(_project) + "|tdd|.agents/skills,.claude/skills";
+            prefs.Save();
+
+            Assert.That(ShouldNotify(), Is.False);
+
+            Unlink(".claude/skills/code-review");
+            Assert.That(ShouldNotify(), Is.True);
+        }
     }
 }

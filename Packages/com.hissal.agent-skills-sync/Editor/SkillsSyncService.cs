@@ -35,7 +35,7 @@ namespace Hissal.AgentSkillsSync.Editor
             Mode = modeOverride ?? projectMode;
             var prefs = LocalPrefs.Load(unityRoot);
             Choices = MachineChoices.Read(Root, prefs, _environment);
-            NewSources = SourceConsent.NewSources(Lock, prefs);
+            NewSources = SourceConsent.NewSources(Lock, prefs, Choices.Skills);
         }
 
         internal string Root { get; }
@@ -56,7 +56,7 @@ namespace Hissal.AgentSkillsSync.Editor
         /// </summary>
         internal SyncSummary Run(IEnumerable<string> confirmedSources, InstallMode? expectedMode = null)
         {
-            var unconfirmed = SourceConsent.Unconfirmed(Lock, LocalPrefs.Load(_unityRoot), confirmedSources);
+            var unconfirmed = SourceConsent.Unconfirmed(Lock, LocalPrefs.Load(_unityRoot), confirmedSources, Choices.Skills);
             if (unconfirmed.Count > 0) throw new SourceConsentException(unconfirmed);
             if (expectedMode.HasValue && expectedMode.Value != Mode)
                 throw new InstallModeChangedException(Mode);
@@ -68,7 +68,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 var prefs = LocalPrefs.Load(_unityRoot);
                 FolderSelection.Save(prefs, Choices.Layout, Choices.Selected, _environment);
                 StartupCheck.RecordSynced(prefs, SyncStatus.Read(Root, Choices, _unityRoot));
-                SourceConsent.RecordSynced(prefs, Lock);
+                SourceConsent.RecordSynced(prefs, Lock, Choices.Skills);
                 prefs.Save();
             }
             catch (Exception e) when (e is LockfileException || e is IOException || e is UnauthorizedAccessException)

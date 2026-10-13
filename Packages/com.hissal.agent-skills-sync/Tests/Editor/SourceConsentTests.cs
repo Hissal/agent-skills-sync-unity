@@ -36,13 +36,13 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             var lockfile = Lock(("tdd", "owner/skills"), ("review", "owner/skills"), ("unity", "other/unity-skills"));
 
-            Assert.That(SourceConsent.NewSources(lockfile, Prefs), Is.EqualTo(new[] { "other/unity-skills", "owner/skills" }));
+            Assert.That(SourceConsent.NewSources(lockfile, Prefs, SkillSelection.All), Is.EqualTo(new[] { "other/unity-skills", "owner/skills" }));
         }
 
-        void RecordSynced(Lockfile lockfile)
+        void RecordSynced(Lockfile lockfile, SkillSelection selection = null)
         {
             var prefs = Prefs;
-            SourceConsent.RecordSynced(prefs, lockfile);
+            SourceConsent.RecordSynced(prefs, lockfile, selection ?? SkillSelection.All);
             prefs.Save();
         }
 
@@ -53,7 +53,7 @@ namespace Hissal.AgentSkillsSync.Tests
 
             var lockfile = Lock(("tdd", "owner/skills"), ("review", "owner/skills"), ("unity", "other/unity-skills"));
 
-            Assert.That(SourceConsent.NewSources(lockfile, Prefs), Is.EqualTo(new[] { "other/unity-skills" }));
+            Assert.That(SourceConsent.NewSources(lockfile, Prefs, SkillSelection.All), Is.EqualTo(new[] { "other/unity-skills" }));
         }
 
         [Test]
@@ -64,7 +64,7 @@ namespace Hissal.AgentSkillsSync.Tests
 
             var lockfile = Lock(("tdd", "owner/skills"), ("unity", "other/unity-skills"));
 
-            Assert.That(SourceConsent.NewSources(lockfile, Prefs), Is.Empty);
+            Assert.That(SourceConsent.NewSources(lockfile, Prefs, SkillSelection.All), Is.Empty);
         }
 
         [Test]
@@ -72,7 +72,7 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             RecordSynced(Lock(("tdd", "Owner/Skills")));
 
-            Assert.That(SourceConsent.NewSources(Lock(("tdd", "owner/skills")), Prefs), Is.Empty);
+            Assert.That(SourceConsent.NewSources(Lock(("tdd", "owner/skills")), Prefs, SkillSelection.All), Is.Empty);
         }
 
         [Test]
@@ -83,7 +83,7 @@ namespace Hissal.AgentSkillsSync.Tests
             prefs.LastSyncedLockHash = "abc";
             prefs.Save();
 
-            Assert.That(SourceConsent.NewSources(lockfile, Prefs), Is.EqualTo(new[] { "owner/skills" }));
+            Assert.That(SourceConsent.NewSources(lockfile, Prefs, SkillSelection.All), Is.EqualTo(new[] { "owner/skills" }));
         }
 
         [Test]
@@ -92,7 +92,7 @@ namespace Hissal.AgentSkillsSync.Tests
             RecordSynced(Lock(("tdd", "owner/skills")));
             var lockfile = Lock(("tdd", "owner/skills"), ("unity", "other/unity-skills"), ("x", "third/x"));
 
-            Assert.That(SourceConsent.Unconfirmed(lockfile, Prefs, new[] { "third/x" }), Is.EqualTo(new[] { "other/unity-skills" }));
+            Assert.That(SourceConsent.Unconfirmed(lockfile, Prefs, new[] { "third/x" }, SkillSelection.All), Is.EqualTo(new[] { "other/unity-skills" }));
         }
 
         [Test]
@@ -100,7 +100,7 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             var lockfile = Lock(("tdd", "owner/skills"), ("unity", "other/unity-skills"));
 
-            Assert.That(SourceConsent.Unconfirmed(lockfile, Prefs, new[] { "owner/skills", "other/unity-skills" }), Is.Empty);
+            Assert.That(SourceConsent.Unconfirmed(lockfile, Prefs, new[] { "owner/skills", "other/unity-skills" }, SkillSelection.All), Is.Empty);
         }
 
         [Test]
@@ -109,7 +109,37 @@ namespace Hissal.AgentSkillsSync.Tests
             var lockfile = Lock(("tdd", "owner/skills"));
             RecordSynced(lockfile);
 
-            Assert.That(SourceConsent.Unconfirmed(lockfile, Prefs, Array.Empty<string>()), Is.Empty);
+            Assert.That(SourceConsent.Unconfirmed(lockfile, Prefs, Array.Empty<string>(), SkillSelection.All), Is.Empty);
+        }
+
+        static SkillSelection OptedOut(params string[] names) => new SkillSelection(optedOut: names);
+
+        [Test]
+        public void NewSources_SourceOfOnlyOptedOutSkills_IsNotNew()
+        {
+            var lockfile = Lock(("tdd", "owner/skills"), ("unity", "other/unity-skills"), ("art", "other/unity-skills"));
+
+            Assert.That(SourceConsent.NewSources(lockfile, Prefs, OptedOut("unity", "art")), Is.EqualTo(new[] { "owner/skills" }));
+            Assert.That(SourceConsent.NewSources(lockfile, Prefs, OptedOut("unity")), Is.EqualTo(new[] { "other/unity-skills", "owner/skills" }));
+        }
+
+        [Test]
+        public void Unconfirmed_SourceOfAnOptedOutSkill_DoesNotBlockSync()
+        {
+            var lockfile = Lock(("tdd", "owner/skills"), ("unity", "other/unity-skills"));
+
+            Assert.That(SourceConsent.Unconfirmed(lockfile, Prefs, new[] { "owner/skills" }, OptedOut("unity")), Is.Empty);
+        }
+
+        [Test]
+        public void RecordSynced_SkillOptedOutDuringTheSync_AsksConsentForItsSourceOnceOptedIn()
+        {
+            var lockfile = Lock(("tdd", "owner/skills"), ("unity", "other/unity-skills"));
+
+            RecordSynced(lockfile, OptedOut("unity"));
+
+            Assert.That(Prefs.SyncedSources, Is.EqualTo(new[] { "owner/skills" }));
+            Assert.That(SourceConsent.NewSources(lockfile, Prefs, SkillSelection.All), Is.EqualTo(new[] { "other/unity-skills" }));
         }
     }
 }
