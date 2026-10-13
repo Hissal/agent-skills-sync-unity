@@ -38,6 +38,12 @@ namespace Hissal.AgentSkillsSync
         public bool IsSelected(string skillName) =>
             !_optedOut.Contains(skillName) && (_optedIn.Contains(skillName) || _selectedByDefault(skillName));
 
+        /// <summary>
+        /// Whether the contributor opted out of <paramref name="skillName"/>. A skill that is not selected and not opted
+        /// out is left out by its default alone.
+        /// </summary>
+        public bool IsOptedOut(string skillName) => _optedOut.Contains(skillName);
+
         /// <summary>The skills of <paramref name="lockfile"/> this machine installs, in lockfile order.</summary>
         public IEnumerable<LockedSkill> SelectedIn(Lockfile lockfile) => lockfile.Skills.Where(s => IsSelected(s.Name));
 

@@ -6,7 +6,7 @@ namespace Hissal.AgentSkillsSync
     /// <summary>
     /// What this machine brings to a sync besides the lockfile and the project: the folder layout, the skills folders
     /// it installs into, the user-scope copies found for them, the contributor's install-anyway choices and the locked
-    /// skills they opted out of. Planning, syncing
+    /// skills it installs (the contributor's choices over the project's group defaults). Planning, syncing
     /// and the startup status all read the same choices, so build them once with <see cref="Read"/>.
     /// </summary>
     public sealed class MachineChoices
@@ -34,12 +34,18 @@ namespace Hissal.AgentSkillsSync
         /// in <paramref name="prefs"/>, and the user-scope copies <paramref name="environment"/> holds for that selection
         /// (from <see cref="UserScopeScanner.DefaultSourcesFor"/> the project).
         /// </summary>
-        public static MachineChoices Read(string projectRoot, LocalPrefs prefs, UserEnvironment environment, FolderLayout layout = null)
+        /// <param name="groups">
+        /// The project's skill groups (<see cref="ProjectSyncSettings.Groups"/>), which give each skill without a stored
+        /// choice its default; null = every skill is selected by default.
+        /// </param>
+        public static MachineChoices Read(string projectRoot, LocalPrefs prefs, UserEnvironment environment, FolderLayout layout = null,
+            SkillGroups groups = null)
         {
             layout = layout ?? FolderLayout.Default;
             var selected = FolderSelection.Effective(prefs, layout, environment);
             var userScope = UserScopeScanner.Scan(selected, environment, UserScopeScanner.DefaultSourcesFor(projectRoot));
-            return new MachineChoices(layout, selected, userScope, InstallAnywayChoices.From(prefs), SkillSelection.From(prefs));
+            return new MachineChoices(layout, selected, userScope, InstallAnywayChoices.From(prefs),
+                SkillSelection.From(prefs, (groups ?? SkillGroups.None).IsSelectedByDefault));
         }
 
         public FolderLayout Layout { get; }
