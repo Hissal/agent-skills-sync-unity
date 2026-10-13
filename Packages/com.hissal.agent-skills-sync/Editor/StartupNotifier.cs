@@ -10,7 +10,8 @@ namespace Hissal.AgentSkillsSync.Editor
     /// user-scope home appeared since the selection was made (declining is remembered per folder), then
     /// checks whether the project's skills are out of sync or a new optional skill was locked and, if so, offers to
     /// open the sync window in one dialog. Declining keeps each part quiet until it changes. With no folder selected
-    /// it never notifies. Prefs with no seen skills yet are seeded here, so skills already locked are never announced.
+    /// it never notifies. Prefs an earlier version wrote are seeded here (<see cref="StartupCheck.Seed"/>), so upgrading
+    /// announces neither the skills already locked nor a later lock change this machine does not install.
     /// </summary>
     [InitializeOnLoad]
     static class StartupNotifier
@@ -38,7 +39,7 @@ namespace Hissal.AgentSkillsSync.Editor
 
                 var groups = ProjectSyncSettings.Load(unityRoot).Groups;
                 var status = SyncStatus.Read(skillsRoot, MachineChoices.Read(skillsRoot, prefs, environment, layout, groups), unityRoot);
-                if (SeenSkills.Seed(prefs, status?.LockedSkills)) prefs.Save();
+                if (StartupCheck.Seed(prefs, status)) prefs.Save();
                 if (!StartupCheck.ShouldNotify(status, prefs)) return;
 
                 if (EditorUtility.DisplayDialog(

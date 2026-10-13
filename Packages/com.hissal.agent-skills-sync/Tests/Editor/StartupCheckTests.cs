@@ -473,6 +473,66 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(ShouldNotify(), Is.True);
         }
 
+        const string TddOnlyLock = @"{
+  ""version"": 1,
+  ""skills"": {
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHash + @""" }
+  }
+}";
+
+        /// <summary>A machine that synced the tdd-only lock with a version that recorded no selected-skills hash.</summary>
+        void SyncTddOnlyLockBeforeSkillSelectionExisted()
+        {
+            WriteLock(TddOnlyLock);
+            var layout = FolderLayout.Default;
+            var plan = InstallPlanner.Plan(Lockfile.Load(_project), ProjectScanner.Scan(_project, layout), layout);
+            new PlanExecutor().Execute(_project, plan, new Dictionary<string, string> { ["tdd"] = Path.Combine(FixturesRoot, "minimal") });
+            var prefs = Prefs;
+            prefs.LastSyncedLockHash = LockfileHash.Compute(_project);
+            prefs.Save();
+        }
+
+        [Test]
+        public void Seed_PrefsSyncedBeforeSkillSelectionExisted_KeepsALaterOptionalOnlyLockChangeQuiet()
+        {
+            SyncTddOnlyLockBeforeSkillSelectionExisted();
+            var prefs = Prefs;
+            Assert.That(StartupCheck.Seed(prefs, SyncStatus.Read(_project, CodeReviewOffByDefault())), Is.True);
+            prefs.Save();
+
+            WriteLock(Lock);
+
+            var status = SyncStatus.Read(_project, CodeReviewOffByDefault());
+            Assert.That(StartupCheck.LockChanged(status, Prefs), Is.False, "only a skill this machine leaves out was locked");
+            Assert.That(StartupCheck.OutOfSync(status, Prefs), Is.False);
+            Assert.That(StartupCheck.NewSkills(status, Prefs), Is.EqualTo(new[] { "code-review" }));
+        }
+
+        [Test]
+        public void Seed_LockChangedSinceTheLastSync_RecordsNoSelectedSkillsHash()
+        {
+            SyncTddOnlyLockBeforeSkillSelectionExisted();
+            WriteLock(LockWithTddHash("changed-2"));
+
+            var prefs = Prefs;
+            StartupCheck.Seed(prefs, SyncStatus.Read(_project));
+            prefs.Save();
+
+            Assert.That(Prefs.LastSyncedSelectedSkillsHash, Is.Null);
+            Assert.That(ShouldNotify(), Is.True, "the unsynced lock change still notifies");
+        }
+
+        [Test]
+        public void Seed_AlreadySeededPrefs_ChangesNothing()
+        {
+            InstallAll();
+            RecordSynced();
+            var prefs = Prefs;
+
+            Assert.That(StartupCheck.Seed(prefs, SyncStatus.Read(_project)), Is.False);
+            Assert.That(StartupCheck.Seed(prefs, null), Is.False);
+        }
+
         [Test]
         public void ShouldNotify_DeclineRecordedBeforeSkillSelectionExisted_StillHolds()
         {

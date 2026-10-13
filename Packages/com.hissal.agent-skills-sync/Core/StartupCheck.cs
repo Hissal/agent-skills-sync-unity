@@ -37,12 +37,30 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Whether the lock changed since the last sync for a skill this machine installs. An unchanged file never did.
-        /// A changed one did unless the selected skills hash to what the last sync recorded; prefs written before that
-        /// hash was recorded, and an unusable lockfile, count any file change.
+        /// A changed one did unless the selected skills hash to what the last sync recorded. Prefs written before that
+        /// hash was recorded get it from <see cref="Seed"/> at the next editor start; until then, and for an unusable
+        /// lockfile, any file change counts.
         /// </summary>
         public static bool LockChanged(SyncStatus status, LocalPrefs prefs) =>
             status.LockHash != prefs.LastSyncedLockHash &&
             (status.SelectedSkillsHash == null || status.SelectedSkillsHash != prefs.LastSyncedSelectedSkillsHash);
+
+        /// <summary>
+        /// Fills in, at editor start, what prefs written by an earlier version lack, so upgrading announces nothing:
+        /// the seen skills (<see cref="SeenSkills.Seed"/>), and the selected-skills hash of the last sync while the
+        /// lockfile is still the one that sync recorded. Without that hash the first lock change after an upgrade
+        /// would count even when it touches only skills this machine does not install. A null status (no lockfile)
+        /// changes nothing. Call <see cref="LocalPrefs.Save"/> after when it returns true.
+        /// </summary>
+        /// <returns>Whether the prefs changed.</returns>
+        public static bool Seed(LocalPrefs prefs, SyncStatus status)
+        {
+            var changed = SeenSkills.Seed(prefs, status?.LockedSkills);
+            if (status?.SelectedSkillsHash == null || prefs.LastSyncedSelectedSkillsHash != null ||
+                status.LockHash != prefs.LastSyncedLockHash) return changed;
+            prefs.LastSyncedSelectedSkillsHash = status.SelectedSkillsHash;
+            return true;
+        }
 
         /// <summary>
         /// Records a successful sync of the lockfile in <paramref name="status"/>: clears any decline and marks every
