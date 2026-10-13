@@ -58,6 +58,13 @@ namespace Hissal.AgentSkillsSync
             return listing.Count == 0 ? UngroupedSelectedByDefault : listing.Any(g => g.SelectedByDefault);
         }
 
+        /// <summary>Whether <paramref name="other"/> has the same groups in the same order, each with the same default and skills, and the same ungrouped default.</summary>
+        public bool SameAs(SkillGroups other) =>
+            other != null && UngroupedSelectedByDefault == other.UngroupedSelectedByDefault &&
+            Groups.Count == other.Groups.Count &&
+            Groups.Zip(other.Groups, (a, b) => a.Name == b.Name && a.SelectedByDefault == b.SelectedByDefault &&
+                                               a.Skills.SequenceEqual(b.Skills)).All(same => same);
+
         /// <summary>
         /// How the window lists <paramref name="lockfile"/>: one section per group in file order, each with the locked
         /// skills it lists (a skill in several groups is in each), then the skills no group lists as a section without a

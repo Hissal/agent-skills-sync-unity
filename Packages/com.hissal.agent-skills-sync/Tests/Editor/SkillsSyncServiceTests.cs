@@ -242,6 +242,27 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Run_GroupsChangedSinceWindowPreview_RequiresReviewBeforeFetching()
+        {
+            var shown = ProjectSyncSettings.Load(_project).Groups;
+            WriteSettings(ReviewOptional);
+            var service = Service();
+
+            Assert.Throws<SkillGroupsChangedException>(() => service.Run(service.NewSources, expectedGroups: shown));
+            Assert.That(_github.Requested, Is.Empty);
+        }
+
+        [Test]
+        public void Run_GroupsSameAsWindowPreview_Syncs()
+        {
+            WriteSettings(ReviewOptional);
+            var shown = ProjectSyncSettings.Load(_project).Groups;
+            var service = Service();
+
+            Assert.DoesNotThrow(() => service.Run(service.NewSources, expectedGroups: shown));
+        }
+
+        [Test]
         public void Run_ModeOverride_AppliesOnlyToThisInvocation()
         {
             new ProjectSyncSettings(InstallMode.Pinned).Save(_project);

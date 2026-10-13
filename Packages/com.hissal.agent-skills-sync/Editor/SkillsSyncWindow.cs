@@ -539,10 +539,10 @@ namespace Hissal.AgentSkillsSync.Editor
                 // Re-check against the lockfile as it is now: it may have gained a source since the window listed it.
                 var service = new SkillsSyncService(UnityProjectRoot);
                 EditorUtility.DisplayProgressBar(Title, "Downloading and installing skills...", 0.5f);
-                var summary = service.Run(_confirmedSources, expectedMode: _installMode);
+                var summary = service.Run(_confirmedSources, expectedMode: _installMode, expectedGroups: _groups);
                 ShowSummary(SyncText.Describe(summary), summary.UserScopeDiffers.Count > 0 ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info);
             }
-            catch (Exception e) when (e is SourceConsentException || e is InstallModeChangedException)
+            catch (Exception e) when (e is SourceConsentException || e is InstallModeChangedException || e is SkillGroupsChangedException)
             {
                 ShowSummary(e.Message, HelpBoxMessageType.Warning);
             }

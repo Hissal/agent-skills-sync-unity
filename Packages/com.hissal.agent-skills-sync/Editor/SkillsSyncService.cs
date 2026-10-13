@@ -59,16 +59,19 @@ namespace Hissal.AgentSkillsSync.Editor
         internal IReadOnlyList<string> InstalledDiffersFromLock() => Sync(null).InstalledDiffersFromLock(Lock);
 
         /// <summary>
-        /// Syncs only after every new source is confirmed. The window also passes the mode it showed,
-        /// so a changed project setting requires another review. Records consent only on success, and
+        /// Syncs only after every new source is confirmed. The window also passes the mode and skill groups it
+        /// showed, so a changed project setting requires another review. Records consent only on success, and
         /// marks every locked skill seen (<see cref="StartupCheck.RecordSynced"/>) from either entry point.
         /// </summary>
-        internal SyncSummary Run(IEnumerable<string> confirmedSources, InstallMode? expectedMode = null)
+        internal SyncSummary Run(IEnumerable<string> confirmedSources, InstallMode? expectedMode = null,
+            SkillGroups expectedGroups = null)
         {
             var unconfirmed = SourceConsent.Unconfirmed(Lock, LocalPrefs.Load(_unityRoot), confirmedSources, Choices.Skills);
             if (unconfirmed.Count > 0) throw new SourceConsentException(unconfirmed);
             if (expectedMode.HasValue && expectedMode.Value != Mode)
                 throw new InstallModeChangedException(Mode);
+            if (expectedGroups != null && !expectedGroups.SameAs(Groups))
+                throw new SkillGroupsChangedException();
 
             var summary = Sync(_fetcher(Mode)).Run(Lock);
             try
@@ -100,6 +103,12 @@ namespace Hissal.AgentSkillsSync.Editor
     {
         internal InstallModeChangedException(InstallMode mode)
             : base($"The install mode changed to {mode} since the window listed the skills. Review it and sync again.") { }
+    }
+
+    internal sealed class SkillGroupsChangedException : Exception
+    {
+        internal SkillGroupsChangedException()
+            : base("The project's skill groups changed since the window listed the skills. Review the list and sync again.") { }
     }
 
     /// <summary>The skills were synced, but consent and notification state could not be saved.</summary>
