@@ -114,6 +114,23 @@ class EditModeCommandTests(unittest.TestCase):
         self.assertIn("Example.Fails", output)
         self.assertIn("Assertion failed", output)
 
+    def test_unity_failed_child_result_prints_the_failing_test(self):
+        # Unity writes the result and its label as one value: Failed(Child) on a parent of a failing test.
+        result, output = self.run_command('''
+            <test-run total="2" passed="1" failed="1" result="Failed(Child)">
+              <test-suite fullname="Example.Tests" result="Failed(Child)">
+                <failure><message>One or more child tests had errors</message></failure>
+                <test-case fullname="Example.Tests.Fails" result="Failed(Error)">
+                  <failure><message>Boom</message></failure>
+                </test-case>
+              </test-suite>
+            </test-run>''')
+        self.assertNotEqual(result, 0)
+        self.assertIn("2 / 1 / 1", output)
+        self.assertIn("Example.Tests.Fails", output)
+        self.assertIn("Boom", output)
+        self.assertNotIn("No valid NUnit results report", output)
+
     def test_cli_cannot_start(self):
         output = io.StringIO()
         with patch("test_editmode.subprocess.run", side_effect=FileNotFoundError("unity")):
