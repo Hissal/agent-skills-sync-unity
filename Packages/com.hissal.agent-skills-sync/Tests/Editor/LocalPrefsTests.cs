@@ -74,6 +74,47 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void SeenSkills_Unset_IsNull()
+        {
+            Assert.That(LocalPrefs.Load(_project).SeenSkills, Is.Null);
+        }
+
+        [Test]
+        public void SeenSkills_SaveThenLoad_RoundTripsSortedAndKeepsAnEmptyList()
+        {
+            var prefs = LocalPrefs.Load(_project);
+            prefs.SeenSkills = new[] { "tdd", "code-review", "tdd" };
+            prefs.Save();
+            Assert.That(LocalPrefs.Load(_project).SeenSkills, Is.EqualTo(new[] { "code-review", "tdd" }));
+
+            prefs.SeenSkills = new string[0];
+            prefs.Save();
+            Assert.That(LocalPrefs.Load(_project).SeenSkills, Is.Empty);
+        }
+
+        [Test]
+        public void NotifyNewSkills_Unset_IsOn()
+        {
+            Assert.That(LocalPrefs.Load(_project).NotifyNewSkills, Is.True);
+        }
+
+        [Test]
+        public void NotifyNewSkills_TurnedOffThenOn_RoundTrips()
+        {
+            var prefs = LocalPrefs.Load(_project);
+            prefs.NotifyNewSkills = false;
+            prefs.Save();
+            Assert.That(LocalPrefs.Load(_project).NotifyNewSkills, Is.False);
+            Assert.That(File.ReadAllText(PrefsPath), Does.Contain("\"notifyNewSkills\": false"));
+
+            prefs = LocalPrefs.Load(_project);
+            prefs.NotifyNewSkills = true;
+            prefs.Save();
+            Assert.That(LocalPrefs.Load(_project).NotifyNewSkills, Is.True);
+            Assert.That(File.ReadAllText(PrefsPath), Does.Not.Contain("notifyNewSkills"));
+        }
+
+        [Test]
         public void Save_ValueSetToNull_RemovesIt()
         {
             var prefs = LocalPrefs.Load(_project);

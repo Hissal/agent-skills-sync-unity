@@ -15,9 +15,14 @@ namespace Hissal.AgentSkillsSync
         /// <param name="selectedFolders">Relative paths of the skills folders the status was read for.</param>
         /// <param name="selectedSkillsHash">See <see cref="LockfileHash.OfSelected"/>; null when the lockfile is unusable.</param>
         /// <param name="toRemove">The <paramref name="outOfSyncSkills"/> a sync would only remove or unlink; null = none.</param>
+        /// <param name="lockedSkills">Names of the skills the lock lists; null when the lockfile is unusable.</param>
+        /// <param name="optionalSkills">See <see cref="SeenSkills.Optional"/>; null = none.</param>
         public SyncStatus(string lockHash, IEnumerable<string> outOfSyncSkills, bool noFolderSelected = false,
-            IEnumerable<string> selectedFolders = null, string selectedSkillsHash = null, IEnumerable<string> toRemove = null)
+            IEnumerable<string> selectedFolders = null, string selectedSkillsHash = null, IEnumerable<string> toRemove = null,
+            IEnumerable<string> lockedSkills = null, IEnumerable<string> optionalSkills = null)
         {
+            LockedSkills = lockedSkills == null ? null : Sorted(lockedSkills);
+            OptionalSkills = Sorted(optionalSkills);
             LockHash = lockHash;
             SelectedSkillsHash = selectedSkillsHash;
             NoFolderSelected = noFolderSelected;
@@ -52,6 +57,15 @@ namespace Hissal.AgentSkillsSync
         /// unlink, as for an installed skill that is no longer selected or locked. The others are missing somewhere.
         /// </summary>
         public IReadOnlyList<string> ToRemove { get; }
+
+        /// <summary>Sorted names of the skills the lock lists for this tool to install; null when the lockfile is unusable.</summary>
+        public IReadOnlyList<string> LockedSkills { get; }
+
+        /// <summary>
+        /// Sorted names of the locked skills this machine leaves out by their default alone (see
+        /// <see cref="SeenSkills.Optional"/>): the ones the startup check tells the contributor about while they are new.
+        /// </summary>
+        public IReadOnlyList<string> OptionalSkills { get; }
 
         /// <summary>True when no skills folder is selected: nothing is installed and the startup check never notifies.</summary>
         public bool NoFolderSelected { get; }
@@ -99,6 +113,8 @@ namespace Hissal.AgentSkillsSync
             var noFolderSelected = selection != null && !layout.Folders.Any(f => selection.Any(s => s?.RelativePath == f.RelativePath));
             IEnumerable<string> outOfSync;
             IEnumerable<string> toRemove = null;
+            IEnumerable<string> lockedSkills = null;
+            IEnumerable<string> optionalSkills = null;
             string selectedSkillsHash = null;
             try
             {
@@ -106,6 +122,8 @@ namespace Hissal.AgentSkillsSync
                 var project = ProjectScanner.Scan(projectRoot, layout, readContents: false, prefsRoot: prefsRoot);
                 var lockfile = Lockfile.Load(projectRoot);
                 selectedSkillsHash = LockfileHash.OfSelected(lockfile, choices.Skills);
+                lockedSkills = lockfile.Skills.Select(s => s.Name).ToList();
+                optionalSkills = SeenSkills.Optional(lockfile, choices.Skills).ToList();
                 var plan = InstallPlanner.Plan(lockfile, project, choices, FixedCheck.AlwaysCurrent);
                 // A left-alone (foreign) entry is never synced, so it does not count as out of sync.
                 var changes = plan.Actions.Where(a => a.ChangesProject).ToList();
@@ -121,7 +139,8 @@ namespace Hissal.AgentSkillsSync
             var selectedFolders = layout.Folders
                 .Where(f => selection == null || selection.Any(s => s?.RelativePath == f.RelativePath))
                 .Select(f => f.RelativePath);
-            return new SyncStatus(lockHash, outOfSync, noFolderSelected, selectedFolders, selectedSkillsHash, toRemove);
+            return new SyncStatus(lockHash, outOfSync, noFolderSelected, selectedFolders, selectedSkillsHash, toRemove,
+                lockedSkills, optionalSkills);
         }
     }
 }

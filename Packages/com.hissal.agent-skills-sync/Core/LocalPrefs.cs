@@ -33,6 +33,8 @@ namespace Hissal.AgentSkillsSync
         const string InstallAnywaySkillsKey = "installAnywaySkills";
         const string OptedOutSkillsKey = "optedOutSkills";
         const string OptedInSkillsKey = "optedInSkills";
+        const string SeenSkillsKey = "seenSkills";
+        const string NotifyNewSkillsKey = "notifyNewSkills";
 
         readonly string _path;
         readonly List<KeyValuePair<string, object>> _members;
@@ -182,6 +184,27 @@ namespace Hissal.AgentSkillsSync
         {
             get => GetSortedNames(OptedInSkillsKey);
             set => SetSortedNames(OptedInSkillsKey, value);
+        }
+
+        /// <summary>
+        /// Sorted names of the locked skills the contributor has already been shown; null in prefs written before they
+        /// were recorded, and before the first sync or startup check seeds them. Kept when empty, which is not null.
+        /// Use <see cref="Hissal.AgentSkillsSync.SeenSkills"/> rather than this directly.
+        /// </summary>
+        public IReadOnlyList<string> SeenSkills
+        {
+            get => Get(SeenSkillsKey) is List<object> ? GetSortedNames(SeenSkillsKey) : null;
+            set => SetStringList(SeenSkillsKey, value == null ? null : new SortedSet<string>(value, StringComparer.Ordinal));
+        }
+
+        /// <summary>
+        /// Whether the startup check tells the contributor about a newly locked skill this machine does not install.
+        /// On unless turned off; only "off" is stored.
+        /// </summary>
+        public bool NotifyNewSkills
+        {
+            get => !(Get(NotifyNewSkillsKey) is bool notify) || notify;
+            set => Set(NotifyNewSkillsKey, value ? null : (object)false);
         }
 
         /// <summary>
