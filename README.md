@@ -73,10 +73,12 @@ Open it from **Window → Agent Skills Sync**. From top to bottom:
 - **Install mode**: Latest or Pinned, with a note on what the mode does (see [Install mode](#install-mode)).
 - **New sources**: a warning, and an "I trust the new source …" toggle for each source repo this machine has not
   synced before.
-- **Skills locked in `skills-lock.json`**: each skill with its source repo and what Sync will do to it (to install,
-  to update, to link, installed, left alone, skipped). Tags: `NEW SOURCE`, `differs from lock`, and
-  `can't verify lock hash` / `hash not verifiable` (see [Install mode](#install-mode)). Under each skill there is
-  one row per selected folder, with its status there, any copy you already have at user scope, and an install-anyway toggle.
+- **Skills locked in `skills-lock.json`**: each skill with an install checkbox, its source repo and what Sync will
+  do to it (to install, to update, to link, installed, left alone, skipped). Tags: `NEW SOURCE`, `differs from lock`,
+  and `can't verify lock hash` / `hash not verifiable` (see [Install mode](#install-mode)). Under each skill there is
+  one row per selected folder, with its status there, any copy you already have at user scope, and an install-anyway
+  toggle. A skill whose checkbox you cleared has no folder rows and reads "not installed (opted out)" (see
+  [Opting out of a skill](#opting-out-of-a-skill)).
 - **I trust these sources. Skills run with my agent's permissions.**: the consent box. **Sync** stays disabled until
   it is ticked and every new source is confirmed. Consent and confirmations are not saved: they reset on Refresh and
   after each sync.
@@ -115,8 +117,8 @@ Run with `--dry_run true` to list new sources, then ask the user to approve them
 for those sources in the current conversation remains valid. If the lock gains another source, obtain
 approval for that source before consenting again.
 
-The command honours this machine's saved folder selection, user-scope copies and install-anyway choices,
-including an empty folder selection. Its default mode is the project's setting. `--install_mode latest` or
+The command honours this machine's saved folder selection, user-scope copies, install-anyway choices and
+[opted-out skills](#opting-out-of-a-skill), including an empty folder selection. Its default mode is the project's setting. `--install_mode latest` or
 `pinned` overrides that setting without saving it. The result contains skill-name arrays for `installed`,
 `updated`, `removed`, `skipped`, `skippedForUserScope`, `linked`, `unlinked`, and `differsFromLock`, plus
 `userScopeDiffers`, `nothingChanged` and an empty `failures` array on success. Aborted or failed syncs fail the
@@ -132,6 +134,8 @@ changes. Nothing is installed automatically; a sync needs consent in the window 
 - The check is cheap: it looks at folder names, links and the lockfile's hash, never at skill contents. An installed
   copy that differs from the lock is caught through the lockfile change that caused it; the window, which hashes
   every copy, shows the details.
+- Skills you opted out of don't count. Locking, updating or removing one does not make the check offer a sync; it
+  only does while the tool's copy of one is still waiting to be removed.
 - While no skills folder is selected, it does not offer a sync. It can still ask once whether to add a folder whose
   agent home appeared (see [Choosing skills folders](#choosing-skills-folders-per-machine)).
 
@@ -242,6 +246,23 @@ un-skipped a skill. Legacy `skippedSkills` choices are ignored and removed on th
 withdraws managed project copies and links where they are no longer needed. Choose install anyway before syncing
 to retain them. The committed `.gitignore` blocks do not change because of these machine choices.
 
+## Opting out of a skill
+
+Every locked skill is installed by default. To leave one out on this machine, clear its checkbox in the window's
+skill list.
+
+- **Per machine, per skill, all folders.** The choice is stored in `UserSettings/AgentSkillsSync.json`
+  (`optedOutSkills`) as soon as you change the checkbox, and applies on the next sync. It is never committed, so it
+  does not affect your teammates.
+- **The next sync removes the skill**: the tool's links to it first, then its copy in `.agents/skills`. A folder
+  with the same name that the tool did not install is not touched.
+- **An opted-out skill is never downloaded.** Its source repo needs no confirmation and is not recorded as trusted.
+- **Tick the checkbox again** to install it on the next sync. If its source repo was never confirmed on this
+  machine, the window asks you to confirm it first.
+- The committed `.gitignore` blocks still list the skill, so they stay the same on every machine.
+- This differs from **use mine** (see [above](#skills-you-already-have-at-user-scope)), which skips a skill in one
+  folder because your agents already have their own copy of it.
+
 ## Install mode
 
 The lockfile stores a content hash (`computedHash`), not a commit. The tool can therefore only check whether
@@ -284,7 +305,8 @@ Some lock hashes can't be checked:
 
 Skills run with your agent's full permissions. Before every sync, you tick
 **I trust these sources. Skills run with my agent's permissions.** in the window. A source repo this machine has
-never synced from is tagged `NEW SOURCE`, and needs its own confirmation as well. If the lockfile gains a source
+never synced from is tagged `NEW SOURCE`, and needs its own confirmation as well. A source that only skills you
+[opted out of](#opting-out-of-a-skill) come from is not asked about until you opt in to one of them. If the lockfile gains a source
 after the window listed the skills, Sync stops and asks you to review again. The same happens if the install mode
 changed on disk. Confirmed sources are recorded per machine after a successful sync. The same rules apply in both
 install modes. In Latest mode, the window also tells you that skills differing from the lock will be installed.

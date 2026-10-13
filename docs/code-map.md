@@ -11,7 +11,8 @@ map says about them.
 Editor, which hands their results to the `SkillSync` constructor.
 
 1. **Read the lock.** _Caller:_ `Lockfile.FindRoot` finds it. `Lockfile` loads `skills-lock.json` into `LockedSkill`s;
-   `LockfileException` when it is missing or unusable. `LockfileHash` hashes it for the startup check.
+   `LockfileException` when it is missing or unusable. `LockfileHash` hashes it for the startup check: the whole
+   file, and (`LockfileHash.OfSelected`) only the entries this machine installs.
    `SkillName` owns the folder-name rule; `LockedSkill`, `UnsupportedSkill` and `PlanAction` enforce it on construction.
    Managed names read from prefs and `.gitignore` blocks are filtered by the same rule.
 2. **Scan what is there.**
@@ -21,9 +22,11 @@ Editor, which hands their results to the `SkillSync` constructor.
      for folders like `~/.codex/skills`, `ClaudePluginSource` for Claude Code plugins, `CodexPluginSource` for Codex
      plugins) for user-scope copies, giving
      a `UserScopeState` of `UserScopeCopy`s.
-     `MachineChoices` bundles this machine's layout, `FolderSelection`, `UserScopeState` and `InstallAnywayChoices`.
+     `MachineChoices` bundles this machine's layout, `FolderSelection`, `UserScopeState`, `InstallAnywayChoices`
+     and `SkillSelection` (which locked skills it installs: the contributor's opt-out or opt-in, else the default).
 3. **Plan.** `InstallPlanner` turns lock + `ProjectState` + `MachineChoices` into an `InstallPlan` of `PlanAction`s
-   (`PlanActionKind`), deciding whether a managed copy is current through an `IInstalledCopyCheck`.
+   (`PlanActionKind`), deciding whether a managed copy is current through an `IInstalledCopyCheck`. A skill
+   `SkillSelection` leaves out gets no action but the withdrawal of its managed entries, so step 4 never fetches it.
 4. **Fetch and verify.** For each action that needs a fetch, the `ISkillFetcher` downloads the skill and
    `SkillFolderHash` hashes it. `InstallModeStrategy` (picked by `InstallMode`) decides what to fetch, whether a
    changed source is refused, and which check plans step 5. Every `SkillFetchException` is collected and thrown
@@ -43,8 +46,9 @@ user-scope copies a skip checks against the lock) for the startup check.
 | `LocalPrefs` | `UserSettings/AgentSkillsSync.json` (per machine) | the ↳ rows' readers, `ProjectScanner` | `PlanExecutor`, `SkillsSyncWindow`, `StartupNotifier` |
 | ↳ folder selection | `LocalPrefs.SelectedFolders` / declined offers | `FolderSelection` | `FolderSelection.Save` |
 | ↳ install anyway | `LocalPrefs.InstallAnywaySkills` | `InstallAnywayChoices` | `InstallAnywayChoices.Set` |
-| ↳ synced sources | `LocalPrefs.SyncedSources` | `SourceConsent` | `SourceConsent.RecordSynced` |
-| ↳ last sync / decline | `LastSyncedLockHash`, `DeclinedState` | `StartupCheck.ShouldNotify` | `StartupCheck.RecordSynced` / `RecordDeclined` |
+| ↳ skill selection | `LocalPrefs.OptedOutSkills` / `OptedInSkills` | `SkillSelection` | `SkillSelection.Set` |
+| ↳ synced sources | `LocalPrefs.SyncedSources` (selected skills' sources only) | `SourceConsent` | `SourceConsent.RecordSynced` |
+| ↳ last sync / decline | `LastSyncedLockHash`, `LastSyncedSelectedSkillsHash`, `DeclinedState` | `StartupCheck.ShouldNotify` | `StartupCheck.RecordSynced` / `RecordDeclined` |
 | ↳ managed skills | `LocalPrefs.ManagedSkills` | `ProjectScanner` | `PlanExecutor` |
 | `ManagedStateFile` | block in each skills folder's `.gitignore` (committed) | `ProjectScanner` | `PlanExecutor` |
 | `MachineChoices` | in memory, built by `MachineChoices.Read` from `LocalPrefs` + `UserEnvironment` | `SkillSync`, `SyncStatus` | — |
@@ -71,11 +75,12 @@ The `Record*`/`Set`/`Save` helpers change a loaded `LocalPrefs`; the caller then
 - `SkillsSyncCommand` (`Pipeline/`) — parses invocation-only options and returns a structured plan or sync summary.
   Its Editor assembly is enabled by a package version define only when `com.unity.pipeline` is installed.
 - `SkillsSyncWindow` — the sync window: folder selection, plan preview, source consent (`SourceConsent`), install
-  mode, install-anyway toggles, then `SkillsSyncService.Run`. `UnityProjectRoot` holds `LocalPrefs` and
+  mode, per-skill install checkboxes (`SkillSelection.Set`), install-anyway toggles, then `SkillsSyncService.Run`. `UnityProjectRoot` holds `LocalPrefs` and
   `ProjectSyncSettings`; `SkillsRoot` holds `skills-lock.json` and the skills folders.
 - `StartupNotifier` — once per editor session: offers newly found folders (`FolderSelection.Offers`), reads
   `SyncStatus`, and asks `StartupCheck.ShouldNotify` whether to offer opening the window.
-- `StartupCheck` (Core) — the notify decision; `StartupNotifier` records declines, `SkillsSyncWindow` records syncs.
+- `StartupCheck` (Core) — the notify decision; `StartupNotifier` records declines, `SkillsSyncService` records syncs.
+  `StartupCheck.LockChanged` ignores a lock change that touches only skills this machine does not install.
 
 ## Tests
 

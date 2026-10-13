@@ -15,7 +15,9 @@ namespace Hissal.AgentSkillsSync.Editor
     /// A failed sync marks each skill that could not be fetched or verified with its error.
     /// The skills folders to install into are chosen at the top and stored in local prefs as soon as they change;
     /// until then they are pre-selected by autofill, and nothing is installed before Sync.
-    /// Each skill lists its status per selected folder; where that folder's agents already have the skill at user scope,
+    /// Each skill has an install checkbox (stored in local prefs at once, applied on Sync); unchecking it opts this machine
+    /// out of the skill, which then shows no folder rows.
+    /// Each selected skill lists its status per selected folder; where that folder's agents already have the skill at user scope,
     /// the row names where it was found and offers an install-anyway toggle (stored in local prefs at once, applied on Sync).
     /// The project's install mode (Latest or Pinned) is shown and edited here, and saved to the committed project settings.
     /// </summary>
@@ -52,7 +54,7 @@ namespace Hissal.AgentSkillsSync.Editor
 
         static FolderLayout Layout => FolderLayout.Default;
 
-        /// <summary>This machine's folder selection, user-scope copies and install-anyway choices, as stored now.</summary>
+        /// <summary>This machine's folder selection, user-scope copies, install-anyway choices and skill selection, as stored now.</summary>
         static MachineChoices Choices() =>
             MachineChoices.Read(SkillsRoot, LocalPrefs.Load(UnityProjectRoot), UserEnvironment.Current, Layout);
 
@@ -141,9 +143,16 @@ namespace Hissal.AgentSkillsSync.Editor
                 var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
                 foreach (var skill in lockfile.Skills)
                 {
-                    _skillList.Add(SkillRow(skill, selected.Count == 0 ? "not installed (no folder selected)" : SyncText.PendingLabel(plan, skill.Name),
-                        _installMode, isNew.Contains(skill.Source), differs.Contains(skill.Name),
-                        _failures.TryGetValue(skill.Name, out var failure) ? failure : null));
+                    var name = skill.Name;
+                    var install = service.Choices.Skills.IsSelected(name);
+                    var pending = !install ? SyncText.OptedOutLabel(plan, name)
+                        : selected.Count == 0 ? "not installed (no folder selected)"
+                        : SyncText.PendingLabel(plan, name);
+                    _skillList.Add(SkillRow(skill, pending, _installMode, install && isNew.Contains(skill.Source), differs.Contains(name),
+                        install && _failures.TryGetValue(name, out var failure) ? failure : null,
+                        install, value => SaveSkillSelected(name, value)));
+                    // An opted-out skill is installed in no folder, so it has no per-folder status.
+                    if (!install) continue;
                     foreach (var folder in selected)
                         _skillList.Add(FolderRow(skill, folder, plan, choices));
                 }
@@ -276,11 +285,37 @@ namespace Hissal.AgentSkillsSync.Editor
             Refresh();
         }
 
+        void SaveSkillSelected(string skillName, bool selected)
+        {
+            try
+            {
+                var prefs = LocalPrefs.Load(UnityProjectRoot);
+                SkillSelection.Set(prefs, skillName, selected);
+                prefs.Save();
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                ShowSummary("Saving the skill choice failed: " + e.Message, HelpBoxMessageType.Error);
+                Debug.LogException(e);
+            }
+            Refresh();
+        }
+
+        /// <param name="install">Whether this machine installs the skill: the row's checkbox. <paramref name="setInstall"/> stores a change.</param>
         static VisualElement SkillRow(LockedSkill skill, string pending, InstallMode mode, bool newSource, bool differsFromLock,
-            SkillFetchException failure)
+            SkillFetchException failure, bool install, Action<bool> setInstall)
         {
             var container = new VisualElement { style = { marginBottom = 2 } };
             var row = new VisualElement { style = { flexDirection = FlexDirection.Row } };
+            var toggle = new Toggle
+            {
+                tooltip = "Install this skill on this machine. Stored on this machine only; applies on the next Sync. " +
+                          "Uncheck to opt out: Sync then removes the tool's copy and links of it.",
+                style = { marginRight = 4 },
+            };
+            toggle.SetValueWithoutNotify(install);
+            toggle.RegisterValueChangedCallback(e => setInstall(e.newValue));
+            row.Add(toggle);
             row.Add(new Label(skill.Name) { style = { width = 200, unityFontStyleAndWeight = FontStyle.Bold } });
             row.Add(new Label(skill.Source) { style = { flexGrow = 1 } });
             if (newSource) row.Add(new Label("NEW SOURCE") { style = { unityFontStyleAndWeight = FontStyle.Bold, color = new Color(0.9f, 0.6f, 0.1f), marginRight = 8 } });

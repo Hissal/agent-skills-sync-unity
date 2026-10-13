@@ -22,6 +22,12 @@ namespace Hissal.AgentSkillsSync.Editor
             return "installed";
         }
 
+        /// <summary>The row status of a skill this machine opted out of: whether Sync still has a managed copy or link to remove.</summary>
+        public static string OptedOutLabel(InstallPlan plan, string skillName) =>
+            plan.Actions.Any(a => a.SkillName == skillName && (a.Kind == PlanActionKind.Remove || a.Kind == PlanActionKind.Unlink))
+                ? "opted out (removed on Sync)"
+                : "not installed (opted out)";
+
         /// <summary>Names the lock entries whose source type this tool does not install, and says it leaves them alone.</summary>
         public static string UnsupportedMessage(IReadOnlyList<UnsupportedSkill> unsupported) =>
             "Not installed by this tool (only \"github\" sources are; these are left to whatever installs them): " +
