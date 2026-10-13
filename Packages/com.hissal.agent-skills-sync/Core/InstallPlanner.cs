@@ -32,6 +32,12 @@ namespace Hissal.AgentSkillsSync
     /// (<see cref="UserScopeCopy.DiffersFromLock"/>) -> WarnUserScopeDiffers right after its SkipUserScope. That check
     /// hashes the copy, the planner's only read of the filesystem.
     /// </para>
+    /// <para>
+    /// Skill selection: a locked skill this machine does not install (<see cref="SkillSelection"/>) is needed in no
+    /// folder, so its managed entries go as above (links first) and nothing else is planned or reported for it: no
+    /// Install, Link, Update, LeaveForeign or SkipUserScope. It stays locked, so its entries are never taken for a
+    /// project-authored skill, and it stays in the <c>.gitignore</c> blocks.
+    /// </para>
     /// </remarks>
     public static class InstallPlanner
     {
@@ -42,7 +48,7 @@ namespace Hissal.AgentSkillsSync
             UserScopeState userScope = null, InstallAnywayChoices installAnyway = null) =>
             Plan(lockfile, project, new MachineChoices(layout, selected, userScope, installAnyway), installedCopyCheck);
 
-        /// <param name="choices">This machine's layout, folder selection, user-scope copies and install-anyway choices.</param>
+        /// <param name="choices">This machine's layout, folder selection, user-scope copies, install-anyway choices and skill selection.</param>
         /// <param name="installedCopyCheck">Whether a managed canonical copy is current; defaults to <see cref="LockedHashCheck"/>.</param>
         public static InstallPlan Plan(Lockfile lockfile, ProjectState project, MachineChoices choices,
             IInstalledCopyCheck installedCopyCheck = null)
@@ -50,6 +56,7 @@ namespace Hissal.AgentSkillsSync
             var layout = choices.Layout;
             var userScope = choices.UserScope;
             var installAnyway = choices.InstallAnyway;
+            var skills = choices.Skills;
             var check = installedCopyCheck ?? LockedHashCheck.Instance;
             var actions = new List<PlanAction>();
             var managed = layout.Folders.ToDictionary(f => f, f => new SortedSet<string>(StringComparer.Ordinal));
@@ -65,16 +72,18 @@ namespace Hissal.AgentSkillsSync
             bool Needed(SkillsFolder folder) =>
                 folder.Role == SkillsFolderRole.Canonical ? anySelected : selectedPaths.Contains(folder.RelativePath);
 
-            // A selected folder whose agents already have the skill at user scope, and no install-anyway override is stored.
+            // A selected folder whose agents already have the selected skill at user scope, and no install-anyway override is stored.
             bool Skipped(SkillsFolder folder, string skill) =>
-                selectedPaths.Contains(folder.RelativePath) && !installAnyway.IsInstalledAnyway(folder, skill) && userScope.Has(folder, skill);
+                skills.IsSelected(skill) && selectedPaths.Contains(folder.RelativePath) &&
+                !installAnyway.IsInstalledAnyway(folder, skill) && userScope.Has(folder, skill);
 
-            // Per locked skill: a selected link folder that does not skip it, or the canonical folder while any selected
-            // folder (canonical or link) still needs the project copy of it.
+            // Per locked skill this machine installs: a selected link folder that does not skip it, or the canonical
+            // folder while any selected folder (canonical or link) still needs the project copy of it.
             bool NeededFor(SkillsFolder folder, string skill) =>
-                folder.Role == SkillsFolderRole.Canonical
+                skills.IsSelected(skill) &&
+                (folder.Role == SkillsFolderRole.Canonical
                     ? layout.Folders.Any(f => selectedPaths.Contains(f.RelativePath) && !Skipped(f, skill))
-                    : Needed(folder) && !Skipped(folder, skill);
+                    : Needed(folder) && !Skipped(folder, skill));
 
             // Takes a managed entry out of a folder the tool no longer keeps entries in.
             void Withdraw(string name, SkillsFolder folder, FolderState state)
@@ -176,7 +185,7 @@ namespace Hissal.AgentSkillsSync
                 }
             }
 
-            // The committed .gitignore blocks: the same on every machine, whatever it selected or manages. They list
+            // The committed .gitignore blocks: the same on every machine, whatever it selected, opted out of or manages. They list
             // only what the tool may install or link; an unsupported entry's placer decides whether git tracks it.
             var ignored = new Dictionary<SkillsFolder, IReadOnlyList<string>>();
             foreach (var folder in layout.Folders)

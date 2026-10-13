@@ -30,6 +30,8 @@ namespace Hissal.AgentSkillsSync
         const string ManagedSkillsKey = "managedSkills";
         const string ManagedSkillsRootKey = "managedSkillsRoot";
         const string InstallAnywaySkillsKey = "installAnywaySkills";
+        const string OptedOutSkillsKey = "optedOutSkills";
+        const string OptedInSkillsKey = "optedInSkills";
 
         readonly string _path;
         readonly List<KeyValuePair<string, object>> _members;
@@ -152,6 +154,26 @@ namespace Hissal.AgentSkillsSync
         }
 
         /// <summary>
+        /// Sorted names of the skills the contributor opted out of on this machine, whatever their default. Never null;
+        /// the member is left out while there are none. Use <see cref="SkillSelection"/> rather than this directly.
+        /// </summary>
+        public IReadOnlyList<string> OptedOutSkills
+        {
+            get => GetSortedNames(OptedOutSkillsKey);
+            set => SetSortedNames(OptedOutSkillsKey, value);
+        }
+
+        /// <summary>
+        /// Sorted names of the skills the contributor opted in to on this machine though their default is not to install
+        /// them. Never null; the member is left out while there are none. Use <see cref="SkillSelection"/> rather than this directly.
+        /// </summary>
+        public IReadOnlyList<string> OptedInSkills
+        {
+            get => GetSortedNames(OptedInSkillsKey);
+            set => SetSortedNames(OptedInSkillsKey, value);
+        }
+
+        /// <summary>
         /// Per skills folder (<see cref="SkillsFolder.RelativePath"/>), the names of the entries this machine's syncs
         /// created there and still manage; null until the first sync records it (the scanner then falls back to the
         /// names in each folder's <c>.gitignore</c> block). Written by <see cref="PlanExecutor"/>.
@@ -236,6 +258,16 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Stores the strings as an array member; null removes it.</summary>
         void SetStringList(string key, IEnumerable<string> values) =>
             Set(key, values == null ? null : new List<object>(values));
+
+        IReadOnlyList<string> GetSortedNames(string key) =>
+            new List<string>(new SortedSet<string>(GetStringList(key), StringComparer.Ordinal));
+
+        /// <summary>Stores the distinct names as a sorted array member; null or none removes it.</summary>
+        void SetSortedNames(string key, IEnumerable<string> names)
+        {
+            var sorted = new SortedSet<string>(names ?? new string[0], StringComparer.Ordinal);
+            SetStringList(key, sorted.Count == 0 ? null : sorted);
+        }
 
         object Get(string key)
         {
