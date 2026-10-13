@@ -289,7 +289,10 @@ What contributors see and get:
   out of every selected-by-default group, or setting `ungroupedSelectedByDefault` to `false`, **removes** the tool's
   copy and links of it from every machine that never chose, on that machine's next sync. The window shows such a
   skill as "not selected by default (removed on Sync)" beforehand, and the sync summary names it under "Removed
-  because no longer selected by default". A contributor who ticked the skill keeps it.
+  because no longer selected by default". A contributor who ticked the skill keeps it. A removal you caused
+  yourself (opting out, or clearing the tick of a skill you had opted in to) is not listed there: each sync records
+  on this machine which skills it installed by default alone (`lastSyncedDefaultSkills` in
+  `UserSettings/AgentSkillsSync.json`) to tell the two apart.
 - A skill that is not selected is never downloaded, needs no source confirmation and does not count as out of sync.
   The generated `.gitignore` blocks list every locked skill whatever the groups say.
 

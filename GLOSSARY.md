@@ -11,9 +11,12 @@
 - **Selected skill**: a locked skill this machine installs: the contributor's explicit choice for it (opt out or
   opt in), else the default its **skill groups** give it. A skill that is not selected is never fetched, needs no
   source consent and never makes the project out of sync.
-- **New skill**: a locked skill this machine leaves out by its default alone that the contributor has not been shown
-  yet. The startup check announces it once and the window tags it; it is seen once they sync, choose for it in the
-  window, or dismiss the notice. A skill the contributor **opted out** of is never new.
+- **Optional skill**: a locked skill that is not a **selected skill** on this machine by its default alone: its
+  **skill groups** leave it out and the contributor made no choice for it. A skill the contributor **opted out** of
+  is not optional, and one they opted in to is selected.
+  _Avoid_: unselected skill (which also covers an opt-out), extra skill.
+- **New skill**: an **optional skill** the contributor has not been shown yet. The startup check announces it once
+  and the window tags it; it is seen once they sync, choose for it in the window, or dismiss the notice.
   _Avoid_: unseen skill, optional-skill alert.
 - **Install anyway**: the contributor's explicit per-skill, per-folder override to install the project copy despite
   a detected user-scope copy. Stored in local prefs on that machine only.
