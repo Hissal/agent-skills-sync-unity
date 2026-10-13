@@ -16,7 +16,7 @@ namespace Hissal.AgentSkillsSync
         /// <param name="selectedSkillsHash">See <see cref="LockfileHash.OfSelected"/>; null when the lockfile is unusable.</param>
         /// <param name="toRemove">The <paramref name="outOfSyncSkills"/> a sync would only remove or unlink; null = none.</param>
         /// <param name="lockedSkills">Names of the skills the lock lists; null when the lockfile is unusable.</param>
-        /// <param name="optionalSkills">See <see cref="SeenSkills.Optional"/>; null = none.</param>
+        /// <param name="optionalSkills">See <see cref="SkillSelection.OptionalIn"/>; null = none.</param>
         public SyncStatus(string lockHash, IEnumerable<string> outOfSyncSkills, bool noFolderSelected = false,
             IEnumerable<string> selectedFolders = null, string selectedSkillsHash = null, IEnumerable<string> toRemove = null,
             IEnumerable<string> lockedSkills = null, IEnumerable<string> optionalSkills = null)
@@ -45,7 +45,8 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Sorted names of skills a sync would change: selected locked skills missing in at least one skills folder (or
-        /// behind a broken link), and managed skills it would remove or unlink (no longer locked, or opted out of).
+        /// behind a broken link), and managed skills it would remove or unlink (no longer locked, opted out of, or no
+        /// longer selected because their default changed).
         /// Entries left alone as foreign do not count.
         /// An installed copy is not hashed, so an outdated one is not listed: a lock change surfaces through
         /// <see cref="LockHash"/> instead.
@@ -63,7 +64,7 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Sorted names of the locked skills this machine leaves out by their default alone (see
-        /// <see cref="SeenSkills.Optional"/>): the ones the startup check tells the contributor about while they are new.
+        /// <see cref="SkillSelection.OptionalIn"/>): the ones the startup check tells the contributor about while they are new.
         /// </summary>
         public IReadOnlyList<string> OptionalSkills { get; }
 
@@ -123,13 +124,13 @@ namespace Hissal.AgentSkillsSync
                 var lockfile = Lockfile.Load(projectRoot);
                 selectedSkillsHash = LockfileHash.OfSelected(lockfile, choices.Skills);
                 lockedSkills = lockfile.Skills.Select(s => s.Name).ToList();
-                optionalSkills = SeenSkills.Optional(lockfile, choices.Skills).ToList();
+                optionalSkills = choices.Skills.OptionalIn(lockfile).ToList();
                 var plan = InstallPlanner.Plan(lockfile, project, choices, FixedCheck.AlwaysCurrent);
                 // A left-alone (foreign) entry is never synced, so it does not count as out of sync.
                 var changes = plan.Actions.Where(a => a.ChangesProject).ToList();
                 outOfSync = changes.Select(a => a.SkillName);
                 toRemove = changes.GroupBy(a => a.SkillName)
-                    .Where(g => g.All(a => a.Kind == PlanActionKind.Remove || a.Kind == PlanActionKind.Unlink))
+                    .Where(g => g.All(a => a.Withdraws))
                     .Select(g => g.Key);
             }
             catch (LockfileException)

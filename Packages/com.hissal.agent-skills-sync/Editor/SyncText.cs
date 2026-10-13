@@ -24,7 +24,7 @@ namespace Hissal.AgentSkillsSync.Editor
 
         /// <summary>The row status of a skill this machine opted out of: whether Sync still has a managed copy or link to remove.</summary>
         public static string OptedOutLabel(InstallPlan plan, string skillName) =>
-            plan.Actions.Any(a => a.SkillName == skillName && (a.Kind == PlanActionKind.Remove || a.Kind == PlanActionKind.Unlink))
+            plan.Actions.Any(a => a.SkillName == skillName && a.Withdraws)
                 ? "opted out (removed on Sync)"
                 : "not installed (opted out)";
 
@@ -35,7 +35,7 @@ namespace Hissal.AgentSkillsSync.Editor
         public static string UnselectedLabel(InstallPlan plan, string skillName, SkillSelection skills)
         {
             if (skills.IsOptedOut(skillName)) return OptedOutLabel(plan, skillName);
-            return plan.Actions.Any(a => a.SkillName == skillName && (a.Kind == PlanActionKind.Remove || a.Kind == PlanActionKind.Unlink))
+            return plan.Actions.Any(a => a.SkillName == skillName && a.Withdraws)
                 ? "not selected by default (removed on Sync)"
                 : "not installed (not selected by default)";
         }

@@ -69,7 +69,7 @@ namespace Hissal.AgentSkillsSync.Tests
             var groups = new SkillGroups(new[] { Group("recommended", true, "tdd", "code-review"), Group("art", false, "ui-uitk", "shaders") });
             var prefs = Prefs(optedOut: new[] { "tdd" }, optedIn: new[] { "ui-uitk" });
 
-            var selection = SkillSelection.From(prefs, groups.IsSelectedByDefault);
+            var selection = SkillSelection.From(prefs, groups);
 
             Assert.That(selection.IsSelected("tdd"), Is.False, "opted out of a recommended skill");
             Assert.That(selection.IsSelected("ui-uitk"), Is.True, "opted in to an optional skill");
@@ -84,10 +84,10 @@ namespace Hissal.AgentSkillsSync.Tests
             var after = new SkillGroups(new[] { Group("recommended", true, "ui-uitk"), Group("optional", false, "tdd") });
             var neverChose = Prefs();
 
-            Assert.That(SkillSelection.From(neverChose, before.IsSelectedByDefault).IsSelected("tdd"), Is.True);
-            Assert.That(SkillSelection.From(neverChose, before.IsSelectedByDefault).IsSelected("ui-uitk"), Is.False);
-            Assert.That(SkillSelection.From(neverChose, after.IsSelectedByDefault).IsSelected("tdd"), Is.False);
-            Assert.That(SkillSelection.From(neverChose, after.IsSelectedByDefault).IsSelected("ui-uitk"), Is.True);
+            Assert.That(SkillSelection.From(neverChose, before).IsSelected("tdd"), Is.True);
+            Assert.That(SkillSelection.From(neverChose, before).IsSelected("ui-uitk"), Is.False);
+            Assert.That(SkillSelection.From(neverChose, after).IsSelected("tdd"), Is.False);
+            Assert.That(SkillSelection.From(neverChose, after).IsSelected("ui-uitk"), Is.True);
         }
 
         [Test]
@@ -95,20 +95,20 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             var optional = new SkillGroups(new[] { Group("optional", false, "tdd") });
             var prefs = Prefs();
-            SkillSelection.Set(prefs, "tdd", true, optional.IsSelectedByDefault("tdd"));
+            SkillSelection.Set(prefs, new[] { "tdd" }, true, optional);
             var recommended = new SkillGroups(new[] { Group("recommended", true, "tdd") });
             var ungroupedOff = new SkillGroups(ungroupedSelectedByDefault: false);
 
-            Assert.That(SkillSelection.From(prefs, recommended.IsSelectedByDefault).IsSelected("tdd"), Is.True);
-            Assert.That(SkillSelection.From(prefs, optional.IsSelectedByDefault).IsSelected("tdd"), Is.True);
-            Assert.That(SkillSelection.From(prefs, ungroupedOff.IsSelectedByDefault).IsSelected("tdd"), Is.True);
+            Assert.That(SkillSelection.From(prefs, recommended).IsSelected("tdd"), Is.True);
+            Assert.That(SkillSelection.From(prefs, optional).IsSelected("tdd"), Is.True);
+            Assert.That(SkillSelection.From(prefs, ungroupedOff).IsSelected("tdd"), Is.True);
         }
 
         [Test]
         public void Selection_IsOptedOut_IsOnlyTheContributorsChoice()
         {
             var groups = new SkillGroups(new[] { Group("optional", false, "ui-uitk") });
-            var selection = SkillSelection.From(Prefs(optedOut: new[] { "tdd" }), groups.IsSelectedByDefault);
+            var selection = SkillSelection.From(Prefs(optedOut: new[] { "tdd" }), groups);
 
             Assert.That(selection.IsOptedOut("tdd"), Is.True);
             Assert.That(selection.IsOptedOut("ui-uitk"), Is.False, "unselected by default, not opted out");
@@ -121,23 +121,23 @@ namespace Hissal.AgentSkillsSync.Tests
             var groups = new SkillGroups(new[] { Group("recommended", true, "tdd", "ui-uitk"), Group("art", false, "ui-uitk", "shaders") });
             var prefs = Prefs(optedOut: new[] { "ui-uitk" });
 
-            SkillSelection.Set(prefs, new[] { "ui-uitk", "shaders" }, true, groups.IsSelectedByDefault);
+            SkillSelection.Set(prefs, new[] { "ui-uitk", "shaders" }, true, groups);
 
             Assert.That(prefs.OptedInSkills, Is.EqualTo(new[] { "shaders" }));
             Assert.That(prefs.OptedOutSkills, Is.Empty);
 
-            SkillSelection.Set(prefs, new[] { "ui-uitk", "shaders" }, false, groups.IsSelectedByDefault);
+            SkillSelection.Set(prefs, new[] { "ui-uitk", "shaders" }, false, groups);
 
             Assert.That(prefs.OptedInSkills, Is.Empty);
             Assert.That(prefs.OptedOutSkills, Is.EqualTo(new[] { "ui-uitk" }));
-            Assert.That(SkillSelection.From(prefs, groups.IsSelectedByDefault).IsSelected("tdd"), Is.True, "not in the group toggled");
+            Assert.That(SkillSelection.From(prefs, groups).IsSelected("tdd"), Is.True, "not in the group toggled");
         }
 
         [Test]
         public void Plan_SkillInSeveralGroups_IsInstalledOnce()
         {
             var groups = new SkillGroups(new[] { Group("recommended", true, "tdd"), Group("programming", true, "tdd") });
-            var choices = new MachineChoices(Layout, new[] { Layout.Canonical }, skills: SkillSelection.From(Prefs(), groups.IsSelectedByDefault));
+            var choices = new MachineChoices(Layout, new[] { Layout.Canonical }, skills: SkillSelection.From(Prefs(), groups));
 
             var plan = InstallPlanner.Plan(Lock(new[] { "tdd" }), EmptyProject(), choices);
 
@@ -149,7 +149,7 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             var groups = new SkillGroups(new[] { Group("recommended", true, "tdd"), Group("art", false, "ui-uitk") });
             InstallPlan Plan(LocalPrefs prefs) => InstallPlanner.Plan(Lock(new[] { "tdd", "ui-uitk" }), EmptyProject(),
-                new MachineChoices(Layout, new[] { Layout.Canonical }, skills: SkillSelection.From(prefs, groups.IsSelectedByDefault)));
+                new MachineChoices(Layout, new[] { Layout.Canonical }, skills: SkillSelection.From(prefs, groups)));
 
             Assert.That(Plan(Prefs()).Actions.Select(a => a.ToString()), Is.EqualTo(new[] { "Install .agents/skills/tdd" }));
             Assert.That(Plan(Prefs(optedIn: new[] { "ui-uitk" })).Actions.Select(a => a.ToString()),

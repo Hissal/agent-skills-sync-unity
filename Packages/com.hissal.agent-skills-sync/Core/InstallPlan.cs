@@ -87,6 +87,9 @@ namespace Hissal.AgentSkillsSync
         /// <summary>Whether the action needs the skill fetched first (Install, Update).</summary>
         public bool NeedsFetch => Kind == PlanActionKind.Install || Kind == PlanActionKind.Update;
 
+        /// <summary>Whether the action takes a managed entry away (Remove, Unlink).</summary>
+        public bool Withdraws => Kind == PlanActionKind.Remove || Kind == PlanActionKind.Unlink;
+
         /// <summary>Whether applying the action changes the project (false for LeaveForeign, SkipUserScope and WarnUserScopeDiffers).</summary>
         public bool ChangesProject => Kind != PlanActionKind.LeaveForeign && Kind != PlanActionKind.SkipUserScope &&
                                       Kind != PlanActionKind.WarnUserScopeDiffers;

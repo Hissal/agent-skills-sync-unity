@@ -61,14 +61,14 @@ namespace Hissal.AgentSkillsSync.Tests
         SyncSummary Sync(SkillGroups groups)
         {
             var layout = FolderLayout.Default;
-            var skills = SkillSelection.From(LocalPrefs.Load(_project), groups.IsSelectedByDefault);
+            var skills = SkillSelection.From(LocalPrefs.Load(_project), groups);
             return new SkillSync(_project, new FixtureFetcher(_root), new MachineChoices(layout, layout.Folders, skills: skills)).Run();
         }
 
         void Choose(string skill, bool selected, SkillGroups groups)
         {
             var prefs = LocalPrefs.Load(_project);
-            SkillSelection.Set(prefs, skill, selected, groups.IsSelectedByDefault(skill));
+            SkillSelection.Set(prefs, new[] { skill }, selected, groups);
             prefs.Save();
         }
 
@@ -126,6 +126,48 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Run_ContributorDropsTheirOptIn_IsRemovedButNotNamedAsADefaultChange()
+        {
+            Choose("ui-uitk", true, UiUitkOptional);
+            Sync(UiUitkOptional);
+            Assert.That(Installed("ui-uitk"), Is.True);
+            Choose("ui-uitk", false, UiUitkOptional);
+            Assert.That(LocalPrefs.Load(_project).OptedOutSkills, Is.Empty, "a choice equal to the default is not stored");
+
+            var summary = Sync(UiUitkOptional);
+
+            Assert.That(summary.Removed, Is.EqualTo(new[] { "ui-uitk" }));
+            Assert.That(summary.NoLongerSelectedByDefault, Is.Empty);
+            Assert.That(SyncText.Describe(summary), Does.Not.Contain("selected by default"));
+        }
+
+        [Test]
+        public void Run_NoFolderSelectedForASkillStillSelectedByDefault_IsNotNamedAsADefaultChange()
+        {
+            Sync(Recommended);
+
+            var layout = FolderLayout.Default;
+            var skills = SkillSelection.From(LocalPrefs.Load(_project), Recommended);
+            var summary = new SkillSync(_project, new FixtureFetcher(_root), new MachineChoices(layout, new SkillsFolder[0], skills: skills)).Run();
+
+            Assert.That(summary.Removed, Is.EquivalentTo(new[] { "tdd", "ui-uitk" }));
+            Assert.That(summary.NoLongerSelectedByDefault, Is.Empty);
+        }
+
+        [Test]
+        public void Run_DefaultChangedAfterASyncByAVersionThatRecordedNoDefaults_StillNamesTheRemoval()
+        {
+            Sync(Recommended);
+            var prefs = LocalPrefs.Load(_project);
+            prefs.LastSyncedDefaultSkills = null;
+            prefs.Save();
+
+            var summary = Sync(UiUitkOptional);
+
+            Assert.That(summary.NoLongerSelectedByDefault, Is.EqualTo(new[] { "ui-uitk" }));
+        }
+
+        [Test]
         public void Run_SkillNeverInstalledAndNotSelectedByDefault_NamesNothing()
         {
             var summary = Sync(UiUitkOptional);
@@ -140,7 +182,7 @@ namespace Hissal.AgentSkillsSync.Tests
             Sync(Recommended);
             InstallPlan Plan(SkillSelection skills) =>
                 new SkillSync(_project, null, new MachineChoices(FolderLayout.Default, FolderLayout.Default.Folders, skills: skills)).Plan();
-            var byDefault = new SkillSelection(selectedByDefault: UiUitkOptional.IsSelectedByDefault);
+            var byDefault = new SkillSelection(groups: UiUitkOptional);
             var optedOut = new SkillSelection(optedOut: new[] { "ui-uitk" });
 
             Assert.That(SyncText.UnselectedLabel(Plan(byDefault), "ui-uitk", byDefault), Is.EqualTo("not selected by default (removed on Sync)"));

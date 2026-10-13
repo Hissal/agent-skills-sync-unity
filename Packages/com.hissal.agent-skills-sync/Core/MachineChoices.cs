@@ -45,7 +45,7 @@ namespace Hissal.AgentSkillsSync
             var selected = FolderSelection.Effective(prefs, layout, environment);
             var userScope = UserScopeScanner.Scan(selected, environment, UserScopeScanner.DefaultSourcesFor(projectRoot));
             return new MachineChoices(layout, selected, userScope, InstallAnywayChoices.From(prefs),
-                SkillSelection.From(prefs, (groups ?? SkillGroups.None).IsSelectedByDefault));
+                SkillSelection.From(prefs, groups));
         }
 
         public FolderLayout Layout { get; }

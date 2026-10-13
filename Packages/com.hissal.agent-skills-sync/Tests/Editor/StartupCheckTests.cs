@@ -397,7 +397,7 @@ namespace Hissal.AgentSkillsSync.Tests
 
         /// <summary>This machine made no choice; the project's groups leave code-review unselected by default.</summary>
         static MachineChoices CodeReviewOffByDefault() =>
-            new MachineChoices(skills: new SkillSelection(selectedByDefault: name => name != "code-review"));
+            new MachineChoices(skills: new SkillSelection(groups: new SkillGroups(new[] { new SkillGroup("optional", false, new[] { "code-review" }) })));
 
         bool ShouldNotifyWith(MachineChoices choices) => StartupCheck.ShouldNotify(SyncStatus.Read(_project, choices), Prefs);
 

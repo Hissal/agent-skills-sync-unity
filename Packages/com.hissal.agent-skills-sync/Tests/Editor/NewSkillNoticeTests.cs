@@ -36,7 +36,10 @@ namespace Hissal.AgentSkillsSync.Tests
 
         /// <summary>The project selects only tdd by default: every other skill is optional. The contributor's choices are on top.</summary>
         static MachineChoices Choices(string[] optedOut = null, string[] optedIn = null) =>
-            new MachineChoices(skills: new SkillSelection(optedOut, optedIn, name => name == "tdd"));
+            new MachineChoices(skills: new SkillSelection(optedOut, optedIn, OnlyTdd));
+
+        static readonly SkillGroups OnlyTdd =
+            new SkillGroups(new[] { new SkillGroup("recommended", true, new[] { "tdd" }) }, ungroupedSelectedByDefault: false);
 
         LocalPrefs Prefs => LocalPrefs.Load(_project);
 

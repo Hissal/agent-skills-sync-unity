@@ -33,6 +33,7 @@ namespace Hissal.AgentSkillsSync
         const string InstallAnywaySkillsKey = "installAnywaySkills";
         const string OptedOutSkillsKey = "optedOutSkills";
         const string OptedInSkillsKey = "optedInSkills";
+        const string LastSyncedDefaultSkillsKey = "lastSyncedDefaultSkills";
         const string SeenSkillsKey = "seenSkills";
         const string NotifyNewSkillsKey = "notifyNewSkills";
 
@@ -184,6 +185,18 @@ namespace Hissal.AgentSkillsSync
         {
             get => GetSortedNames(OptedInSkillsKey);
             set => SetSortedNames(OptedInSkillsKey, value);
+        }
+
+        /// <summary>
+        /// Sorted names of the locked skills the last successful sync on this machine selected by their default alone,
+        /// with no opt-in; null in prefs written before they were recorded. Kept when empty, which is not null. Tells a
+        /// removal caused by a changed default from one caused by the contributor's own choice.
+        /// Use <see cref="SkillSelection"/> rather than this directly.
+        /// </summary>
+        public IReadOnlyList<string> LastSyncedDefaultSkills
+        {
+            get => Get(LastSyncedDefaultSkillsKey) is List<object> ? GetSortedNames(LastSyncedDefaultSkillsKey) : null;
+            set => SetStringList(LastSyncedDefaultSkillsKey, value == null ? null : new SortedSet<string>(value, StringComparer.Ordinal));
         }
 
         /// <summary>

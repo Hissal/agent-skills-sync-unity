@@ -21,13 +21,16 @@ namespace Hissal.AgentSkillsSync.Tests
         [TearDown]
         public void TearDown() => TempDirectory.Delete(_project);
 
-        SkillSelection Reloaded(Func<string, bool> selectedByDefault = null) =>
-            SkillSelection.From(LocalPrefs.Load(_project), selectedByDefault);
+        /// <summary>Groups that leave art and audio out by default and select every other skill.</summary>
+        static readonly SkillGroups ArtAndAudioOptional =
+            new SkillGroups(new[] { new SkillGroup("optional", false, new[] { "art", "audio" }) });
 
-        void Set(string skill, bool selected, bool selectedByDefault = true)
+        SkillSelection Reloaded(SkillGroups groups = null) => SkillSelection.From(LocalPrefs.Load(_project), groups);
+
+        void Set(string skill, bool selected, SkillGroups groups = null)
         {
             var prefs = LocalPrefs.Load(_project);
-            SkillSelection.Set(prefs, skill, selected, selectedByDefault);
+            SkillSelection.Set(prefs, new[] { skill }, selected, groups);
             prefs.Save();
         }
 
@@ -77,18 +80,17 @@ namespace Hissal.AgentSkillsSync.Tests
         [Test]
         public void Set_OptInToASkillUnselectedByDefault_IsStoredAsAnOptIn()
         {
-            Set("art", true, selectedByDefault: false);
+            Set("art", true, ArtAndAudioOptional);
 
             Assert.That(LocalPrefs.Load(_project).OptedInSkills, Is.EqualTo(new[] { "art" }));
-            Assert.That(Reloaded(_ => false).IsSelected("art"), Is.True);
-            Assert.That(Reloaded(_ => false).IsSelected("audio"), Is.False);
+            Assert.That(Reloaded(ArtAndAudioOptional).IsSelected("art"), Is.True);
+            Assert.That(Reloaded(ArtAndAudioOptional).IsSelected("audio"), Is.False);
         }
 
         [Test]
         public void IsSelected_ExplicitChoiceWinsOverTheDefault()
         {
-            var selection = new SkillSelection(optedOut: new[] { "tdd" }, optedIn: new[] { "art" },
-                selectedByDefault: name => name != "art" && name != "audio");
+            var selection = new SkillSelection(optedOut: new[] { "tdd" }, optedIn: new[] { "art" }, groups: ArtAndAudioOptional);
 
             Assert.That(selection.IsSelected("tdd"), Is.False);
             Assert.That(selection.IsSelected("art"), Is.True);

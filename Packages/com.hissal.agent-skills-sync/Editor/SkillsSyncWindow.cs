@@ -48,8 +48,9 @@ namespace Hissal.AgentSkillsSync.Editor
         Lockfile _lockfile;
         SkillSelection _skills = SkillSelection.All;
         SkillGroups _groups = SkillGroups.None;
-        // Group sections the contributor collapsed, kept across refreshes (null = the ungrouped section).
+        // Names of the group sections the contributor collapsed, kept across refreshes.
         readonly HashSet<string> _collapsed = new HashSet<string>(StringComparer.Ordinal);
+        // The same for the ungrouped section, which has no name.
         bool _ungroupedCollapsed;
         readonly HashSet<string> _confirmedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -65,11 +66,11 @@ namespace Hissal.AgentSkillsSync.Editor
         static FolderLayout Layout => FolderLayout.Default;
 
         /// <summary>
-        /// This machine's folder selection, user-scope copies and install-anyway choices, as stored now. Its skill
-        /// selection lacks the project's group defaults: read that from the <see cref="SkillsSyncService"/>.
+        /// The skills folders this machine installs into, as stored now: shown even when the lock or the project
+        /// settings cannot be read. Every other machine choice comes from the <see cref="SkillsSyncService"/>.
         /// </summary>
-        static MachineChoices Choices() =>
-            MachineChoices.Read(SkillsRoot, LocalPrefs.Load(UnityProjectRoot), UserEnvironment.Current, Layout);
+        static IReadOnlyList<SkillsFolder> SelectedFolders() =>
+            FolderSelection.Effective(LocalPrefs.Load(UnityProjectRoot), Layout, UserEnvironment.Current);
 
         [MenuItem("Window/Agent Skills Sync")]
         public static void Open() => GetWindow<SkillsSyncWindow>(Title).Show();
@@ -146,8 +147,7 @@ namespace Hissal.AgentSkillsSync.Editor
             ShowStatus(null, HelpBoxMessageType.None);
             ShowLockPath();
 
-            var choices = Choices();
-            var selected = choices.Selected;
+            var selected = SelectedFolders();
             ShowFolders(selected);
             _notifyNewSkills.SetValueWithoutNotify(LocalPrefs.Load(UnityProjectRoot).NotifyNewSkills);
 
@@ -164,10 +164,11 @@ namespace Hissal.AgentSkillsSync.Editor
                     : new HashSet<string>();
                 var newSources = service.NewSources;
                 var isNew = new HashSet<string>(newSources, StringComparer.OrdinalIgnoreCase);
-                var skills = service.Choices.Skills;
+                var choices = service.Choices;
+                var skills = choices.Skills;
                 var newSkills = new HashSet<string>(service.NewSkills, StringComparer.Ordinal);
                 _groups = service.Groups;
-                var sections = service.Sections;
+                var sections = _groups.Sections(lockfile);
                 var unknown = SyncText.UnknownGroupSkillsMessage(sections);
                 if (unknown.Length > 0) _skillList.Add(new HelpBox(unknown, HelpBoxMessageType.Warning));
                 foreach (var section in sections)
@@ -197,7 +198,7 @@ namespace Hissal.AgentSkillsSync.Editor
                     _skillList.Add(new HelpBox(SyncText.UnsupportedMessage(lockfile.Unsupported), HelpBoxMessageType.Info));
 
                 _lockfile = lockfile;
-                _skills = service.Choices.Skills;
+                _skills = skills;
 
                 var removals = plan.Actions.Where(a => a.Kind == PlanActionKind.Remove).Select(a => a.SkillName).Distinct().ToList();
                 if (removals.Count > 0)
@@ -391,7 +392,7 @@ namespace Hissal.AgentSkillsSync.Editor
             try
             {
                 var prefs = LocalPrefs.Load(UnityProjectRoot);
-                SkillSelection.Set(prefs, skillNames, selected, _groups.IsSelectedByDefault);
+                SkillSelection.Set(prefs, skillNames, selected, _groups);
                 SeenSkills.Mark(prefs, skillNames);
                 prefs.Save();
             }
@@ -425,7 +426,7 @@ namespace Hissal.AgentSkillsSync.Editor
             if (newSkill)
                 row.Add(new Label("NEW")
                 {
-                    tooltip = "Locked since you last synced. This machine does not install it unless you check it.",
+                    tooltip = "A newly locked optional skill you have not reviewed yet. This machine does not install it unless you check it.",
                     style = { unityFontStyleAndWeight = FontStyle.Bold, color = new Color(0.3f, 0.7f, 0.3f), marginRight = 8 },
                 });
             if (newSource) row.Add(new Label("NEW SOURCE") { style = { unityFontStyleAndWeight = FontStyle.Bold, color = new Color(0.9f, 0.6f, 0.1f), marginRight = 8 } });

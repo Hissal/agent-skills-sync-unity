@@ -52,9 +52,6 @@ namespace Hissal.AgentSkillsSync.Editor
         /// <summary>The project's skill groups, which give each locked skill without a stored choice its default.</summary>
         internal SkillGroups Groups { get; }
 
-        /// <summary>The lock as the window lists it: one section per group, then the ungrouped skills.</summary>
-        internal IReadOnlyList<SkillGroupSection> Sections => Groups.Sections(Lock);
-
         SkillSync Sync(ISkillFetcher fetcher) =>
             new SkillSync(Root, fetcher, Choices, mode: Mode, prefsRoot: _unityRoot);
 

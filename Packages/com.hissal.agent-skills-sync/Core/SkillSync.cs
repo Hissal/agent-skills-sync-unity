@@ -8,6 +8,8 @@ namespace Hissal.AgentSkillsSync
     /// One sync of a project: read the lock, scan the folders, plan, fetch everything the plan needs (Install and Update), then apply it.
     /// Fetching (and hash verification) finishes before the first filesystem change, so a failed fetch (offline, or a
     /// source changed since it was locked) leaves the project untouched. Every skill is attempted so all failures are reported.
+    /// A finished sync records in <see cref="LocalPrefs"/> which skills it selected by their default alone, so the next
+    /// one can tell a removal caused by a changed default (<see cref="SyncSummary.NoLongerSelectedByDefault"/>).
     /// </summary>
     /// <remarks>
     /// The <see cref="InstallMode"/> decides what a source that changed since it was locked means.
@@ -133,10 +135,18 @@ namespace Hissal.AgentSkillsSync
             var applyCheck = _strategy.ApplyCheck(upstreamHashes);
             var plan = applyCheck == null ? toFetch : PlanWith(lockfile, project, applyCheck);
             var summary = _executor.Execute(_projectRoot, plan, fetched, _prefsRoot);
-            // Left out by the default alone: a removal of one of these was the project's doing, not the contributor's.
-            var unselectedByDefault = lockfile.Skills.Select(s => s.Name)
-                .Where(name => !_choices.Skills.IsSelected(name) && !_choices.Skills.IsOptedOut(name));
-            return new SyncSummary(summary.Applied, summary.LinkMethods, differs, unselectedByDefault);
+            // A removal of one of these was the project's doing, not the contributor's.
+            var noLongerSelectedByDefault = lockfile.Skills.Select(s => s.Name).Where(_choices.Skills.IsNoLongerSelectedByDefault).ToList();
+            RecordSyncedDefaults(lockfile);
+            return new SyncSummary(summary.Applied, summary.LinkMethods, differs, noLongerSelectedByDefault);
+        }
+
+        /// <summary>Reloads the prefs the executor just wrote and records which skills this sync selected by their default alone.</summary>
+        void RecordSyncedDefaults(Lockfile lockfile)
+        {
+            var prefs = LocalPrefs.Load(_prefsRoot ?? _projectRoot);
+            _choices.Skills.RecordSynced(prefs, lockfile);
+            prefs.Save();
         }
     }
 }

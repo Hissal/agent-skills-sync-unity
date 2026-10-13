@@ -132,8 +132,9 @@ namespace Hissal.AgentSkillsSync.Tests
             WriteSettings(ReviewOptional);
             var service = Service();
 
-            Assert.That(service.Sections.Select(s => s.Name), Is.EqualTo(new[] { "recommended", "optional" }));
-            Assert.That(SyncText.UnknownGroupSkillsMessage(service.Sections), Is.EqualTo(
+            var sections = service.Groups.Sections(service.Lock);
+            Assert.That(sections.Select(s => s.Name), Is.EqualTo(new[] { "recommended", "optional" }));
+            Assert.That(SyncText.UnknownGroupSkillsMessage(sections), Is.EqualTo(
                 "Group \"optional\" lists a skill that is not in skills-lock.json: not-locked. " +
                 "Sync ignores it; fix or remove the name in ProjectSettings/AgentSkillsSync.json."));
             Assert.That(service.Run(service.NewSources).Installed, Is.EqualTo(new[] { "tdd" }));
@@ -144,7 +145,7 @@ namespace Hissal.AgentSkillsSync.Tests
         {
             WriteSettings(ReviewOptional);
             var prefs = LocalPrefs.Load(_project);
-            SkillSelection.Set(prefs, new[] { "review" }, true, Service().Groups.IsSelectedByDefault);
+            SkillSelection.Set(prefs, new[] { "review" }, true, Service().Groups);
             prefs.Save();
             var service = Service();
 
@@ -347,7 +348,7 @@ namespace Hissal.AgentSkillsSync.Tests
         void SetSkillSelected(string skill, bool selected)
         {
             var prefs = LocalPrefs.Load(_project);
-            SkillSelection.Set(prefs, skill, selected);
+            SkillSelection.Set(prefs, new[] { skill }, selected);
             prefs.Save();
         }
 

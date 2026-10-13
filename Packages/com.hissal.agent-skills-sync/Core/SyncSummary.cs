@@ -6,15 +6,16 @@ namespace Hissal.AgentSkillsSync
     /// <summary>What a sync did, for the window's summary.</summary>
     public sealed class SyncSummary
     {
-        readonly HashSet<string> _unselectedByDefault;
+        readonly HashSet<string> _noLongerSelectedByDefault;
 
-        /// <param name="unselectedByDefault">
-        /// Names of locked skills this machine leaves out by their default alone, with no opt-out; null = none.
+        /// <param name="noLongerSelectedByDefault">
+        /// Names of locked skills this machine leaves out because their default changed (see
+        /// <see cref="SkillSelection.IsNoLongerSelectedByDefault"/>); null = none.
         /// </param>
         public SyncSummary(IReadOnlyList<PlanAction> applied, IReadOnlyDictionary<PlanAction, LinkMethod> linkMethods = null,
-            IReadOnlyList<string> differsFromLock = null, IEnumerable<string> unselectedByDefault = null)
+            IReadOnlyList<string> differsFromLock = null, IEnumerable<string> noLongerSelectedByDefault = null)
         {
-            _unselectedByDefault = new HashSet<string>(unselectedByDefault ?? Enumerable.Empty<string>(), System.StringComparer.Ordinal);
+            _noLongerSelectedByDefault = new HashSet<string>(noLongerSelectedByDefault ?? Enumerable.Empty<string>(), System.StringComparer.Ordinal);
             Applied = applied;
             LinkMethods = linkMethods ?? new Dictionary<PlanAction, LinkMethod>();
             DiffersFromLock = differsFromLock ?? new List<string>();
@@ -29,11 +30,11 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Names of skills whose managed copy or links this sync deleted because the project's skill groups no longer
-        /// select them by default and the contributor made no choice (<see cref="SkillGroups"/>): never an opt-out.
-        /// Also listed in <see cref="Removed"/> or <see cref="Unlinked"/>.
+        /// select them by default (<see cref="SkillGroups"/>): never an opt-out, an opt-in the contributor dropped, or
+        /// a skill that is still selected and only lost its folder. Also listed in <see cref="Removed"/> or <see cref="Unlinked"/>.
         /// </summary>
         public IReadOnlyList<string> NoLongerSelectedByDefault =>
-            Applied.Where(a => (a.Kind == PlanActionKind.Remove || a.Kind == PlanActionKind.Unlink) && _unselectedByDefault.Contains(a.SkillName))
+            Applied.Where(a => a.Withdraws && _noLongerSelectedByDefault.Contains(a.SkillName))
                 .Select(a => a.SkillName).Distinct().ToList();
 
         /// <summary>Every action applied, in order, including LeaveForeign (which changes nothing).</summary>

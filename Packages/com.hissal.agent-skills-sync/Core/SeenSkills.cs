@@ -6,7 +6,7 @@ namespace Hissal.AgentSkillsSync
 {
     /// <summary>
     /// Which locked skills the contributor has already been shown (<see cref="LocalPrefs.SeenSkills"/>, on this machine
-    /// only). A skill is new when it is locked, left out by its default alone, and not seen; the startup check tells the
+    /// only). A skill is new when it is locked, optional (<see cref="SkillSelection.IsOptional"/>) and not seen; the startup check tells the
     /// contributor about it once and the sync window tags it. It becomes seen when they sync, choose for it in the
     /// window, or dismiss the notice.
     /// </summary>
@@ -17,13 +17,6 @@ namespace Hissal.AgentSkillsSync
     /// </remarks>
     public static class SeenSkills
     {
-        /// <summary>
-        /// The locked skills that can be new: the ones this machine leaves out by their default alone, in lockfile order.
-        /// A skill the contributor opted out of is never new, since the opt-out is already their answer to it.
-        /// </summary>
-        public static IEnumerable<string> Optional(Lockfile lockfile, SkillSelection skills) =>
-            lockfile.Skills.Select(s => s.Name).Where(name => !skills.IsSelected(name) && !skills.IsOptedOut(name));
-
         /// <summary>The sorted names among <paramref name="optionalSkills"/> the contributor has not seen; none while unseeded.</summary>
         public static IReadOnlyList<string> New(LocalPrefs prefs, IEnumerable<string> optionalSkills)
         {
@@ -34,7 +27,7 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>The sorted new skills of <paramref name="lockfile"/> for this machine's <paramref name="skills"/>.</summary>
         public static IReadOnlyList<string> New(LocalPrefs prefs, Lockfile lockfile, SkillSelection skills) =>
-            New(prefs, Optional(lockfile, skills));
+            New(prefs, skills.OptionalIn(lockfile));
 
         /// <summary>
         /// Seeds prefs that have no seen skills yet with <paramref name="lockedSkills"/>; seeded prefs, and a null list
