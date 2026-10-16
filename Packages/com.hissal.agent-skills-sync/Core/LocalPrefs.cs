@@ -36,6 +36,15 @@ namespace Hissal.AgentSkillsSync
         const string LastSyncedDefaultSkillsKey = "lastSyncedDefaultSkills";
         const string SeenSkillsKey = "seenSkills";
         const string NotifyNewSkillsKey = "notifyNewSkills";
+        const string ChoiceScopeKey = "choiceScope";
+
+        /// <summary>
+        /// The members holding the contributor's choices, the ones a checkout following the shared choices
+        /// (<see cref="SharedChoices"/>) takes from them: folder selection, declined folders, opt-outs, opt-ins and
+        /// install-anyway choices. Ownership, sync fingerprints, synced defaults and notice state are never among them.
+        /// </summary>
+        static readonly string[] ChoiceKeys =
+            { SelectedFoldersKey, DeclinedFoldersKey, OptedOutSkillsKey, OptedInSkillsKey, InstallAnywaySkillsKey };
 
         readonly string _path;
         readonly List<KeyValuePair<string, object>> _members;
@@ -59,17 +68,67 @@ namespace Hissal.AgentSkillsSync
             return new LocalPrefs(path, ReadMembers(path) ?? new List<KeyValuePair<string, object>>());
         }
 
-        /// <summary>Writes the prefs, creating <c>UserSettings/</c> if needed.</summary>
+        /// <summary>Reads a prefs file at <paramref name="path"/> outside a project, such as the shared choices.</summary>
+        internal static LocalPrefs LoadFile(string path) =>
+            new LocalPrefs(path, ReadMembers(path) ?? new List<KeyValuePair<string, object>>());
+
+        /// <summary>
+        /// Writes the prefs, creating <c>UserSettings/</c> if needed. The file is written beside the old one and swapped
+        /// in, so a failed write leaves the old prefs.
+        /// </summary>
         public void Save()
         {
             Set("skippedSkills", null); // Retired choices are ignored, never migrated to install-anyway.
             if (Get(VersionKey) == null) _members.Insert(0, new KeyValuePair<string, object>(VersionKey, (double)FormatVersion));
             Directory.CreateDirectory(Path.GetDirectoryName(_path));
-            var temp = _path + ".tmp";
+            var temp = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllText(temp, JsonWriter.Write(_members));
-            if (File.Exists(_path)) File.Delete(_path);
-            File.Move(temp, _path);
+            if (File.Exists(_path)) File.Replace(temp, _path, null);
+            else File.Move(temp, _path);
         }
+
+        /// <summary>
+        /// Where this checkout's choices come from: <see cref="Hissal.AgentSkillsSync.ChoiceScope.Shared"/> (set by a
+        /// restore) mirrors the repository's shared choices, <see cref="Hissal.AgentSkillsSync.ChoiceScope.Worktree"/>
+        /// keeps its own, and null (prefs no restore has touched) keeps its own without sharing them.
+        /// </summary>
+        public ChoiceScope? ChoiceScope
+        {
+            get
+            {
+                switch (GetString(ChoiceScopeKey))
+                {
+                    case "shared": return Hissal.AgentSkillsSync.ChoiceScope.Shared;
+                    case "worktree": return Hissal.AgentSkillsSync.ChoiceScope.Worktree;
+                    default: return null;
+                }
+            }
+            set => Set(ChoiceScopeKey, value?.ToString().ToLowerInvariant());
+        }
+
+        /// <summary>Whether these prefs hold any of the contributor's choices (see <see cref="ChoiceKeys"/>).</summary>
+        internal bool HasChoices => ChoiceKeys.Any(key => Get(key) != null);
+
+        /// <summary>Replaces the choices here with those of <paramref name="other"/>, leaving every other member.</summary>
+        internal void CopyChoicesFrom(LocalPrefs other)
+        {
+            foreach (var key in ChoiceKeys) Set(key, other.Get(key));
+        }
+
+        /// <summary>Whether <paramref name="other"/> holds the same choices as these prefs.</summary>
+        internal bool SameChoicesAs(LocalPrefs other) =>
+            (SelectedFolders == null) == (other.SelectedFolders == null)
+            && Sorted(SelectedFolders).SequenceEqual(Sorted(other.SelectedFolders))
+            && Sorted(DeclinedFolders).SequenceEqual(Sorted(other.DeclinedFolders))
+            && OptedOutSkills.SequenceEqual(other.OptedOutSkills)
+            && OptedInSkills.SequenceEqual(other.OptedInSkills)
+            && FlattenNames(InstallAnywaySkills).SequenceEqual(FlattenNames(other.InstallAnywaySkills));
+
+        static IEnumerable<string> Sorted(IEnumerable<string> values) =>
+            (values ?? Enumerable.Empty<string>()).OrderBy(v => v, StringComparer.Ordinal);
+
+        static IEnumerable<string> FlattenNames(IReadOnlyDictionary<string, IReadOnlyList<string>> namesByFolder) =>
+            namesByFolder.SelectMany(f => f.Value.Select(name => f.Key + "/" + name)).OrderBy(n => n, StringComparer.Ordinal);
 
         /// <summary>Hash of the lockfile as it was at the last successful sync (see <see cref="LockfileHash"/>).</summary>
         public string LastSyncedLockHash
@@ -348,5 +407,18 @@ namespace Hissal.AgentSkillsSync
                 return null;
             }
         }
+    }
+}
+
+namespace Hissal.AgentSkillsSync
+{
+    /// <summary>Where a checkout's choices come from (<see cref="LocalPrefs.ChoiceScope"/>).</summary>
+    public enum ChoiceScope
+    {
+        /// <summary>The repository's shared choices on this machine (<see cref="SharedChoices"/>).</summary>
+        Shared,
+
+        /// <summary>This checkout's own choices, which win over the shared ones.</summary>
+        Worktree,
     }
 }

@@ -31,7 +31,7 @@ namespace Hissal.AgentSkillsSync.Pipeline
                 else throw new ArgumentException("install_mode must be latest or pinned.");
             }
 
-            var service = new SkillsSyncService(SkillsSyncService.UnityProjectRoot, modeOverride: mode);
+            var service = new SkillsSyncService(SkillsSyncWindow.UnityProjectRoot, modeOverride: mode);
             if (dryRun)
             {
                 var plan = service.Plan();

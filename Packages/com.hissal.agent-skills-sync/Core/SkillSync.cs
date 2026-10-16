@@ -89,6 +89,14 @@ namespace Hissal.AgentSkillsSync
         public InstallPlan Plan(Lockfile lockfile) =>
             PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout, prefsRoot: _prefsRoot), _strategy.PreviewCheck);
 
+        /// <summary>
+        /// The locked skills <see cref="Run(Lockfile)"/> would fetch now, in plan order, found without fetching: in
+        /// Pinned mode the missing and stale ones, in Latest mode every selected one installed or to install.
+        /// </summary>
+        public IReadOnlyList<LockedSkill> ToFetch(Lockfile lockfile) =>
+            PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout, prefsRoot: _prefsRoot), _strategy.FetchCheck)
+                .Actions.Where(a => a.NeedsFetch).Select(a => a.Skill).Distinct().ToList();
+
         /// <summary>Plans with this sync's machine choices.</summary>
         InstallPlan PlanWith(Lockfile lockfile, ProjectState project, IInstalledCopyCheck check) =>
             InstallPlanner.Plan(lockfile, project, _choices, check);

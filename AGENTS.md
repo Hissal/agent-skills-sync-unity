@@ -1,6 +1,6 @@
 # Agent Skills Sync (Unity)
 
-Editor-only UPM package that installs a project's locked agent skills. Spec: [#1](https://github.com/Hissal/agent-skills-sync-unity/issues/1).
+UPM package that installs a project's locked agent skills: Unity Editor adapters over an engine-free `Core`, plus a standalone .NET restore command (`Tools~/AgentSkillsSync.Cli`) for new worktrees. Spec: [#1](https://github.com/Hissal/agent-skills-sync-unity/issues/1).
 
 ## Agent skills
 

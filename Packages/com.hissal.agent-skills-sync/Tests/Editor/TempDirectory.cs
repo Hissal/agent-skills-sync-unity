@@ -16,8 +16,11 @@ namespace Hissal.AgentSkillsSync.Tests
             Directory.Delete(root, recursive: true);
         }
 
+        /// <summary>Also clears read-only files (Git writes its objects read-only), which a recursive delete refuses on Windows.</summary>
         static void RemoveLinks(string folder)
         {
+            foreach (var file in Directory.GetFiles(folder))
+                if (File.GetAttributes(file).HasFlag(FileAttributes.ReadOnly)) File.SetAttributes(file, FileAttributes.Normal);
             foreach (var child in Directory.GetDirectories(folder))
             {
                 if (File.GetAttributes(child).HasFlag(FileAttributes.ReparsePoint)) DirectoryLink.Remove(child);

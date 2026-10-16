@@ -20,3 +20,16 @@
   _Avoid_: unseen skill, optional-skill alert.
 - **Install anyway**: the contributor's explicit per-skill, per-folder override to install the project copy despite
   a detected user-scope copy. Stored in local prefs on that machine only.
+- **Restore**: installing a checkout's selected skills from recorded **snapshots**, offline and without Unity, so a
+  new worktree is ready before an agent starts in it. Distinct from a sync, which fetches upstream.
+- **Shared choices**: a repository's folder selection, opt-ins and opt-outs, install-anyway choices and synced
+  sources on one machine, which every checkout of that repository follows unless it keeps **worktree choices**.
+  Kept outside every checkout, keyed by the repository's Git common directory and the Unity project's path.
+- **Worktree choices**: a checkout's own choices, which win over the **shared choices**. A checkout keeps them when
+  told to, or when its existing choices differed from the shared ones when they were first shared.
+- **Baseline**: the checkout whose choices become a repository's first **shared choices**, when its checkouts'
+  existing choices disagree. Never picked by enumeration order.
+- **Snapshot**: an immutable copy of a skill's files on this machine, stored once under its content hash.
+  _Avoid_: cache (which is the fetcher's download cache).
+- **Resolution**: the recorded **snapshot** a complete lock entry installed at its last sync or import, with its
+  provenance. A restore installs it instead of fetching, so an unchanged entry gets the same bytes everywhere.

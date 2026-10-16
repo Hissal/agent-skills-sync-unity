@@ -25,6 +25,8 @@ namespace Hissal.AgentSkillsSync.Editor
     /// Each selected skill lists its status per selected folder; where that folder's agents already have the skill at user scope,
     /// the row names where it was found and offers an install-anyway toggle (stored in local prefs at once, applied on Sync).
     /// The project's install mode (Latest or Pinned) is shown and edited here, and saved to the committed project settings.
+    /// In a checkout following the repository's shared choices (as a restore leaves it), each choice stored in local prefs
+    /// also becomes the shared one (<see cref="SharedChoices"/>).
     /// </summary>
     public sealed class SkillsSyncWindow : EditorWindow
     {
@@ -55,22 +57,28 @@ namespace Hissal.AgentSkillsSync.Editor
         readonly HashSet<string> _confirmedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>The Unity project folder: holds this machine's local prefs and the committed project settings.</summary>
-        internal static string UnityProjectRoot => SkillsSyncService.UnityProjectRoot;
+        internal static string UnityProjectRoot => Path.GetDirectoryName(Application.dataPath);
 
         /// <summary>
         /// The folder holding <c>skills-lock.json</c> (see <see cref="Lockfile.FindRoot"/>), where the skills folders are
         /// installed; the Unity project folder when no lock is found.
         /// </summary>
-        internal static string SkillsRoot => SkillsSyncService.SkillsRoot;
+        internal static string SkillsRoot => Lockfile.FindRoot(UnityProjectRoot) ?? UnityProjectRoot;
 
         static FolderLayout Layout => FolderLayout.Default;
+
+        /// <summary>This checkout's prefs, with the shared choices while it follows them (<see cref="SharedChoices"/>).</summary>
+        static LocalPrefs LoadPrefs() => SharedChoices.Load(UnityProjectRoot, UserEnvironment.Current);
+
+        /// <summary>Saves the prefs; a choice made in a checkout following the shared choices becomes the shared one.</summary>
+        static void SavePrefs(LocalPrefs prefs) => SharedChoices.Save(prefs, UnityProjectRoot, UserEnvironment.Current);
 
         /// <summary>
         /// The skills folders this machine installs into, as stored now: shown even when the lock or the project
         /// settings cannot be read. Every other machine choice comes from the <see cref="SkillsSyncService"/>.
         /// </summary>
         static IReadOnlyList<SkillsFolder> SelectedFolders() =>
-            FolderSelection.Effective(LocalPrefs.Load(UnityProjectRoot), Layout, UserEnvironment.Current);
+            FolderSelection.Effective(LoadPrefs(), Layout, UserEnvironment.Current);
 
         [MenuItem("Window/Agent Skills Sync")]
         public static void Open() => GetWindow<SkillsSyncWindow>(Title).Show();
@@ -149,7 +157,7 @@ namespace Hissal.AgentSkillsSync.Editor
 
             var selected = SelectedFolders();
             ShowFolders(selected);
-            _notifyNewSkills.SetValueWithoutNotify(LocalPrefs.Load(UnityProjectRoot).NotifyNewSkills);
+            _notifyNewSkills.SetValueWithoutNotify(LoadPrefs().NotifyNewSkills);
 
             try
             {
@@ -310,9 +318,9 @@ namespace Hissal.AgentSkillsSync.Editor
         {
             try
             {
-                var prefs = LocalPrefs.Load(UnityProjectRoot);
+                var prefs = LoadPrefs();
                 InstallAnywayChoices.Set(prefs, folder, skillName, installAnyway);
-                prefs.Save();
+                SavePrefs(prefs);
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
             {
@@ -371,9 +379,9 @@ namespace Hissal.AgentSkillsSync.Editor
         {
             try
             {
-                var prefs = LocalPrefs.Load(UnityProjectRoot);
+                var prefs = LoadPrefs();
                 prefs.NotifyNewSkills = notify;
-                prefs.Save();
+                SavePrefs(prefs);
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
             {
@@ -391,10 +399,10 @@ namespace Hissal.AgentSkillsSync.Editor
         {
             try
             {
-                var prefs = LocalPrefs.Load(UnityProjectRoot);
+                var prefs = LoadPrefs();
                 SkillSelection.Set(prefs, skillNames, selected, _groups);
                 SeenSkills.Mark(prefs, skillNames);
-                prefs.Save();
+                SavePrefs(prefs);
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
             {
@@ -481,7 +489,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 pair.Value.RegisterValueChangedCallback(_ =>
                     SaveFolders(toggles.Where(t => t.Value.value).Select(t => t.Key), environment));
 
-            if (!FolderSelection.IsChosen(LocalPrefs.Load(UnityProjectRoot)))
+            if (!FolderSelection.IsChosen(LoadPrefs()))
                 _folders.Add(new HelpBox(selected.Count > 0
                     ? "Pre-selected because these agents' user folders exist on this machine. Nothing is installed until you Sync."
                     : "No agent user folders found on this machine, so nothing is pre-selected.", HelpBoxMessageType.Info));
@@ -491,9 +499,9 @@ namespace Hissal.AgentSkillsSync.Editor
         {
             try
             {
-                var prefs = LocalPrefs.Load(UnityProjectRoot);
+                var prefs = LoadPrefs();
                 FolderSelection.Save(prefs, Layout, selected, environment);
-                prefs.Save();
+                SavePrefs(prefs);
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
             {
@@ -524,7 +532,7 @@ namespace Hissal.AgentSkillsSync.Editor
         }
 
         bool HasUnconfirmedSources(Lockfile lockfile) =>
-            SourceConsent.Unconfirmed(lockfile, LocalPrefs.Load(UnityProjectRoot), _confirmedSources, _skills).Count > 0;
+            SourceConsent.Unconfirmed(lockfile, LoadPrefs(), _confirmedSources, _skills).Count > 0;
 
         void UpdateSyncButton() =>
             _syncButton.SetEnabled(_canSync && _consent.value && _lockfile != null && !HasUnconfirmedSources(_lockfile));

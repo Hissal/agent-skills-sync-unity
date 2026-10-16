@@ -63,6 +63,48 @@ namespace Hissal.AgentSkillsSync.Tests
             File.WriteAllText(InProject(relativePath + "/SKILL.md"), "# mine");
         }
 
+        /// <summary>A copy that writes part of the skill, then fails as a full disk would.</summary>
+        static void FailingCopy(string source, string destination)
+        {
+            Directory.CreateDirectory(destination);
+            File.WriteAllText(Path.Combine(destination, "SKILL.md"), "partial");
+            throw new IOException("There is not enough space on the disk.");
+        }
+
+        SyncSummary SyncFailingCopy(string lockedAt)
+        {
+            var parts = lockedAt.Split('=');
+            var skill = new LockedSkill(parts[0], "owner/repo", "github", $"skills/{parts[0]}/SKILL.md", Versions[parts[1]].Hash);
+            return new PlanExecutor(null, FailingCopy).Execute(_project, Plan(new[] { skill }),
+                new Dictionary<string, string> { [parts[0]] = Path.Combine(FixturesRoot, Versions[parts[1]].Fixture) });
+        }
+
+        string[] CanonicalEntries() => Directory.GetFileSystemEntries(InProject(".agents/skills"))
+            .Select(Path.GetFileName).Where(n => n != ".gitignore").OrderBy(n => n, StringComparer.Ordinal).ToArray();
+
+        [Test]
+        public void Execute_InstallCopyFailsPartway_LeavesNoEntryAndTheNextSyncInstallsIt()
+        {
+            Directory.CreateDirectory(InProject(".agents/skills"));
+
+            Assert.Throws<IOException>(() => SyncFailingCopy("tdd=v1"));
+
+            Assert.That(CanonicalEntries(), Is.Empty);
+            Assert.That(Sync("tdd=v1").Installed, Is.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
+        public void Execute_UpdateCopyFailsPartway_KeepsTheOldCopy()
+        {
+            Sync("tdd=v1");
+
+            Assert.Throws<IOException>(() => SyncFailingCopy("tdd=v2"));
+
+            Assert.That(CanonicalEntries(), Is.EqualTo(new[] { "tdd" }));
+            Assert.That(File.ReadAllText(InProject(".agents/skills/tdd/SKILL.md")), Is.EqualTo(Fixture("minimal", "SKILL.md")));
+            Assert.That(Sync("tdd=v2").Updated, Is.EqualTo(new[] { "tdd" }));
+        }
+
         // Install
 
         [Test]
