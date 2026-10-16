@@ -445,6 +445,59 @@ To update, `git pull` the clone and build again. Any other copy of the package w
 editor runs with `com.unity.pipeline`, `unity command skills_restore` runs the same restore (`--dry_run true`,
 `--consent_new_sources true`, `--baseline <checkout>`).
 
+### New worktrees
+
+Open **Window > Agent Skills Sync > New worktrees > Restore skills in new worktrees** once per clone on
+this machine. With the .NET 8 SDK or newer installed, the window builds the command from the installed package into
+`AgentSkillsSync/commands/<package-version>/` in local application data. No separate clone or command path is needed.
+Sync the existing checkout once (or import an older installation) to record the snapshots that restores need.
+
+The repository's Git `post-checkout` hook then restores every registered Unity project before `git worktree add`
+returns, so worktree launchers need no additional setup. Install for each Unity project in a repository; paths are
+recorded relative to the checkout. One installation covers existing and future worktrees of that clone. Branch
+switches, merges and rebases do not restore skills. `git worktree add --no-checkout` bypasses the hook.
+
+The window shows whether this project's hook is installed, outdated (a different package version or missing command),
+or blocked. After upgrading the package, **Update restore hook** builds the new version and updates the command for
+all registered projects. Until then the previous build remains outside the checkout and continues working.
+**Uninstall for this project** removes its registration; other projects and foreign hook code remain.
+
+For scripted setup, use the built command from a stable location outside every worktree you might delete:
+
+```sh
+dotnet /path/to/agent-skills-sync.dll hook install --project /path/to/unity-project
+dotnet /path/to/agent-skills-sync.dll hook status --project /path/to/unity-project
+dotnet /path/to/agent-skills-sync.dll hook uninstall --project /path/to/unity-project
+```
+
+These commands print JSON (`status`, `hookPath`, `message`); status is `notInstalled`, `installed`, `outdated` or
+`blocked`. Exit code 3 means an update or manual action is needed. Installing again updates the managed block.
+The hook prints one outcome line per existing registered project. When restore needs a new source confirmed, missing
+snapshots recorded, or a baseline chosen, the line names the reason and the command to resolve it. A restore failure
+leaves checkout successful. Projects without a lockfile are skipped.
+
+The tool keeps existing `sh`, `bash` and `dash` hook code, running the managed block before it. Non-shell hooks,
+malformed managed blocks and symbolic links are left for manual setup. It uses Git's configured `core.hooksPath`
+when that path is outside all this clone's checkouts. A path inside a checkout (including tracked Husky folders) is
+refused without modifying that folder or Git configuration. Relative external paths are also refused because they
+resolve to different folders in differently located worktrees; configure an absolute external path instead. An external hooks folder already registered to another
+repository is also refused. For a hook you manage yourself, add the equivalent of:
+
+```sh
+# Git supplies an all-zero old HEAD only for a new checkout.
+case "$1" in
+  ''|*[!0]*) ;;
+  *) if [ "$3" = 1 ]; then
+       dotnet /stable/path/agent-skills-sync.dll restore --project ./path/to/project --hook-output || :
+     fi ;;
+esac
+```
+
+Use `.` for a Unity project at the checkout root. Repeat the restore line for each project. Keep any existing hook's
+behavior when placing this snippet. Git's working directory and new-checkout arguments are documented in
+[post-checkout](https://git-scm.com/docs/githooks#_post_checkout); relative configured hook paths are resolved from
+that working directory ([core.hooksPath](https://git-scm.com/docs/git-config#Documentation/git-config.txt-corehooksPath)).
+
 ### Commands
 
 `--project` names the Unity project and defaults to the current folder.
@@ -454,6 +507,7 @@ editor runs with `com.unity.pipeline`, `unity command skills_restore` runs the s
 | `restore [--dry-run] [--confirm-source <owner/repo>]… [--baseline <checkout>]` | Installs the selected skills from recorded snapshots, offline. `--dry-run` reports what a run would do and writes nothing. |
 | `sync [--confirm-source <owner/repo>]… [--install-mode latest\|pinned]` | The sync window's sync: fetches from GitHub, installs, and records the snapshots later restores install. |
 | `import` | Records the skills an earlier version of this package installed as snapshots, as found on disk. |
+| `hook install \| status \| uninstall` | Installs, inspects or removes automatic restore for this project in new worktrees; see [New worktrees](#new-worktrees). |
 | `scope --shared \| --worktree` | Makes the checkout follow the repository's shared choices, or keep its own. `--shared` in a repository with no shared choices yet shares this checkout's. |
 
 Each run prints one JSON object with a `status`. A restore also reports `unconfirmedSources`, `missingSnapshots`

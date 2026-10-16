@@ -27,14 +27,52 @@ namespace Hissal.AgentSkillsSync.Cli
             "      Record the skills an earlier version installed as snapshots, as found on disk.\n" +
             "  scope --shared | --worktree\n" +
             "      Follow the repository's shared choices, or keep this checkout's own.\n" +
+            "  hook install | status | uninstall\n" +
+            "      Restore skills automatically when Git creates a new worktree.\n" +
             "--project defaults to the current directory. Output is one JSON object.";
 
         static int Main(string[] args)
         {
             var output = new List<KeyValuePair<string, object>>();
             var code = Run(args, output);
-            Console.Out.Write(JsonWriter.Write(output));
+            if (args.Contains("--hook-output")) Console.Out.WriteLine(HookOutcome(code, output));
+            else Console.Out.Write(JsonWriter.Write(output));
             return code;
+        }
+
+        static string HookOutcome(int code, List<KeyValuePair<string, object>> output)
+        {
+            object Get(string key) => output.FirstOrDefault(p => p.Key == key).Value;
+            var project = (string)Get("project");
+            var status = (string)Get("status");
+            var command = "dotnet " + RestoreHook.Quote(typeof(Program).Assembly.Location.Replace('\\', '/'));
+            var fix = command + " restore --project " + RestoreHook.Quote(project ?? ".");
+            if (status == "sourcesNeedConfirmation")
+                foreach (var source in (List<object>)Get("unconfirmedSources")) fix += " --confirm-source " + RestoreHook.Quote((string)source);
+            else if (status == "snapshotsMissing") fix = command + " sync --project " + RestoreHook.Quote(project);
+            else if (status == "baselineRequired") fix += " --baseline <checkout>";
+            var detail = code == 0 ? "" : "; " + (Get("error") ?? "action required") + "; run " + fix;
+            return ("agent-skills-sync: " + project + ": " + status + detail).Replace('\r', ' ').Replace('\n', ' ');
+        }
+
+        static string PackageVersion
+        {
+            get
+            {
+                using (var stream = typeof(Program).Assembly.GetManifestResourceStream("package.json"))
+                using (var reader = new StreamReader(stream))
+                    return (string)((List<KeyValuePair<string, object>>)JsonReader.Read(reader.ReadToEnd())).Single(p => p.Key == "version").Value;
+            }
+        }
+
+        static int Hook(Options options, List<KeyValuePair<string, object>> output)
+        {
+            var hook = new RestoreHook(options.Project, typeof(Program).Assembly.Location, PackageVersion);
+            var report = options.HookAction == "install" ? hook.Install() : options.HookAction == "uninstall" ? hook.Uninstall() : hook.Status();
+            Add(output, "status", Camel(report.Status.ToString()));
+            Add(output, "hookPath", report.Path);
+            Add(output, "message", report.Message);
+            return report.Status == RestoreHookStatus.Blocked || report.Status == RestoreHookStatus.Outdated ? ActionRequired : Ok;
         }
 
         static int Run(string[] args, List<KeyValuePair<string, object>> output)
@@ -58,6 +96,7 @@ namespace Hissal.AgentSkillsSync.Cli
             {
                 switch (options.Command)
                 {
+                    case "hook": return Hook(options, output);
                     case "restore": return Restore(options, output);
                     case "sync": return Sync(options, output);
                     case "import": return Import(options, output);
@@ -92,6 +131,11 @@ namespace Hissal.AgentSkillsSync.Cli
 
         static int Restore(Options options, List<KeyValuePair<string, object>> output)
         {
+            if (options.HookOutput && Lockfile.FindRoot(options.Project) == null)
+            {
+                Add(output, "status", "skippedNoLockfile");
+                return Ok;
+            }
             var restore = new WorktreeRestore(options.Project, UserEnvironment.Current, options.Baseline);
             var report = options.DryRun ? restore.Plan() : restore.Run(options.ConfirmedSources);
 
@@ -178,6 +222,8 @@ namespace Hissal.AgentSkillsSync.Cli
         sealed class Options
         {
             public string Command;
+            public string HookAction;
+            public bool HookOutput;
             public string Project = Directory.GetCurrentDirectory();
             public bool DryRun;
             public string Baseline;
@@ -190,15 +236,24 @@ namespace Hissal.AgentSkillsSync.Cli
             {
                 if (args.Length == 0) throw new ArgumentException("Name a command.");
                 var options = new Options { Command = args[0] };
-                if (!new[] { "restore", "sync", "import", "scope", "help", "--help" }.Contains(options.Command))
+                if (!new[] { "restore", "sync", "import", "scope", "hook", "help", "--help" }.Contains(options.Command))
                     throw new ArgumentException($"Unknown command \"{options.Command}\".");
 
-                for (var i = 1; i < args.Length; i++)
+                var firstOption = 1;
+                if (options.Command == "hook")
+                {
+                    if (args.Length < 2 || !new[] { "install", "status", "uninstall" }.Contains(args[1]))
+                        throw new ArgumentException("hook needs install, status or uninstall.");
+                    options.HookAction = args[1];
+                    firstOption = 2;
+                }
+                for (var i = firstOption; i < args.Length; i++)
                 {
                     string Value() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{args[i]} needs a value.");
                     switch (args[i])
                     {
                         case "--project": options.Project = Path.GetFullPath(Value()); break;
+                        case "--hook-output" when options.Command == "restore": options.HookOutput = true; break;
                         case "--dry-run" when options.Command == "restore": options.DryRun = true; break;
                         case "--baseline" when options.Command == "restore": options.Baseline = Path.GetFullPath(Value()); break;
                         case "--confirm-source" when options.Command == "restore" || options.Command == "sync":

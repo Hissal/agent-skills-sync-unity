@@ -64,10 +64,11 @@ namespace Hissal.AgentSkillsSync.Tests
             Run(Root, "worktree", "prune");
         }
 
-        static void Run(string directory, params string[] args)
+        public static string Run(string directory, params string[] args)
         {
             if (!TryRun(directory, out var output, args))
                 throw new InvalidOperationException($"git {string.Join(" ", args)} failed: {output}");
+            return output;
         }
 
         static bool TryRun(string directory, out string output, params string[] args)
