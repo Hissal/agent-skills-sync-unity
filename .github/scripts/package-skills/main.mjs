@@ -24,8 +24,9 @@ const program = read(join(packageDir, "Tools~", "AgentSkillsSync.Cli", "Program.
 const pipelineDir = join(packageDir, "Pipeline");
 const pipeline = readdirSync(pipelineDir).filter((name) => name.endsWith(".cs")).map((name) => read(join(pipelineDir, name)));
 const defined = definedNames(program, pipeline);
-if (defined.commands.size === 0) fail("no commands in the standalone command's usage text");
-if (defined.pipelineCommands.size === 0) fail(`no CliCommand in ${pipelineDir}`);
+const entries = [...defined.commands.values()];
+if (!entries.some((entry) => !entry.pipeline)) fail("no commands in the standalone command's usage text");
+if (!entries.some((entry) => entry.pipeline)) fail(`no CliCommand in ${pipelineDir}`);
 
 const skillFolders = [".claude/skills", ".agents/skills"]
   .map((folder) => join(packageDir, folder))

@@ -176,4 +176,5 @@ directory take `SharedState.Lock`; snapshots are published by renaming a finishe
 
 `.claude/skills/agent-skills-sync/` in the package is an agent skill describing the standalone command, the Pipeline
 commands and the source-consent rule. Change it with the commands it names: `.github/scripts/package-skills/` fails CI
-when it names a command or flag the standalone command's usage text, its option parser or a Pipeline command lacks.
+when it names a command, subcommand or flag the standalone command's usage text, its option parser or a Pipeline
+command lacks, or a flag on a command that does not accept it.
