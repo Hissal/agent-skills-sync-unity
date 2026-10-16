@@ -267,13 +267,14 @@ namespace Hissal.AgentSkillsSync.Editor
                 _worktrees.Add(new Label(SyncText.WorktreesOutsideGit) { style = { whiteSpace = WhiteSpace.Normal } });
                 return;
             }
-            var section = new Foldout { text = SyncText.WorktreesTitle, value = _worktreesExpanded ?? identity.Checkouts().Count > 1 };
+            var section = new Foldout { text = SyncText.WorktreesTitle, value = _worktreesExpanded ?? false };
             section.RegisterValueChangedCallback(e => { if (e.target == section) _worktreesExpanded = e.newValue; });
             _worktrees.Add(section);
             section.Add(new Label(SyncText.SharedChoicesExplanation) { style = { whiteSpace = WhiteSpace.Normal } });
             section.Add(new Label(SyncText.WorktreeIdentity(identity)) { style = { whiteSpace = WhiteSpace.Normal } });
             try
             {
+                section.SetValueWithoutNotify(_worktreesExpanded ?? identity.Checkouts().Count > 1);
                 var setup = WorktreeSetupStatus.Read(UnityProjectRoot);
                 section.Add(new Label(SyncText.WorktreeScope(setup)) { style = { whiteSpace = WhiteSpace.Normal } });
                 var scope = new Toggle(SyncText.FollowSharedChoices) { value = setup.FollowsShared };
