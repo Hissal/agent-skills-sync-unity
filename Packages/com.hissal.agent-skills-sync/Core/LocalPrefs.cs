@@ -37,6 +37,7 @@ namespace Hissal.AgentSkillsSync
         const string SeenSkillsKey = "seenSkills";
         const string NotifyNewSkillsKey = "notifyNewSkills";
         const string ChoiceScopeKey = "choiceScope";
+        const string BaselineProjectKey = "baselineProject";
 
         /// <summary>
         /// The members holding the contributor's choices, the ones a checkout following the shared choices
@@ -104,6 +105,17 @@ namespace Hissal.AgentSkillsSync
                 }
             }
             set => Set(ChoiceScopeKey, value?.ToString().ToLowerInvariant());
+        }
+
+        /// <summary>
+        /// In the shared choices only: the Unity project whose choices became the shared ones when they were first
+        /// shared. That checkout follows them from then on without a <see cref="ChoiceScope"/> of its own, so its later
+        /// choices keep reaching other worktrees.
+        /// </summary>
+        internal string BaselineProject
+        {
+            get => GetString(BaselineProjectKey);
+            set => Set(BaselineProjectKey, value);
         }
 
         /// <summary>Whether these prefs hold any of the contributor's choices (see <see cref="ChoiceKeys"/>).</summary>

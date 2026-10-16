@@ -62,7 +62,9 @@ says what stopped it.
 
 A sync through `SkillsSyncService` (window, Pipeline, the command's `sync`) records what it installed with
 `SnapshotRecorder.RecordSync`; `SnapshotRecorder.Import` records an older installation as found
-(`SnapshotProvenance.Import`).
+(`SnapshotProvenance.Import`). The optional Pipeline `SkillsRestoreCommand` runs the same `WorktreeRestore` in an open
+editor. A restore that adopted a baseline records it (`SharedChoices.Adopt`, `LocalPrefs.BaselineProject`), so that
+checkout keeps sharing its choices without a scope of its own (`SharedChoices.Follows`).
 
 `SyncStatus` is the cheap, offline cousin of steps 1–3 (names and links only; it hashes no project copy, only
 user-scope copies a skip checks against the lock) for the startup check. `SyncStatus.ToRemove` tells skills only
@@ -85,8 +87,8 @@ waiting for removal from missing ones.
 | ↳ new-skill notice | `LocalPrefs.NotifyNewSkills` | `StartupCheck.NewSkills` | `SkillsSyncWindow` |
 | ↳ managed skills | `LocalPrefs.ManagedSkills` | `ProjectScanner` | `PlanExecutor` |
 | ↳ choice scope | `LocalPrefs.ChoiceScope` | `SharedChoices`, `WorktreeRestore` | `WorktreeRestore`, `SharedChoices.SetScope` |
-| `SharedChoices` | `repos/<key>/choices.json` in `UserEnvironment.StateDirectory` (per machine and repository) | `SharedChoices.Load` (window, notifier, `SkillsSyncService`), `WorktreeRestore` | `SharedChoices.Save` (choices, while the checkout follows them), `SharedChoices.RecordSyncedSources`, `WorktreeRestore` (baseline) |
-| `SnapshotResolutions` | `repos/<key>/resolutions.json` in the state directory | `SnapshotFetcher` | `SnapshotRecorder` |
+| `SharedChoices` | `repos/<key>/choices.json` in `UserEnvironment.StateDirectory` (per machine and repository) | `SharedChoices.Load` (window, notifier, `SkillsSyncService`, `SnapshotRecorder.Import`, the command's `sync`), `WorktreeRestore` | `SharedChoices.Save` (choices, while the checkout follows them), `SharedChoices.SetScope`, `SharedChoices.RecordSyncedSources`, `SharedChoices.Adopt` |
+| `SnapshotResolutions` | `repos/<key>/resolutions.json` in the state directory | `SnapshotFetcher`, `SnapshotRecorder` | `SnapshotRecorder` |
 | `SnapshotStore` | `snapshots/<hash>/` in the state directory (all repositories) | `SnapshotFetcher` | `SnapshotRecorder` |
 | `ManagedStateFile` | block in each skills folder's `.gitignore` (committed) | `ProjectScanner` | `PlanExecutor` |
 | `MachineChoices` | in memory, built by `MachineChoices.Read` from `LocalPrefs` + `UserEnvironment` | `SkillSync`, `SyncStatus` | — |

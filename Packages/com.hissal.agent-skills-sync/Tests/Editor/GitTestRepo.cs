@@ -78,7 +78,11 @@ namespace Hissal.AgentSkillsSync.Tests
                 {
                     var stdout = process.StandardOutput.ReadToEndAsync();
                     var stderr = process.StandardError.ReadToEnd();
-                    process.WaitForExit();
+                    if (!process.WaitForExit(120000))
+                    {
+                        process.Kill();
+                        throw new TimeoutException($"git {string.Join(" ", args)} did not finish.");
+                    }
                     output = stdout.Result + stderr;
                     return process.ExitCode == 0;
                 }

@@ -56,6 +56,10 @@ namespace Hissal.AgentSkillsSync
         /// <exception cref="ProjectSyncSettingsException">The project settings are unusable.</exception>
         /// <exception cref="RepositoryException">The baseline is not this project in a checkout of the repository.</exception>
         /// <exception cref="SyncAbortedException">A snapshot could not be installed; nothing was changed.</exception>
+        /// <exception cref="IOException">
+        /// Installing failed partway: each skill is in its old or its new state, and the checkout's prefs are as they were,
+        /// so a later run repairs it.
+        /// </exception>
         public RestoreReport Run(IEnumerable<string> confirmedSources = null) => Evaluate(confirmedSources, dryRun: false);
 
         RestoreReport Evaluate(IEnumerable<string> confirmedSources, bool dryRun)
@@ -100,22 +104,25 @@ namespace Hissal.AgentSkillsSync
             report.Plan = service.Plan();
             if (dryRun) return report.With(RestoreStatus.Ready);
 
-            if (decision.AdoptFrom != null) AdoptBaseline(decision.Choices);
+            // The sync reads the checkout's prefs from disk, so they are saved first, and put back if it changes nothing.
+            var prefsPath = LocalPrefs.PathFor(_unityRoot);
+            var oldPrefs = File.Exists(prefsPath) ? File.ReadAllBytes(prefsPath) : null;
+            var hadPrefsFolder = Directory.Exists(Path.GetDirectoryName(prefsPath));
             effective.Save();
-            report.Summary = service.Run(confirmed);
-            return report.With(RestoreStatus.Restored);
-        }
-
-        /// <summary>Makes <paramref name="choices"/> the shared choices, unless another checkout shared some meanwhile.</summary>
-        void AdoptBaseline(LocalPrefs choices)
-        {
-            using (_state.Lock())
+            try
             {
-                var shared = _state.LoadChoices();
-                if (shared.HasChoices) return;
-                shared.CopyChoicesFrom(choices);
-                shared.Save();
+                report.Summary = service.Run(confirmed);
             }
+            catch (Exception e) when (!(e is SyncStateSaveException))
+            {
+                if (oldPrefs != null) File.WriteAllBytes(prefsPath, oldPrefs);
+                else File.Delete(prefsPath);
+                if (!hadPrefsFolder && Directory.GetFileSystemEntries(Path.GetDirectoryName(prefsPath)).Length == 0)
+                    Directory.Delete(Path.GetDirectoryName(prefsPath));
+                throw;
+            }
+            if (decision.AdoptFrom != null) SharedChoices.Adopt(_state, decision.AdoptFrom, decision.Choices);
+            return report.With(RestoreStatus.Restored);
         }
 
         /// <summary>The prefs of this project in every other checkout of the repository.</summary>
@@ -179,7 +186,8 @@ namespace Hissal.AgentSkillsSync
                 }
             }
 
-            if (local.ChoiceScope == null && local.HasChoices && reference != null && !local.SameChoicesAs(reference))
+            if (local.ChoiceScope == null && local.HasChoices && reference != null && !local.SameChoicesAs(reference) &&
+                !SharedChoices.Follows(local, shared, _unityRoot))
             {
                 decision.Scope = ChoiceScope.Worktree;
                 return decision;

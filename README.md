@@ -434,14 +434,16 @@ folder. A new worktree has not imported the package yet, so run it from a copy o
 such as a clone of this repository:
 
 ```sh
-git clone --depth 1 --branch latest https://github.com/Hissal/agent-skills-sync-unity.git ~/.agent-skills-sync
-dotnet build ~/.agent-skills-sync/Packages/com.hissal.agent-skills-sync/Tools~/AgentSkillsSync.Cli -c Release -o ~/.agent-skills-sync/bin
-dotnet ~/.agent-skills-sync/bin/agent-skills-sync.dll restore --project <worktree>
+git clone --depth 1 --branch latest https://github.com/Hissal/agent-skills-sync-unity.git ~/agent-skills-sync-tool
+dotnet build ~/agent-skills-sync-tool/Packages/com.hissal.agent-skills-sync/Tools~/AgentSkillsSync.Cli -c Release -o ~/agent-skills-sync-tool/bin
+dotnet ~/agent-skills-sync-tool/bin/agent-skills-sync.dll restore --project <worktree>
 ```
 
 To update, `git pull` the clone and build again. Any other copy of the package works too, such as
 `Library/PackageCache/com.hissal.agent-skills-sync@…/` in a checkout Unity has opened:
-`dotnet run --project <package>/Tools~/AgentSkillsSync.Cli -- restore --project <worktree>`.
+`dotnet run --project <package>/Tools~/AgentSkillsSync.Cli -- restore --project <worktree>`. In a checkout whose
+editor runs with `com.unity.pipeline`, `unity command skills_restore` runs the same restore (`--dry_run true`,
+`--consent_new_sources true`, `--baseline <checkout>`).
 
 ### Commands
 
@@ -452,7 +454,7 @@ To update, `git pull` the clone and build again. Any other copy of the package w
 | `restore [--dry-run] [--confirm-source <owner/repo>]… [--baseline <checkout>]` | Installs the selected skills from recorded snapshots, offline. `--dry-run` reports what a run would do and writes nothing. |
 | `sync [--confirm-source <owner/repo>]… [--install-mode latest\|pinned]` | The sync window's sync: fetches from GitHub, installs, and records the snapshots later restores install. |
 | `import` | Records the skills an earlier version of this package installed as snapshots, as found on disk. |
-| `scope --shared \| --worktree` | Makes the checkout follow the repository's shared choices, or keep its own. |
+| `scope --shared \| --worktree` | Makes the checkout follow the repository's shared choices, or keep its own. `--shared` in a repository with no shared choices yet shares this checkout's. |
 
 Each run prints one JSON object with a `status`. A restore also reports `unconfirmedSources`, `missingSnapshots`
 (each with a `reason`), `baselineCandidates`, `choices` (`scope` and `baselineFrom`), the planned `actions`, and, once
@@ -502,8 +504,10 @@ the shared ones; `scope --shared` makes it follow them again.
 
 **Migration.** The first restore in a repository with no shared choices adopts the choices its checkouts already
 have, when they all agree. If they disagree, it stops with `baselineRequired` and lists them in
-`baselineCandidates`; pass `--baseline <checkout>` to choose. A checkout whose own existing choices differ from the
-shared ones keeps them, as if it had run `scope --worktree`. A dry run reports what it would adopt without saving it.
+`baselineCandidates`; pass `--baseline <checkout>` to choose, or run `scope --shared` in that checkout. The checkout
+whose choices were adopted follows the shared choices from then on, so a choice made in its sync window still reaches
+new worktrees. Any other checkout whose own existing choices differ from the shared ones keeps them, as if it had run
+`scope --worktree`. A dry run reports what it would adopt without saving it.
 
 ### Snapshots
 

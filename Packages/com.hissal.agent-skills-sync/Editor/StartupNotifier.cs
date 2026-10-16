@@ -39,7 +39,8 @@ namespace Hissal.AgentSkillsSync.Editor
 
                 var groups = ProjectSyncSettings.Load(unityRoot).Groups;
                 var status = SyncStatus.Read(skillsRoot, MachineChoices.Read(skillsRoot, prefs, environment, layout, groups), unityRoot);
-                if (StartupCheck.Seed(prefs, status)) SharedChoices.Save(prefs, unityRoot, environment);
+                // Seeding and declining record this checkout's notices only, never a choice, so they never touch the shared choices.
+                if (StartupCheck.Seed(prefs, status)) prefs.Save();
                 if (!StartupCheck.ShouldNotify(status, prefs)) return;
 
                 if (EditorUtility.DisplayDialog(
@@ -53,7 +54,7 @@ namespace Hissal.AgentSkillsSync.Editor
                 }
 
                 StartupCheck.RecordDeclined(prefs, status);
-                SharedChoices.Save(prefs, unityRoot, environment);
+                prefs.Save();
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is ProjectSyncSettingsException)
             {

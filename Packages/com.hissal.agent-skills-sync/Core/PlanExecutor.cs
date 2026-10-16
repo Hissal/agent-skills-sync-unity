@@ -179,7 +179,9 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Puts the finished <paramref name="staged"/> copy in place of <paramref name="entry"/> by renaming, keeping the
-        /// old copy aside until the new one is in, so a failure leaves the old copy or the new one, never neither.
+        /// old copy aside until the new one is in, so a failure leaves the old copy or the new one. Only when putting the
+        /// old copy back fails too is the entry left missing, which the next sync installs again; the old copy then stays
+        /// in the work folder. A link in the entry's place holds no content and is simply replaced.
         /// </summary>
         static void Replace(string entry, string staged)
         {
@@ -207,8 +209,15 @@ namespace Hissal.AgentSkillsSync
             }
             catch
             {
-                Directory.Move(old, entry);
                 TryRemove(staged);
+                try
+                {
+                    Directory.Move(old, entry);
+                }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+                {
+                    // The move's own failure is the one worth reporting; the entry is missing, not partial.
+                }
                 throw;
             }
             TryRemove(old);

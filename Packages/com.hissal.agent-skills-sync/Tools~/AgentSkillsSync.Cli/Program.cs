@@ -141,7 +141,7 @@ namespace Hissal.AgentSkillsSync.Cli
         static int Scope(Options options, List<KeyValuePair<string, object>> output)
         {
             if (!options.Scope.HasValue) throw new RepositoryException("scope needs --shared or --worktree.");
-            SharedChoices.SetScope(options.Project, options.Scope.Value);
+            SharedChoices.SetScope(options.Project, options.Scope.Value, UserEnvironment.Current);
             Add(output, "status", "ok");
             Add(output, "scope", Camel(options.Scope.Value.ToString()));
             return Ok;

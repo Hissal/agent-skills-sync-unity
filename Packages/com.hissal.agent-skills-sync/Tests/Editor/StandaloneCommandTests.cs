@@ -162,7 +162,11 @@ namespace Hissal.AgentSkillsSync.Tests
                 {
                     var stderr = process.StandardError.ReadToEndAsync();
                     var stdout = process.StandardOutput.ReadToEnd();
-                    process.WaitForExit();
+                    if (!process.WaitForExit(300000))
+                    {
+                        process.Kill();
+                        throw new TimeoutException($"{file} {arguments} did not finish.");
+                    }
                     return (process.ExitCode, stdout, stderr.Result);
                 }
             }

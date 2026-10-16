@@ -229,6 +229,73 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Run_ChoiceMadeLaterInTheBaselineCheckout_ReachesNewWorktrees()
+        {
+            Choose(_repo.Root, (prefs, groups) => SkillSelection.Set(prefs, new[] { "review" }, false, groups));
+            Sync(_repo.Root);
+            Assert.That(Restore(NewWorktree()).Run().BaselineFrom, Is.EqualTo(_repo.Root));
+
+            // The main checkout's sync window, which never restored, opts out of tdd too.
+            var prefs = SharedChoices.Load(_repo.Root, _environment);
+            SkillSelection.Set(prefs, new[] { "tdd" }, false);
+            SharedChoices.Save(prefs, _repo.Root, _environment);
+            var report = Restore(NewWorktree("second")).Run();
+
+            Assert.That(report.Summary.Installed, Is.Empty);
+            Assert.That(LocalPrefs.Load(report.Project).OptedOutSkills, Is.EqualTo(new[] { "review", "tdd" }));
+        }
+
+        [Test]
+        public void Run_InstallFailsPartway_LeavesTheCheckoutAndSharedStateAsTheyWere()
+        {
+            Sync(_repo.Root);
+            var worktree = NewWorktree();
+            File.WriteAllText(Path.Combine(worktree, ".agents"), "not a folder");
+            var before = Contents(_root);
+            var directories = Directories(_root);
+
+            Assert.Throws<IOException>(() => Restore(worktree).Run());
+
+            Assert.That(Contents(_root), Is.EqualTo(before));
+            Assert.That(Directories(_root), Is.EqualTo(directories));
+        }
+
+        [Test]
+        public void Restore_GitFileNamingNoRepository_IsNotACheckout()
+        {
+            var project = Path.Combine(_root, "broken");
+            Directory.CreateDirectory(project);
+            File.WriteAllText(Path.Combine(project, ".git"), "not a gitdir line");
+            File.WriteAllText(Path.Combine(project, Lockfile.FileName), Lock);
+
+            Assert.Throws<RepositoryException>(() => Restore(project));
+        }
+
+        [Test]
+        public void Run_UnreadableResolutions_CountAsNoneRecorded()
+        {
+            Sync(_repo.Root);
+            var state = SharedChoices.StateOf(_repo.Root, _environment);
+            File.WriteAllText(Path.Combine(state.Directory, "resolutions.json"), "{ not json");
+
+            var report = Restore(NewWorktree()).Run();
+
+            Assert.That(report.Status, Is.EqualTo(RestoreStatus.SnapshotsMissing));
+            Assert.That(report.MissingSnapshots.Select(m => m.Skill), Is.EquivalentTo(new[] { "tdd", "review" }));
+        }
+
+        [Test]
+        public void SetScopeShared_RepositoryWithNoSharedChoices_SharesThisCheckoutsChoices()
+        {
+            Choose(_repo.Root, (prefs, groups) => SkillSelection.Set(prefs, new[] { "review" }, false, groups));
+
+            SharedChoices.SetScope(_repo.Root, ChoiceScope.Shared, _environment);
+
+            Assert.That(SharedChoices.StateOf(_repo.Root, _environment).LoadChoices().OptedOutSkills, Is.EqualTo(new[] { "review" }));
+            Assert.That(LocalPrefs.Load(_repo.Root).ChoiceScope, Is.EqualTo(ChoiceScope.Shared));
+        }
+
+        [Test]
         public void Run_InstallAnywayChoice_IsInheritedAndUseMineFollowsTheDestinationsOwnScan()
         {
             var userScope = Path.Combine(_home, ".codex", "skills", "tdd");
