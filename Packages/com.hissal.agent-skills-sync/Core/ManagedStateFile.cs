@@ -46,7 +46,9 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Lists <paramref name="names"/> in the block, creating the folder if needed. Replaces only the tool's
-        /// block (appending one to a file that has none) and leaves an unchanged file untouched.
+        /// block (appending one to a file that has none) and leaves an unchanged file untouched. The existing
+        /// file's line-ending style is kept: a CRLF file (a Windows checkout with <c>core.eol=native</c>) gets a
+        /// CRLF block, so an unchanged block leaves the bytes untouched and git flags nothing. A new file is LF.
         /// </summary>
         public static void Write(string folderPath, IEnumerable<string> names)
         {
@@ -59,19 +61,22 @@ namespace Hissal.AgentSkillsSync
             var path = Path.Combine(folderPath, FileName);
             var existing = File.Exists(path) ? File.ReadAllText(path) : "";
 
+            var newline = existing.Contains("\r\n") ? "\r\n" : "\n";
+            var blockText = newline == "\n" ? block.ToString() : block.Replace("\n", newline).ToString();
+
             string text;
             if (TryFindBlock(existing, out var start, out var end))
             {
-                text = existing.Substring(0, start) + block + existing.Substring(end);
+                text = existing.Substring(0, start) + blockText + existing.Substring(end);
             }
             else
             {
                 // Nothing to record and no block yet: an empty block would only add noise to the user's file.
                 if (existing.Length > 0 && !names.Any()) return;
                 var before = existing;
-                if (before.Length > 0 && !before.EndsWith("\n", StringComparison.Ordinal)) before += "\n";
-                if (before.Length > 0) before += "\n";
-                text = before + block;
+                if (before.Length > 0 && !before.EndsWith("\n", StringComparison.Ordinal)) before += newline;
+                if (before.Length > 0) before += newline;
+                text = before + blockText;
             }
 
             if (text == existing) return;
