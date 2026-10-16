@@ -74,6 +74,10 @@ namespace Hissal.AgentSkillsSync
         internal static LocalPrefs LoadFile(string path) =>
             new LocalPrefs(path, ReadMembers(path) ?? new List<KeyValuePair<string, object>>());
 
+        /// <summary>Unsaved, empty prefs for planning a fresh checkout at the project's current revision.</summary>
+        internal static LocalPrefs Empty(string projectRoot) =>
+            new LocalPrefs(PathFor(projectRoot), new List<KeyValuePair<string, object>>());
+
         /// <summary>
         /// Writes the prefs, creating <c>UserSettings/</c> if needed. The file is written beside the old one and swapped
         /// in, so a failed write leaves the old prefs.

@@ -7,6 +7,96 @@ namespace Hissal.AgentSkillsSync.Editor
     /// <summary>The sync window's status and summary texts, built from plans and sync results only (no UI).</summary>
     internal static class SyncText
     {
+        public const string WorktreesTitle = "Worktrees";
+        public const string WorktreesOutsideGit = "Worktrees: this project is not in a Git checkout, so shared choices and worktree restore are unavailable.";
+        public const string SharedChoicesExplanation = "Shared choices carry your folder and skill selections to other worktrees of this repository on this machine; each checkout can keep its own instead.";
+        public const string FollowSharedChoices = "Follow the shared choices";
+        public const string ShareTheseChoices = "Share these choices";
+        public const string UseSharedChoices = "Use the shared choices";
+        public const string SharedTheseChoices = "Shared this checkout's choices. New worktrees will follow them; this checkout follows them too.";
+        public const string UsingSharedChoices = "This checkout now follows the shared choices. Sync to apply them to its installed skills.";
+        public const string KeepingOwnChoices = "This checkout now keeps its own choices, starting with the choices shown here. Sync to apply them.";
+        public const string BaselineExplanation = "No choices are shared yet and the checkouts disagree. Compare each candidate with this checkout, then choose the baseline new worktrees should follow.";
+        public const string MakeBaseline = "Make this the baseline";
+        public const string SelectedSkillSnapshots = "Snapshots for this checkout's selected skills";
+        public const string NoSelectedSkills = "No locked skills are selected in this checkout.";
+        public const string RecordInstalledSkills = "Record installed skills";
+        public const string AutomaticRestore = "Automatic restore in new worktrees";
+
+        public static string WorktreeIdentity(RepositoryIdentity identity) =>
+            $"Repository: {identity.CommonDirectory}\nProject in repository: {identity.ProjectPath}\nThis checkout: {identity.Checkout}";
+
+        public static string WorktreeScope(WorktreeSetupStatus setup) =>
+            (setup.Scope == null ? "Choice scope has never been set. " : "") +
+            (setup.FollowsShared ? "This checkout follows the shared choices."
+                : "This checkout keeps its own choices.") +
+            (setup.HasSharedChoices ? "" : " No choices are shared yet.");
+
+        public static string WorktreeDifferences(IReadOnlyList<WorktreeChoiceDifference> differences) =>
+            differences.Count == 0 ? "This checkout's choices match the shared choices."
+                : "Differences from the shared choices:\n" + DescribeChoices(differences, "This checkout", "Shared");
+
+        public static string BaselineDifferences(IReadOnlyList<WorktreeChoiceDifference> differences) =>
+            differences.Count == 0 ? "Same choices as this checkout."
+                : DescribeChoices(differences, "Candidate", "This checkout");
+
+        static string DescribeChoices(IReadOnlyList<WorktreeChoiceDifference> differences, string local, string shared) =>
+            string.Join("\n", differences.Select(d => $"{ChoiceKind(d.Kind)} — {local}: {ChoiceValues(d.Local)}; {shared}: {ChoiceValues(d.Shared)}"));
+
+        static string ChoiceKind(WorktreeChoiceKind kind) => kind switch
+        {
+            WorktreeChoiceKind.Folders => "Folders",
+            WorktreeChoiceKind.DeclinedFolders => "Declined folders",
+            WorktreeChoiceKind.OptIns => "Opt-ins",
+            WorktreeChoiceKind.OptOuts => "Opt-outs",
+            _ => "Install anyway",
+        };
+
+        static string ChoiceValues(IReadOnlyList<string> values) => values == null ? "(automatic)"
+            : values.Count == 0 ? "(none)" : string.Join(", ", values);
+
+        public static string AdoptedBaseline(string project) => $"Made {project} the baseline for new worktrees. No installed skills were changed.";
+        public static string WorktreeActionFailed(string message) => "Could not change worktree setup: " + message;
+        public static string RecordedInstalledSkills(IReadOnlyList<string> skills) => skills.Count == 0
+            ? "No additional installed skills could be recorded. Sync here to create any snapshots still needed."
+            : $"Recorded installed skills: {string.Join(", ", skills)}. Their provenance is import; source approval still requires a sync.";
+
+        public static string WorktreeSnapshot(WorktreeSnapshotStatus snapshot)
+        {
+            var resolution = snapshot.Resolution;
+            var lockMatch = snapshot.MatchesLock == true ? "matches lock"
+                : snapshot.MatchesLock == false ? "differs from lock" : "lock match cannot be verified";
+            var provenance = resolution == null ? "no resolution recorded for this lock entry"
+                : $"{resolution.Provenance.ToString().ToLowerInvariant()}, {lockMatch}";
+            if (resolution == null && snapshot.Available) provenance = "lock-verified snapshot available, without a resolution for this entry";
+            var available = snapshot.Available ? "available for restore" : "unavailable for restore";
+            return $"{snapshot.Skill}: {available}; {provenance}." +
+                (snapshot.Available && resolution != null && resolution.Snapshot != snapshot.RestoreSnapshot
+                    ? " Restore will use a separate snapshot that matches the lock." : "") +
+                (snapshot.Problem == null ? "" : " " + snapshot.Problem);
+        }
+
+        public static string NewWorktreeRestore(RestoreReport report)
+        {
+            const string prefix = "A new worktree at this revision: ";
+            switch (report.Status)
+            {
+                case RestoreStatus.BaselineRequired:
+                    return prefix + "needs a baseline. Choose one above.";
+                case RestoreStatus.SourcesNeedConfirmation:
+                    return prefix + "needs source approval: " + string.Join(", ", report.UnconfirmedSources) + ". Confirm these sources and sync here first.";
+                case RestoreStatus.SnapshotsMissing:
+                    return prefix + "needs snapshots.\n" + string.Join("\n", report.MissingSnapshots.Select(s => s.Skill + ": " + s.Reason));
+                default:
+                    var install = report.Plan.Actions.Where(a => a.NeedsFetch).Select(a => a.SkillName).Distinct().ToList();
+                    var skipped = report.Plan.Actions.Where(a => a.Kind == PlanActionKind.SkipUserScope).Select(a => a.SkillName).Distinct().ToList();
+                    return prefix + "ready to restore offline. " +
+                        (install.Count == 0 ? "No project copies need installing." : "Install: " + string.Join(", ", install) + ".") +
+                        (skipped.Count == 0 ? "" : " Use user-scope copies where found: " + string.Join(", ", skipped) + ".") +
+                        (report.BaselineFrom == null ? "" : " Baseline: " + report.BaselineFrom + ".");
+            }
+        }
+
         /// <summary>What Sync would do to the skill, most significant first, for its row in the skill list.</summary>
         public static string PendingLabel(InstallPlan plan, string skillName)
         {

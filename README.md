@@ -445,9 +445,29 @@ To update, `git pull` the clone and build again. Any other copy of the package w
 editor runs with `com.unity.pipeline`, `unity command skills_restore` runs the same restore (`--dry_run true`,
 `--consent_new_sources true`, `--baseline <checkout>`).
 
+### Set up worktree restore in the window
+
+Open **Window > Agent Skills Sync > Worktrees** to see this checkout's choice scope, its differences from
+the shared choices, and whether a new worktree at the current revision can restore offline. Shared choices carry
+your folder selection, opt-ins, opt-outs and install-anyway choices between this repository's worktrees on this
+machine. The section starts collapsed for a repository with just one checkout.
+
+- **Follow the shared choices** switches between shared choices and this checkout's own choices. Keeping its
+  own starts with the choices currently shown; following again takes the current shared choices.
+- **Share these choices** publishes this checkout's choices for new worktrees and makes this checkout follow them.
+  **Use the shared choices** replaces its choices with the shared ones. Sync to apply either change to installed skills.
+- If no choices are shared and checkouts disagree, compare the candidates and choose **Make this the baseline**.
+- The snapshot list shows each selected skill's recorded provenance (`sync` or `import`) and lock match. Use
+  **Record installed skills** for an older installation, or Sync to create snapshots that are still missing. Import
+  records existing managed copies; source approval still requires confirming the source and syncing.
+- The readiness summary models an empty new worktree, using shared choices and this revision's lock and groups.
+  It names missing snapshots or sources needing approval, even if this checkout already has its skills installed.
+
+Opening or refreshing the section changes no files. Actions report their result in the window's summary.
+
 ### New worktrees
 
-Open **Window > Agent Skills Sync > New worktrees > Restore skills in new worktrees** once per clone on
+Open **Window > Agent Skills Sync > Worktrees > Restore skills in new worktrees** once per clone on
 this machine. With the .NET 8 SDK or newer installed, the window builds the command from the installed package into
 `AgentSkillsSync/commands/<package-version>/` in local application data. No separate clone or command path is needed.
 Sync the existing checkout once (or import an older installation) to record the snapshots that restores need.

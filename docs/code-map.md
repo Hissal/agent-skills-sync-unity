@@ -73,6 +73,17 @@ waiting for removal from missing ones.
 
 ## New worktrees
 
+`WorktreeSetupStatus.Read` is the window's offline, read-only view: identity, explicit or never-set choice scope,
+effective choices versus shared choices (`WorktreeChoiceDifference`), disagreeing baseline candidates, selected
+skills' snapshot availability and provenance, and `WorktreeRestore.PlanNewWorktree`. That plan uses empty local
+prefs and `ProjectState.Empty`, so an existing installation cannot hide what a new checkout needs; the open
+checkout participates as a baseline candidate. It uses the open revision's lock and groups and current user scope.
+`WorktreeSetup` changes scope, shares or takes choices, and adopts a baseline under `SharedState.Lock`.
+Keeping worktree choices freezes the effective choices currently shown. These actions preserve bookkeeping and
+installed files; the next sync applies the choices. Recording older installed skills uses `SnapshotRecorder.Import`.
+The window refreshes this view on open, after sync, and after every action; the Worktrees section starts collapsed
+when only one checkout exists. Texts live in `SyncText`; the existing hook controls follow the setup view.
+
 `RestoreHook` installs, inspects and removes one repository's managed `post-checkout` block. Its configuration lives
 inside the block: the external command DLL, package version, common Git directory and registered project paths.
 `RestoreHookReport` exposes the `RestoreHookStatus` and explanation to the window and standalone `hook` commands.
