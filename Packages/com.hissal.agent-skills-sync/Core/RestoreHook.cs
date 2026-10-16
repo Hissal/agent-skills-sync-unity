@@ -57,7 +57,7 @@ namespace Hissal.AgentSkillsSync
             if (_identity.Checkouts().Any(c => Within(_command, c)))
                 return Report(RestoreHookStatus.Blocked, report.Path, "The command must live outside every checkout. Build it from the sync window or copy the complete build to a stable external folder.");
             if (!File.Exists(_command)) return Report(RestoreHookStatus.Blocked, report.Path, "Build the command before installing the hook.");
-            config = config ?? new Configuration();
+            config = config ?? new Configuration { CreatedHeader = text.Length == 0 };
             config.Command = _command;
             config.Version = _version;
             config.Repository = _identity.CommonDirectory;
@@ -88,7 +88,7 @@ namespace Hissal.AgentSkillsSync
             config.Projects.Remove(_identity.ProjectPath);
             var updated = text.Remove(start, length);
             if (config.Projects.Count > 0) updated = updated.Insert(start, Block(config));
-            if (updated == Header) File.Delete(report.Path);
+            if (config.CreatedHeader && updated == Header) File.Delete(report.Path);
             else Write(report.Path, updated);
             return Status();
         }
@@ -141,6 +141,8 @@ namespace Hissal.AgentSkillsSync
                 return Report(RestoreHookStatus.Blocked, path, "This hook belongs to another repository; manage shared hooks manually.");
             if (!config.Projects.Contains(_identity.ProjectPath, StringComparer.Ordinal))
                 return Report(RestoreHookStatus.NotInstalled, path, "Not installed for this project (other projects are registered).");
+            if (!string.Equals(text.Substring(start, length), Block(config), StringComparison.Ordinal))
+                return Report(RestoreHookStatus.Outdated, path, "The managed hook block differs from this package. Update the hook.");
             if (!File.Exists(config.Command) || config.Version != _version || !Paths.Comparer.Equals(config.Command, _command))
                 return Report(RestoreHookStatus.Outdated, path, "The command is missing or differs from this package. Update the hook.");
             return Report(RestoreHookStatus.Installed, path, "Installed: new worktrees restore skills automatically.");
@@ -161,6 +163,7 @@ namespace Hissal.AgentSkillsSync
         {
             var result = new StringBuilder(config.JoinHeader ? "\n" + Begin : Begin);
             result.Append("# command ").AppendLine(Encode(config.Command));
+            result.Append("# createdHeader ").AppendLine(Encode(config.CreatedHeader ? "yes" : "no"));
             result.Append("# headerSeparator ").AppendLine(Encode(config.JoinHeader ? "yes" : "no"));
             result.Append("# version ").AppendLine(Encode(config.Version));
             result.Append("# repository ").AppendLine(Encode(config.Repository));
@@ -223,6 +226,7 @@ namespace Hissal.AgentSkillsSync
         sealed class Configuration
         {
             public bool JoinHeader;
+            public bool CreatedHeader;
             public string Command;
             public string Version;
             public string Repository;
@@ -246,12 +250,19 @@ namespace Hissal.AgentSkillsSync
                         if (config.Projects.Contains(value)) throw new FormatException("Duplicate project.");
                         config.Projects.Add(value);
                     }
-                    else if (new[] { "command", "version", "repository", "headerSeparator" }.Contains(parts[0]) && !fields.ContainsKey(parts[0])) fields.Add(parts[0], value);
+                    else if (new[] { "command", "version", "repository", "headerSeparator", "createdHeader" }.Contains(parts[0]) && !fields.ContainsKey(parts[0])) fields.Add(parts[0], value);
                     else throw new FormatException("Unknown or duplicate metadata.");
                 }
-                if (fields.Count != 4 || config.Projects.Count == 0 || !Path.IsPathRooted(fields["command"]) || !Path.IsPathRooted(fields["repository"]))
+                if (!new[] { "command", "version", "repository", "headerSeparator" }.All(fields.ContainsKey) ||
+                    config.Projects.Count == 0 || !Path.IsPathRooted(fields["command"]) || !Path.IsPathRooted(fields["repository"]))
                     throw new FormatException("Missing or invalid metadata.");
                 if (fields["headerSeparator"] != "yes" && fields["headerSeparator"] != "no") throw new FormatException("Invalid header separator.");
+                // Older blocks did not record ownership. Keep their header rather than risk deleting a foreign one.
+                if (fields.TryGetValue("createdHeader", out var createdHeader))
+                {
+                    if (createdHeader != "yes" && createdHeader != "no") throw new FormatException("Invalid header ownership.");
+                    config.CreatedHeader = createdHeader == "yes";
+                }
                 config.JoinHeader = fields["headerSeparator"] == "yes";
                 config.Command = fields["command"]; config.Version = fields["version"]; config.Repository = fields["repository"];
                 return config;

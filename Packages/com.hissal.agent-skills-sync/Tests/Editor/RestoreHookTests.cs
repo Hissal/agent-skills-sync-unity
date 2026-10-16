@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 
 namespace Hissal.AgentSkillsSync.Tests
@@ -98,17 +99,19 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(File.ReadAllText(path), Is.EqualTo(foreign));
         }
 
-        [Test]
-        public void Install_ShebangWithoutNewline_PreservesItAcrossReinstallAndUninstall()
+        [TestCase("#!/bin/sh")]
+        [TestCase("#!/bin/sh\n")]
+        [TestCase("#!/bin/sh\r\n")]
+        public void Install_ShebangOnlyHook_PreservesItAcrossReinstallAndUninstall(string foreign)
         {
             var path = Path.Combine(_repo.Root, ".git", "hooks", "post-checkout");
-            File.WriteAllText(path, "#!/bin/sh");
+            File.WriteAllText(path, foreign);
             var hook = new RestoreHook(_repo.Root, _command, "1.0.0");
             Assert.That(hook.Install().Status, Is.EqualTo(RestoreHookStatus.Installed));
             Assert.That(hook.Install().Status, Is.EqualTo(RestoreHookStatus.Installed));
             _repo.AddWorktree(Path.Combine(_root, "wt"));
             hook.Uninstall();
-            Assert.That(File.ReadAllText(path), Is.EqualTo("#!/bin/sh"));
+            Assert.That(File.ReadAllText(path), Is.EqualTo(foreign));
         }
 
         [Test]
@@ -142,6 +145,52 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(hook.Install().Status, Is.EqualTo(RestoreHookStatus.Blocked));
             Assert.That(hook.Uninstall().Status, Is.EqualTo(RestoreHookStatus.Blocked));
             Assert.That(File.ReadAllBytes(path), Is.EqualTo(bytes));
+        }
+
+        [Test]
+        public void Status_ExecutableBlockRemoved_ReportsOutdatedAndInstallRepairsIt()
+        {
+            var hook = new RestoreHook(_repo.Root, _command, "1.0.0");
+            hook.Install();
+            var path = Path.Combine(_repo.Root, ".git", "hooks", "post-checkout");
+            // Keep the markers and metadata but remove all executable lines, as an external edit might.
+            File.WriteAllText(path, string.Join("\n", File.ReadAllLines(path).Where(line => line.StartsWith("#", StringComparison.Ordinal))) + "\n");
+
+            Assert.That(hook.Status().Status, Is.EqualTo(RestoreHookStatus.Outdated));
+            Assert.That(hook.Install().Status, Is.EqualTo(RestoreHookStatus.Installed));
+            var output = GitTestRepo.Run(_repo.Root, "worktree", "add", "-q", "--detach", Path.Combine(_root, "repaired"));
+            Assert.That(output, Does.Contain("agent-skills-sync:"), "The repaired executable block must run during checkout.");
+        }
+
+        [Test]
+        public void Install_LegacyBlockWithoutHeaderOwnership_UpdatesAndPreservesHeader()
+        {
+            var hook = new RestoreHook(_repo.Root, _command, "1.0.0");
+            hook.Install();
+            var path = Path.Combine(_repo.Root, ".git", "hooks", "post-checkout");
+            File.WriteAllText(path, string.Join("\n", File.ReadAllLines(path)
+                .Where(line => !line.StartsWith("# createdHeader ", StringComparison.Ordinal))) + "\n");
+
+            Assert.That(hook.Status().Status, Is.EqualTo(RestoreHookStatus.Outdated));
+            Assert.That(hook.Install().Status, Is.EqualTo(RestoreHookStatus.Installed));
+            hook.Uninstall();
+            Assert.That(File.ReadAllText(path), Is.EqualTo("#!/bin/sh\n"), "Unknown ownership must preserve the header.");
+        }
+
+        [Test]
+        public void Operations_InvalidHeaderOwnership_LeaveHookUntouched()
+        {
+            var hook = new RestoreHook(_repo.Root, _command, "1.0.0");
+            hook.Install();
+            var path = Path.Combine(_repo.Root, ".git", "hooks", "post-checkout");
+            var invalid = string.Join("\n", File.ReadAllLines(path).Select(line =>
+                line.StartsWith("# createdHeader ", StringComparison.Ordinal) ? "# createdHeader aW52YWxpZA==" : line)) + "\n";
+            File.WriteAllText(path, invalid);
+
+            Assert.That(hook.Status().Status, Is.EqualTo(RestoreHookStatus.Blocked));
+            Assert.That(hook.Install().Status, Is.EqualTo(RestoreHookStatus.Blocked));
+            Assert.That(hook.Uninstall().Status, Is.EqualTo(RestoreHookStatus.Blocked));
+            Assert.That(File.ReadAllText(path), Is.EqualTo(invalid));
         }
     }
 }
