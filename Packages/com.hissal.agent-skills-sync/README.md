@@ -373,6 +373,18 @@ The order for a worktree launcher (configuring a particular launcher is up to yo
 
 An agent that was already running when its skills were restored may need to refresh its skill list or restart.
 
+### The agent skill
+
+The package ships an agent skill, `agent-skills-sync`, that teaches agents this section: restoring a checkout,
+setting up the hook or a launcher, acting on each status and exit code, and the source-consent rule. It lives in the
+package's `.claude/skills/agent-skills-sync/`, versioned with the package. Until the tool installs skills that
+packages ship ([#60](https://github.com/Hissal/agent-skills-sync-unity/issues/60)), lock it like any GitHub skill and
+sync:
+
+```sh
+npx skills add Hissal/agent-skills-sync-unity --skill agent-skills-sync
+```
+
 ### Set up worktree restore in the window
 
 Open **Window > Agent Skills Sync > Worktrees** to see this checkout's scope and differences from the shared
@@ -421,6 +433,7 @@ editor runs with `com.unity.pipeline`, `unity command skills_restore` runs the s
 | `sync [--confirm-source <owner/repo>]… [--install-mode latest\|pinned]` | The sync window's sync: fetches from GitHub, installs, and records the snapshots later restores install. |
 | `import` | Records the skills an earlier version of this package installed as snapshots, as found on disk. |
 | `scope --shared \| --worktree` | Makes the checkout follow the repository's shared choices, or keep its own. `--shared` in a repository with no shared choices yet shares this checkout's. |
+| `hook install \| status \| uninstall` | Adds this project to the repository's `post-checkout` hook, so each new worktree is restored when Git creates it, or reports or removes that. Run it from a build outside every checkout. |
 
 Each run prints one JSON object with a `status`. A restore also reports `unconfirmedSources`, `missingSnapshots`
 (each with a `reason`), `baselineCandidates`, `choices` (`scope` and `baselineFrom`), the planned `actions`, and, once

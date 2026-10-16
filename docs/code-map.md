@@ -171,3 +171,9 @@ directory take `SharedState.Lock`; snapshots are published by renaming a finishe
 - `TempDirectory` — deletes temp trees safely even when they hold symlinks or junctions.
 - `Fixtures~/` — skill folders with known `skills` CLI hashes (read by `SkillFolderHashTests`,
   `FakeGitHub` and others).
+
+## Shipped skill
+
+`.claude/skills/agent-skills-sync/` in the package is an agent skill describing the standalone command, the Pipeline
+commands and the source-consent rule. Change it with the commands it names: `.github/scripts/package-skills/` fails CI
+when it names a command or flag the standalone command's usage text, its option parser or a Pipeline command lacks.
