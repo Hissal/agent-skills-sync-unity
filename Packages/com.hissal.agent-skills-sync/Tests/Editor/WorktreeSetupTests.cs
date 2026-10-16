@@ -317,5 +317,45 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(snapshot.MatchesLock, Is.False);
             Assert.That(snapshot.RestoreSnapshot, Is.EqualTo(FakeGitHub.MinimalHash));
         }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void Share_WhenLocalPrefsCannotBeSaved_DoesNotPublishChoices(bool switchScope)
+        {
+            Sync(_repo.Root);
+            if (!switchScope) WorktreeSetup.Share(_repo.Root, _environment);
+            var other = Worktree();
+            // A directory in place of the destination file refuses the atomic save on every OS.
+            Directory.CreateDirectory(LocalPrefs.PathFor(other));
+            var before = Contents(_root);
+
+            Assert.Throws<IOException>(() =>
+            {
+                if (switchScope) WorktreeSetup.SetScope(other, ChoiceScope.Shared, _environment);
+                else WorktreeSetup.Share(other, _environment);
+            });
+
+            Assert.That(Contents(_root), Is.EqualTo(before));
+            Assert.That(Read().HasSharedChoices, Is.EqualTo(!switchScope));
+        }
+
+        [Test]
+        public void Share_WhenSharedPrefsCannotBeSaved_RestoresTheCheckoutsPreviousBytes()
+        {
+            Sync(_repo.Root);
+            WorktreeSetup.Share(_repo.Root, _environment);
+            var other = Worktree();
+            var prefs = LocalPrefs.Load(other);
+            prefs.OptedOutSkills = new[] { "tdd" };
+            prefs.Save();
+            var sharedPath = Path.Combine(SharedChoices.StateOf(_repo.Root, _environment).Directory, "choices.json");
+            File.Delete(sharedPath);
+            Directory.CreateDirectory(sharedPath);
+            var before = Contents(_root);
+
+            Assert.Throws<IOException>(() => WorktreeSetup.Share(other, _environment));
+
+            Assert.That(Contents(_root), Is.EqualTo(before));
+        }
     }
 }

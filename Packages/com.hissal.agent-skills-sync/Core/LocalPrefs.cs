@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 
 namespace Hissal.AgentSkillsSync
 {
@@ -86,11 +87,21 @@ namespace Hissal.AgentSkillsSync
         {
             Set("skippedSkills", null); // Retired choices are ignored, never migrated to install-anyway.
             if (Get(VersionKey) == null) _members.Insert(0, new KeyValuePair<string, object>(VersionKey, (double)FormatVersion));
-            Directory.CreateDirectory(Path.GetDirectoryName(_path));
-            var temp = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllText(temp, JsonWriter.Write(_members));
-            if (File.Exists(_path)) File.Replace(temp, _path, null);
-            else File.Move(temp, _path);
+            WriteBytes(_path, Encoding.UTF8.GetBytes(JsonWriter.Write(_members)));
+        }
+
+        /// <summary>Atomically saves prefs bytes, also used to roll back a failed shared-choice publication.</summary>
+        internal static void WriteBytes(string path, byte[] bytes)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllBytes(temp, bytes);
+                if (File.Exists(path)) File.Replace(temp, path, null);
+                else File.Move(temp, path);
+            }
+            finally { if (File.Exists(temp)) File.Delete(temp); }
         }
 
         /// <summary>

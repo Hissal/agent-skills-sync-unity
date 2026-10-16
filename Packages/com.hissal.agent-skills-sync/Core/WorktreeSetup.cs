@@ -132,9 +132,9 @@ namespace Hissal.AgentSkillsSync
                 var shared = ownState.LoadChoices();
                 if (scope == ChoiceScope.Shared && shared.HasChoices) prefs.CopyChoicesFrom(shared);
                 else MaterializeFolders(prefs, environment);
-                if (scope == ChoiceScope.Shared && !shared.HasChoices) Publish(shared, prefs, project);
                 prefs.ChoiceScope = scope;
-                prefs.Save();
+                if (scope == ChoiceScope.Shared && !shared.HasChoices) Publish(shared, prefs, project);
+                else prefs.Save();
             }
         }
 
@@ -148,9 +148,8 @@ namespace Hissal.AgentSkillsSync
                 var prefs = SharedChoices.Load(project, environment);
                 MaterializeFolders(prefs, environment);
                 var shared = state.LoadChoices();
-                Publish(shared, prefs, project);
                 prefs.ChoiceScope = ChoiceScope.Shared;
-                prefs.Save();
+                Publish(shared, prefs, project);
             }
         }
 
@@ -196,7 +195,29 @@ namespace Hissal.AgentSkillsSync
         {
             shared.CopyChoicesFrom(prefs);
             if (shared.BaselineProject == null) shared.BaselineProject = Path.GetFullPath(project);
-            shared.Save();
+            var path = LocalPrefs.PathFor(project);
+            var previous = File.Exists(path) ? File.ReadAllBytes(path) : null;
+            var hadFolder = Directory.Exists(Path.GetDirectoryName(path));
+            // A refused local write must never publish choices to other checkouts. If publication fails instead,
+            // put the local file back before releasing the shared-state lock, preserving even unknown members byte for byte.
+            prefs.Save();
+            try { shared.Save(); }
+            catch (Exception failure) when (failure is IOException || failure is UnauthorizedAccessException)
+            {
+                try
+                {
+                    if (previous == null) File.Delete(path);
+                    else LocalPrefs.WriteBytes(path, previous);
+                    if (!hadFolder && Directory.GetFileSystemEntries(Path.GetDirectoryName(path)).Length == 0)
+                        Directory.Delete(Path.GetDirectoryName(path));
+                }
+                catch (Exception rollback) when (rollback is IOException || rollback is UnauthorizedAccessException)
+                {
+                    throw new IOException("Sharing failed and this checkout's previous choices could not be restored. " +
+                        "Its local scope may have changed; refresh and review it before syncing.", new AggregateException(failure, rollback));
+                }
+                throw;
+            }
         }
 
         static void MaterializeFolders(LocalPrefs prefs, UserEnvironment environment)
