@@ -97,18 +97,25 @@ namespace Hissal.AgentSkillsSync
             (prefs.ChoiceScope == null && shared.BaselineProject != null &&
              Paths.Comparer.Equals(Trim(shared.BaselineProject), Trim(Path.GetFullPath(unityRoot))));
 
-        /// <summary>Adds <paramref name="sources"/> to the repository's synced sources. No-op outside a Git repository.</summary>
-        internal static void RecordSyncedSources(string unityRoot, UserEnvironment environment, IEnumerable<string> sources)
+        /// <summary>
+        /// After a sync or import in the project at <paramref name="unityRoot"/>: adds <paramref name="sources"/> to the
+        /// repository's synced sources, and the project to its known projects (<see cref="LocalPrefs.KnownProjects"/>).
+        /// No-op outside a Git repository.
+        /// </summary>
+        internal static void RecordSync(string unityRoot, UserEnvironment environment, IEnumerable<string> sources)
         {
             var state = StateOf(unityRoot, environment);
             if (state == null) return;
             var list = sources.ToList();
+            var project = Trim(Path.GetFullPath(unityRoot));
             using (state.Lock())
             {
                 var shared = state.LoadChoices();
                 var union = Union(shared.SyncedSources, list);
-                if (union.SequenceEqual(shared.SyncedSources)) return;
+                var known = shared.KnownProjects.Any(p => Paths.Comparer.Equals(Trim(p), project));
+                if (union.SequenceEqual(shared.SyncedSources) && known) return;
                 shared.SyncedSources = union;
+                if (!known) shared.KnownProjects = shared.KnownProjects.Concat(new[] { project }).ToList();
                 shared.Save();
             }
         }

@@ -296,6 +296,26 @@ namespace Hissal.AgentSkillsSync.Tests
         }
 
         [Test]
+        public void Run_RepositoryWithASeparateGitDirectory_FindsTheSyncedMainCheckout()
+        {
+            // Git keeps no record of this main checkout: `git worktree list` names the repository folder instead.
+            _repo = GitTestRepo.Create(Path.Combine(_root, "separate"), Path.Combine(_root, "store.git"), (Lockfile.FileName, Lock));
+            Choose(_repo.Root, (prefs, groups) => SkillSelection.Set(prefs, new[] { "review" }, false, groups));
+            Sync(_repo.Root);
+            var first = NewWorktree("first");
+            Choose(first, (prefs, groups) => SkillSelection.Set(prefs, new[] { "tdd" }, false, groups));
+            var worktree = NewWorktree();
+
+            var report = Restore(worktree).Run();
+
+            Assert.That(report.Status, Is.EqualTo(RestoreStatus.BaselineRequired));
+            Assert.That(report.BaselineCandidates, Is.EquivalentTo(new[] { _repo.Root, first }));
+            var adopted = Restore(worktree, baseline: _repo.Root).Run();
+            Assert.That(adopted.BaselineFrom, Is.EqualTo(_repo.Root));
+            Assert.That(adopted.Summary.Installed, Is.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
         public void Run_InstallAnywayChoice_IsInheritedAndUseMineFollowsTheDestinationsOwnScan()
         {
             var userScope = Path.Combine(_home, ".codex", "skills", "tdd");

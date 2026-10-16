@@ -127,8 +127,7 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>The prefs of this project in every other checkout of the repository.</summary>
         IReadOnlyList<(string Project, LocalPrefs Prefs)> SiblingPrefs() =>
-            Identity.Checkouts()
-                .Select(Identity.ProjectIn)
+            _state.ProjectFolders()
                 .Where(p => !Paths.Comparer.Equals(p, _unityRoot.TrimEnd(Path.DirectorySeparatorChar)))
                 .Where(p => File.Exists(LocalPrefs.PathFor(p)))
                 .Select(p => (p, LocalPrefs.Load(p)))
@@ -201,10 +200,10 @@ namespace Hissal.AgentSkillsSync
         string BaselineProject()
         {
             var full = Path.GetFullPath(_baseline).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            foreach (var checkout in Identity.Checkouts())
+            foreach (var project in _state.ProjectFolders())
             {
-                var project = Identity.ProjectIn(checkout);
-                if (Paths.Comparer.Equals(project, full) || Paths.Comparer.Equals(checkout.TrimEnd(Path.DirectorySeparatorChar), full))
+                var checkout = RepositoryIdentity.Find(project)?.Checkout;
+                if (Paths.Comparer.Equals(project, full) || (checkout != null && Paths.Comparer.Equals(checkout, full)))
                     return project;
             }
             throw new RepositoryException($"The baseline {_baseline} is not a checkout of this repository.");

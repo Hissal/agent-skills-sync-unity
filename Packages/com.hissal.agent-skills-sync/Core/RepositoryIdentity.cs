@@ -64,13 +64,17 @@ namespace Hissal.AgentSkillsSync
         }
 
         /// <summary>
-        /// Every checkout of the repository that still exists: the main checkout (unless the repository is bare) first,
-        /// then the linked worktrees.
+        /// Every checkout of the repository Git records that still exists: the main checkout first, then the linked
+        /// worktrees, and this identity's own <see cref="Checkout"/>. Git records a main checkout only as the folder
+        /// holding the <c>.git</c> folder, so the main checkout of a repository made with
+        /// <c>git init --separate-git-dir</c> is missing unless it is this one (<c>git worktree list</c> shows the
+        /// repository folder there instead); <see cref="SharedState.ProjectFolders"/> adds it once it has synced.
         /// </summary>
         public IReadOnlyList<string> Checkouts()
         {
             var checkouts = new List<string>();
             if (Path.GetFileName(CommonDirectory) == ".git") checkouts.Add(Path.GetDirectoryName(CommonDirectory));
+            checkouts.Add(Checkout);
             var worktrees = Path.Combine(CommonDirectory, "worktrees");
             if (Directory.Exists(worktrees))
                 foreach (var admin in Directory.GetDirectories(worktrees).OrderBy(d => d, StringComparer.Ordinal))
@@ -84,13 +88,6 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>This Unity project's folder in <paramref name="checkout"/>.</summary>
         public string ProjectIn(string checkout) => TrimEnd(Paths.InProject(checkout, ProjectPath));
-
-        /// <summary>Whether <paramref name="path"/> is this project's folder in one of <see cref="Checkouts"/>.</summary>
-        public bool IsProjectFolder(string path)
-        {
-            var full = TrimEnd(Path.GetFullPath(path));
-            return Checkouts().Any(c => Paths.Comparer.Equals(ProjectIn(c), full));
-        }
 
         static string CommonDirectoryOf(string gitDirectory)
         {

@@ -34,6 +34,13 @@ namespace Hissal.AgentSkillsSync.Pipeline
                 baselineCandidates = report.BaselineCandidates,
                 unconfirmedSources = report.UnconfirmedSources,
                 missingSnapshots = report.MissingSnapshots.Select(m => new { skill = m.Skill, reason = m.Reason }).ToArray(),
+                actions = report.Plan?.Actions.Select(a => new
+                {
+                    kind = a.Kind.ToString(),
+                    skill = a.SkillName,
+                    folder = a.Folder.RelativePath,
+                    linkTarget = a.LinkTarget?.RelativePath,
+                }).ToArray(),
                 installed = report.Summary?.Installed,
                 updated = report.Summary?.Updated,
                 removed = report.Summary?.Removed,

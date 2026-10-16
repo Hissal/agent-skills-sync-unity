@@ -38,6 +38,7 @@ namespace Hissal.AgentSkillsSync
         const string NotifyNewSkillsKey = "notifyNewSkills";
         const string ChoiceScopeKey = "choiceScope";
         const string BaselineProjectKey = "baselineProject";
+        const string KnownProjectsKey = "knownProjects";
 
         /// <summary>
         /// The members holding the contributor's choices, the ones a checkout following the shared choices
@@ -116,6 +117,17 @@ namespace Hissal.AgentSkillsSync
         {
             get => GetString(BaselineProjectKey);
             set => Set(BaselineProjectKey, value);
+        }
+
+        /// <summary>
+        /// In the shared choices only: the Unity project folders that synced or imported on this machine, so a restore
+        /// finds checkouts Git keeps no record of (the main checkout of a <c>git init --separate-git-dir</c> repository).
+        /// Never null.
+        /// </summary>
+        internal IReadOnlyList<string> KnownProjects
+        {
+            get => GetStringList(KnownProjectsKey);
+            set => SetStringList(KnownProjectsKey, value);
         }
 
         /// <summary>Whether these prefs hold any of the contributor's choices (see <see cref="ChoiceKeys"/>).</summary>

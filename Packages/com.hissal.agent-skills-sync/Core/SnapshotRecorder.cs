@@ -37,8 +37,10 @@ namespace Hissal.AgentSkillsSync
             var settings = ProjectSyncSettings.Load(unityRoot);
             var choices = MachineChoices.Read(skillsRoot, SharedChoices.Load(unityRoot, environment), environment,
                 groups: settings.Groups);
-            return Record(state, skillsRoot, unityRoot, lockfile, choices, settings.InstallMode, SnapshotProvenance.Import,
+            var recorded = Record(state, skillsRoot, unityRoot, lockfile, choices, settings.InstallMode, SnapshotProvenance.Import,
                 keepExisting: true);
+            SharedChoices.RecordSync(unityRoot, environment, Enumerable.Empty<string>());
+            return recorded;
         }
 
         static IReadOnlyList<string> Record(SharedState state, string skillsRoot, string prefsRoot, Lockfile lockfile,

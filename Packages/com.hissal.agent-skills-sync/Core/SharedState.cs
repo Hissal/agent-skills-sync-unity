@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 
 namespace Hissal.AgentSkillsSync
@@ -40,6 +42,21 @@ namespace Hissal.AgentSkillsSync
         public LocalPrefs LoadChoices() => LocalPrefs.LoadFile(ChoicesPath);
 
         public SnapshotResolutions LoadResolutions() => SnapshotResolutions.Load(ResolutionsPath);
+
+        /// <summary>
+        /// This project's folder in every checkout of the repository that still exists: the checkouts Git records
+        /// (<see cref="RepositoryIdentity.Checkouts"/>), then the projects that synced or imported here
+        /// (<see cref="LocalPrefs.KnownProjects"/>) that still belong to this repository and project.
+        /// </summary>
+        public IReadOnlyList<string> ProjectFolders()
+        {
+            var recorded = LoadChoices().KnownProjects
+                .Where(p => System.IO.Directory.Exists(p) && RepositoryIdentity.Find(p)?.Key == Identity.Key);
+            return Identity.Checkouts().Select(Identity.ProjectIn)
+                .Concat(recorded.Select(p => Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)))
+                .Distinct(Paths.Comparer)
+                .ToList();
+        }
 
         /// <summary>
         /// Waits for, then holds, this repository's lock until disposed. The lock is an open file no other process can

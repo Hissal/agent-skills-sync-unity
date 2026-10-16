@@ -18,11 +18,19 @@ namespace Hissal.AgentSkillsSync.Tests
         /// Creates a repository at <paramref name="root"/> whose first commit holds <paramref name="files"/>
         /// (relative path to text). Ignores the test when <c>git</c> is not installed.
         /// </summary>
-        public static GitTestRepo Create(string root, params (string Path, string Text)[] files)
+        public static GitTestRepo Create(string root, params (string Path, string Text)[] files) =>
+            Create(root, null, files);
+
+        /// <summary>
+        /// Like <see cref="Create(string, (string, string)[])"/>, with the repository folder at
+        /// <paramref name="separateGitDir"/> (<c>git init --separate-git-dir</c>) unless it is null.
+        /// </summary>
+        public static GitTestRepo Create(string root, string separateGitDir, params (string Path, string Text)[] files)
         {
             Directory.CreateDirectory(root);
             if (!TryRun(root, out _, "--version")) Assert.Ignore("git is not installed.");
-            Run(root, "init", "-q");
+            if (separateGitDir == null) Run(root, "init", "-q");
+            else Run(root, "init", "-q", "--separate-git-dir", separateGitDir);
             var repo = new GitTestRepo(root);
             repo.Commit("initial", files);
             return repo;

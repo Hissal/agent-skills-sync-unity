@@ -96,7 +96,7 @@ namespace Hissal.AgentSkillsSync
                 StartupCheck.RecordSynced(prefs, SyncStatus.Read(Root, Choices, _unityRoot));
                 SourceConsent.RecordSynced(prefs, Lock, Choices.Skills);
                 SharedChoices.Save(prefs, _unityRoot, _environment);
-                SharedChoices.RecordSyncedSources(_unityRoot, _environment, Choices.Skills.SelectedIn(Lock).Select(s => s.Source));
+                SharedChoices.RecordSync(_unityRoot, _environment, Choices.Skills.SelectedIn(Lock).Select(s => s.Source));
                 var state = SharedChoices.StateOf(_unityRoot, _environment);
                 if (_recordSnapshots && state != null)
                     SnapshotRecorder.RecordSync(state, Root, _unityRoot, Lock, Choices, Mode);

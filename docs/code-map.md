@@ -53,8 +53,9 @@ says what stopped it.
 1. **Find the repository.** `RepositoryIdentity.Find` reads the checkout's `.git` file or folder and `commondir`;
    its `RepositoryIdentity.Key` (common directory + project path) names the `SharedState` folder.
 2. **Decide the choices.** The checkout's own (`ChoiceScope.Worktree`) or the `SharedChoices`; while none are
-   shared, the other checkouts' (`RepositoryIdentity.Checkouts`) when they agree, else the named baseline or
-   `RestoreStatus.BaselineRequired`. Synced sources of every checkout and the shared ones count as approved.
+   shared, the other checkouts' (`SharedState.ProjectFolders`: Git's checkouts plus the projects that synced) when
+   they agree, else the named baseline or `RestoreStatus.BaselineRequired`. Synced sources of every checkout and the
+   shared ones count as approved.
 3. **Check.** Unapproved sources (`RestoreStatus.SourcesNeedConfirmation`), then each skill the run would fetch
    (`SkillSync.ToFetch`) without a recorded snapshot (`SnapshotFetcher.Locate`, `RestoreStatus.SnapshotsMissing`).
 4. **Run** steps 1–5 of a sync through `SkillsSyncService` with the `SnapshotFetcher`, which hands out the
@@ -87,7 +88,7 @@ waiting for removal from missing ones.
 | ↳ new-skill notice | `LocalPrefs.NotifyNewSkills` | `StartupCheck.NewSkills` | `SkillsSyncWindow` |
 | ↳ managed skills | `LocalPrefs.ManagedSkills` | `ProjectScanner` | `PlanExecutor` |
 | ↳ choice scope | `LocalPrefs.ChoiceScope` | `SharedChoices`, `WorktreeRestore` | `WorktreeRestore`, `SharedChoices.SetScope` |
-| `SharedChoices` | `repos/<key>/choices.json` in `UserEnvironment.StateDirectory` (per machine and repository) | `SharedChoices.Load` (window, notifier, `SkillsSyncService`, `SnapshotRecorder.Import`, the command's `sync`), `WorktreeRestore` | `SharedChoices.Save` (choices, while the checkout follows them), `SharedChoices.SetScope`, `SharedChoices.RecordSyncedSources`, `SharedChoices.Adopt` |
+| `SharedChoices` | `repos/<key>/choices.json` in `UserEnvironment.StateDirectory` (per machine and repository) | `SharedChoices.Load` (window, notifier, `SkillsSyncService`, `SnapshotRecorder.Import`, the command's `sync`), `WorktreeRestore` | `SharedChoices.Save` (choices, while the checkout follows them), `SharedChoices.SetScope`, `SharedChoices.RecordSync` (synced sources, `LocalPrefs.KnownProjects`), `SharedChoices.Adopt` |
 | `SnapshotResolutions` | `repos/<key>/resolutions.json` in the state directory | `SnapshotFetcher`, `SnapshotRecorder` | `SnapshotRecorder` |
 | `SnapshotStore` | `snapshots/<hash>/` in the state directory (all repositories) | `SnapshotFetcher` | `SnapshotRecorder` |
 | `ManagedStateFile` | block in each skills folder's `.gitignore` (committed) | `ProjectScanner` | `PlanExecutor` |
