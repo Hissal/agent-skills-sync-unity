@@ -71,6 +71,19 @@ checkout keeps sharing its choices without a scope of its own (`SharedChoices.Fo
 user-scope copies a skip checks against the lock) for the startup check. `SyncStatus.ToRemove` tells skills only
 waiting for removal from missing ones.
 
+## New worktrees
+
+`RestoreHook` installs, inspects and removes one repository's managed `post-checkout` block. Its configuration lives
+inside the block: the external command DLL, package version, common Git directory and registered project paths.
+`RestoreHookReport` exposes the `RestoreHookStatus` and explanation to the window and standalone `hook` commands.
+Foreign shell code stays outside the block; paths inside a checkout and unsupported hooks are refused.
+
+`RestoreCommand` builds the installed package's standalone command into the machine state directory by package version.
+The window's New worktrees controls call it before installing or updating the hook. The hook calls the standalone
+`restore` command with `--hook-output`, which renders the structured restore result as one line and a recovery command
+when needed. A null previous HEAD gates restoration to a new checkout; the managed block isolates restore failures
+from the remaining hook.
+
 ## State
 
 | State | Where | Read by | Written by |

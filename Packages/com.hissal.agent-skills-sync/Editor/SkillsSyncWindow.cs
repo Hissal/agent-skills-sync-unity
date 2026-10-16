@@ -35,6 +35,7 @@ namespace Hissal.AgentSkillsSync.Editor
         HelpBox _status;
         Label _lockPath;
         VisualElement _folders;
+        VisualElement _worktrees;
         VisualElement _newSources;
         EnumField _mode;
         HelpBox _modeHelp;
@@ -94,6 +95,9 @@ namespace Hissal.AgentSkillsSync.Editor
             scroll.Add(new Label("Skills folders to install into on this machine") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
             _folders = new VisualElement { style = { marginTop = 2, marginBottom = 8 } };
             scroll.Add(_folders);
+            scroll.Add(new Label("New worktrees") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
+            _worktrees = new VisualElement { style = { marginBottom = 8 } };
+            scroll.Add(_worktrees);
             scroll.Add(new Label($"Skills locked in {Lockfile.FileName}") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
             _lockPath = new Label { selection = { isSelectable = true }, style = { whiteSpace = WhiteSpace.Normal, marginLeft = 4 } };
             scroll.Add(_lockPath);
@@ -155,6 +159,7 @@ namespace Hissal.AgentSkillsSync.Editor
             ShowStatus(null, HelpBoxMessageType.None);
             ShowLockPath();
 
+            ShowWorktrees();
             var selected = SelectedFolders();
             ShowFolders(selected);
             _notifyNewSkills.SetValueWithoutNotify(LoadPrefs().NotifyNewSkills);
@@ -251,6 +256,61 @@ namespace Hissal.AgentSkillsSync.Editor
                 _consentNote.text = "";
             }
             _consentNote.style.display = _consentNote.text.Length == 0 ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        void ShowWorktrees()
+        {
+            _worktrees.Clear();
+            _worktrees.Add(new Label("Restore skills in new worktrees, for every launcher. Install once per clone on this machine.")
+                { style = { whiteSpace = WhiteSpace.Normal } });
+            try
+            {
+                var package = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(SkillsSyncWindow).Assembly);
+                var command = new RestoreCommand(package.resolvedPath, package.version, UserEnvironment.Current);
+                var hook = new RestoreHook(UnityProjectRoot, command.PathForCommand, package.version);
+                var report = hook.Status();
+                var sdk = command.HasSdk();
+                _worktrees.Add(new HelpBox(report.Message, report.Status == RestoreHookStatus.Blocked || report.Status == RestoreHookStatus.Outdated
+                    ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info));
+                if (!sdk && !File.Exists(command.PathForCommand))
+                {
+                    _worktrees.Add(new HelpBox("No .NET SDK found. Install the .NET 8 SDK or newer to prepare the restore command.", HelpBoxMessageType.Warning));
+                    _worktrees.Add(new Button(() => Application.OpenURL("https://dotnet.microsoft.com/download")) { text = "Get the .NET SDK" });
+                }
+                var install = new Button(() => ChangeHook(hook, command, true))
+                { text = report.Status == RestoreHookStatus.Outdated ? "Update restore hook" : "Restore skills in new worktrees" };
+                install.SetEnabled(report.Status != RestoreHookStatus.Blocked && report.Status != RestoreHookStatus.Installed &&
+                    (sdk || File.Exists(command.PathForCommand)));
+                _worktrees.Add(install);
+                var uninstall = new Button(() => ChangeHook(hook, command, false)) { text = "Uninstall for this project" };
+                uninstall.SetEnabled(report.Status == RestoreHookStatus.Installed || report.Status == RestoreHookStatus.Outdated);
+                _worktrees.Add(uninstall);
+                _worktrees.Add(new Button(() => Application.OpenURL("https://github.com/Hissal/agent-skills-sync-unity#new-worktrees")) { text = "New worktree setup and limitations" });
+            }
+            catch (Exception e) when (e is RepositoryException || e is IOException || e is UnauthorizedAccessException || e is System.ComponentModel.Win32Exception)
+            {
+                _worktrees.Add(new HelpBox(e.Message, HelpBoxMessageType.Warning));
+            }
+        }
+
+        void ChangeHook(RestoreHook hook, RestoreCommand command, bool install)
+        {
+            try
+            {
+                if (install)
+                {
+                    EditorUtility.DisplayProgressBar(Title, "Preparing the restore command...", 0.5f);
+                    command.Build();
+                }
+                var report = install ? hook.Install() : hook.Uninstall();
+                ShowSummary(report.Message, report.Status == RestoreHookStatus.Blocked ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info);
+            }
+            catch (Exception e)
+            {
+                ShowSummary("Could not change the restore hook: " + e.Message, HelpBoxMessageType.Error);
+            }
+            finally { EditorUtility.ClearProgressBar(); }
+            ShowWorktrees();
         }
 
         void ChangeMode(InstallMode mode)

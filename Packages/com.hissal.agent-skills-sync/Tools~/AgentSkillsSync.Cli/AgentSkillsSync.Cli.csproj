@@ -18,6 +18,7 @@
   <ItemGroup>
     <Compile Include="../../Core/**/*.cs" />
     <Compile Include="*.cs" />
+    <EmbeddedResource Include="../../package.json" LogicalName="package.json" />
   </ItemGroup>
 
 </Project>
