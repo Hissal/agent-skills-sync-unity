@@ -55,6 +55,7 @@ namespace Hissal.AgentSkillsSync.Editor
         readonly HashSet<string> _collapsed = new HashSet<string>(StringComparer.Ordinal);
         // The same for the ungrouped section, which has no name.
         bool _ungroupedCollapsed;
+        bool? _worktreesExpanded;
         readonly HashSet<string> _confirmedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>The Unity project folder: holds this machine's local prefs and the committed project settings.</summary>
@@ -95,7 +96,6 @@ namespace Hissal.AgentSkillsSync.Editor
             scroll.Add(new Label("Skills folders to install into on this machine") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
             _folders = new VisualElement { style = { marginTop = 2, marginBottom = 8 } };
             scroll.Add(_folders);
-            scroll.Add(new Label("New worktrees") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
             _worktrees = new VisualElement { style = { marginBottom = 8 } };
             scroll.Add(_worktrees);
             scroll.Add(new Label($"Skills locked in {Lockfile.FileName}") { style = { unityFontStyleAndWeight = FontStyle.Bold } });
@@ -261,7 +261,94 @@ namespace Hissal.AgentSkillsSync.Editor
         void ShowWorktrees()
         {
             _worktrees.Clear();
-            _worktrees.Add(new Label("Restore skills in new worktrees, for every launcher. Install once per clone on this machine.")
+            var identity = RepositoryIdentity.Find(UnityProjectRoot);
+            if (identity == null)
+            {
+                _worktrees.Add(new Label(SyncText.WorktreesOutsideGit) { style = { whiteSpace = WhiteSpace.Normal } });
+                return;
+            }
+            var section = new Foldout { text = SyncText.WorktreesTitle, value = _worktreesExpanded ?? false };
+            section.RegisterValueChangedCallback(e => { if (e.target == section) _worktreesExpanded = e.newValue; });
+            _worktrees.Add(section);
+            section.Add(new Label(SyncText.SharedChoicesExplanation) { style = { whiteSpace = WhiteSpace.Normal } });
+            section.Add(new Label(SyncText.WorktreeIdentity(identity)) { style = { whiteSpace = WhiteSpace.Normal } });
+            try
+            {
+                section.SetValueWithoutNotify(_worktreesExpanded ?? identity.Checkouts().Count > 1);
+                var setup = WorktreeSetupStatus.Read(UnityProjectRoot);
+                section.Add(new Label(SyncText.WorktreeScope(setup)) { style = { whiteSpace = WhiteSpace.Normal } });
+                var scope = new Toggle(SyncText.FollowSharedChoices) { value = setup.FollowsShared };
+                scope.RegisterValueChangedCallback(e => ChangeWorktreeSetup(() =>
+                {
+                    WorktreeSetup.SetScope(UnityProjectRoot, e.newValue ? ChoiceScope.Shared : ChoiceScope.Worktree);
+                    return e.newValue ? SyncText.UsingSharedChoices : SyncText.KeepingOwnChoices;
+                }));
+                section.Add(scope);
+                if (setup.HasSharedChoices)
+                {
+                    section.Add(new Label(SyncText.WorktreeDifferences(setup.Differences)) { style = { whiteSpace = WhiteSpace.Normal } });
+                    section.Add(new Button(() => ChangeWorktreeSetup(() =>
+                    {
+                        WorktreeSetup.UseShared(UnityProjectRoot);
+                        return SyncText.UsingSharedChoices;
+                    })) { text = SyncText.UseSharedChoices });
+                }
+                section.Add(new Button(() => ChangeWorktreeSetup(() =>
+                {
+                    WorktreeSetup.Share(UnityProjectRoot);
+                    return SyncText.SharedTheseChoices;
+                })) { text = SyncText.ShareTheseChoices });
+                if (setup.Candidates.Count > 0)
+                    section.Add(new HelpBox(SyncText.BaselineExplanation, HelpBoxMessageType.Warning));
+                foreach (var candidate in setup.Candidates)
+                {
+                    var row = new Foldout { text = candidate.Project, value = true };
+                    row.Add(new Label(SyncText.BaselineDifferences(candidate.Differences)) { style = { whiteSpace = WhiteSpace.Normal } });
+                    row.Add(new Button(() => ChangeWorktreeSetup(() =>
+                    {
+                        WorktreeSetup.AdoptBaseline(UnityProjectRoot, candidate.Project);
+                        return SyncText.AdoptedBaseline(candidate.Project);
+                    })) { text = SyncText.MakeBaseline });
+                    section.Add(row);
+                }
+                var snapshots = new Foldout { text = SyncText.SelectedSkillSnapshots, value = setup.Snapshots.Any(s => !s.Available) };
+                foreach (var snapshot in setup.Snapshots)
+                    snapshots.Add(new Label(SyncText.WorktreeSnapshot(snapshot)) { style = { whiteSpace = WhiteSpace.Normal } });
+                if (setup.Snapshots.Count == 0) snapshots.Add(new Label(SyncText.NoSelectedSkills));
+                section.Add(snapshots);
+                if (setup.Snapshots.Any(s => !s.Available))
+                    section.Add(new Button(() => ChangeWorktreeSetup(() =>
+                        SyncText.RecordedInstalledSkills(SnapshotRecorder.Import(UnityProjectRoot)))) { text = SyncText.RecordInstalledSkills });
+                section.Add(new HelpBox(SyncText.NewWorktreeRestore(setup.NewWorktree),
+                    setup.NewWorktree.Succeeded ? HelpBoxMessageType.Info : HelpBoxMessageType.Warning));
+            }
+            catch (Exception e) when (e is LockfileException || e is ProjectSyncSettingsException || e is RepositoryException ||
+                                      e is IOException || e is UnauthorizedAccessException)
+            {
+                section.Add(new HelpBox(e.Message, HelpBoxMessageType.Warning));
+            }
+            ShowRestoreHook(section);
+        }
+
+        void ChangeWorktreeSetup(Func<string> action)
+        {
+            try
+            {
+                var message = action();
+                Refresh();
+                ShowSummary(message, HelpBoxMessageType.Info);
+            }
+            catch (Exception e)
+            {
+                Refresh();
+                ShowSummary(SyncText.WorktreeActionFailed(e.Message), HelpBoxMessageType.Error);
+            }
+        }
+
+        void ShowRestoreHook(VisualElement parent)
+        {
+            parent.Add(new Label(SyncText.AutomaticRestore) { style = { unityFontStyleAndWeight = FontStyle.Bold, marginTop = 4 } });
+            parent.Add(new Label("Restore skills in new worktrees, for every launcher. Install once per clone on this machine.")
                 { style = { whiteSpace = WhiteSpace.Normal } });
             try
             {
@@ -270,26 +357,26 @@ namespace Hissal.AgentSkillsSync.Editor
                 var hook = new RestoreHook(UnityProjectRoot, command.PathForCommand, package.version);
                 var report = hook.Status();
                 var sdk = command.HasSdk();
-                _worktrees.Add(new HelpBox(report.Message, report.Status == RestoreHookStatus.Blocked || report.Status == RestoreHookStatus.Outdated
+                parent.Add(new HelpBox(report.Message, report.Status == RestoreHookStatus.Blocked || report.Status == RestoreHookStatus.Outdated
                     ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info));
                 if (!sdk && !File.Exists(command.PathForCommand))
                 {
-                    _worktrees.Add(new HelpBox("No .NET SDK found. Install the .NET 8 SDK or newer to prepare the restore command.", HelpBoxMessageType.Warning));
-                    _worktrees.Add(new Button(() => Application.OpenURL("https://dotnet.microsoft.com/download")) { text = "Get the .NET SDK" });
+                    parent.Add(new HelpBox("No .NET SDK found. Install the .NET 8 SDK or newer to prepare the restore command.", HelpBoxMessageType.Warning));
+                    parent.Add(new Button(() => Application.OpenURL("https://dotnet.microsoft.com/download")) { text = "Get the .NET SDK" });
                 }
                 var install = new Button(() => ChangeHook(hook, command, true))
                 { text = report.Status == RestoreHookStatus.Outdated ? "Update restore hook" : "Restore skills in new worktrees" };
                 install.SetEnabled(report.Status != RestoreHookStatus.Blocked && report.Status != RestoreHookStatus.Installed &&
                     (sdk || File.Exists(command.PathForCommand)));
-                _worktrees.Add(install);
+                parent.Add(install);
                 var uninstall = new Button(() => ChangeHook(hook, command, false)) { text = "Uninstall for this project" };
                 uninstall.SetEnabled(report.Status == RestoreHookStatus.Installed || report.Status == RestoreHookStatus.Outdated);
-                _worktrees.Add(uninstall);
-                _worktrees.Add(new Button(() => Application.OpenURL("https://github.com/Hissal/agent-skills-sync-unity#new-worktrees")) { text = "New worktree setup and limitations" });
+                parent.Add(uninstall);
+                parent.Add(new Button(() => Application.OpenURL("https://github.com/Hissal/agent-skills-sync-unity#new-worktrees")) { text = "New worktree setup and limitations" });
             }
             catch (Exception e) when (e is RepositoryException || e is IOException || e is UnauthorizedAccessException || e is System.ComponentModel.Win32Exception)
             {
-                _worktrees.Add(new HelpBox(e.Message, HelpBoxMessageType.Warning));
+                parent.Add(new HelpBox(e.Message, HelpBoxMessageType.Warning));
             }
         }
 

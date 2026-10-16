@@ -373,6 +373,25 @@ The order for a worktree launcher (configuring a particular launcher is up to yo
 
 An agent that was already running when its skills were restored may need to refresh its skill list or restart.
 
+### Set up worktree restore in the window
+
+Open **Window > Agent Skills Sync > Worktrees** to see this checkout's scope and differences from the shared
+choices. Shared choices carry folder selection, opt-ins, opt-outs and install-anyway choices between this
+repository's worktrees on this machine; a checkout can keep its own instead. The section starts collapsed when
+the repository has just one checkout.
+
+- Switch **Follow the shared choices** to keep this checkout's current choices or follow the shared ones again.
+- **Share these choices** publishes this checkout's choices; **Use the shared choices** takes the shared ones.
+  Sync afterward to apply the choices to installed skills.
+- When checkouts disagree and nothing is shared yet, compare their differences and **Make this the baseline**.
+- Inspect selected skills' snapshot provenance and lock match. **Record installed skills** imports older managed
+  installations; Sync creates missing snapshots and confirms new sources.
+- Read the offline readiness summary for an empty new worktree at this revision. It names sources needing
+  approval and missing snapshots, independently of what is already installed in this checkout.
+
+The section also shows automatic restore's hook status and setup controls. Opening or refreshing it changes
+no files; each explicit action reports its outcome in the window's summary.
+
 ### Installing the command
 
 The command needs the [.NET SDK](https://dotnet.microsoft.com/download) 8 or later. It is the package's

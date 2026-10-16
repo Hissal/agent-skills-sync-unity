@@ -48,6 +48,12 @@ namespace Hissal.AgentSkillsSync
         public RestoreReport Plan() => Evaluate(null, dryRun: true);
 
         /// <summary>
+        /// What a new, empty worktree at this project's revision would restore: shared choices (or a baseline),
+        /// current user-scope copies, and no installed project copies. Writes nothing, including no temporary checkout.
+        /// </summary>
+        public RestoreReport PlanNewWorktree() => Evaluate(null, dryRun: true, newWorktree: true);
+
+        /// <summary>
         /// Restores the checkout once every source its selected skills come from was synced somewhere in the repository
         /// or is in <paramref name="confirmedSources"/>, every skill to install has a recorded snapshot and the shared
         /// choices are decided. Otherwise returns the status that says which, having changed nothing.
@@ -62,14 +68,16 @@ namespace Hissal.AgentSkillsSync
         /// </exception>
         public RestoreReport Run(IEnumerable<string> confirmedSources = null) => Evaluate(confirmedSources, dryRun: false);
 
-        RestoreReport Evaluate(IEnumerable<string> confirmedSources, bool dryRun)
+        RestoreReport Evaluate(IEnumerable<string> confirmedSources, bool dryRun, bool newWorktree = false)
         {
             var confirmed = (confirmedSources ?? Enumerable.Empty<string>()).ToList();
             var report = new RestoreReport { DryRun = dryRun, Project = _unityRoot, Identity = Identity };
 
-            var local = LocalPrefs.Load(_unityRoot);
+            var current = LocalPrefs.Load(_unityRoot);
+            var local = newWorktree ? LocalPrefs.Empty(_unityRoot) : current;
             var shared = _state.LoadChoices();
-            var siblings = SiblingPrefs();
+            var siblings = SiblingPrefs().ToList();
+            if (newWorktree) siblings.Add((_unityRoot, current));
             var decision = DecideChoices(local, shared, siblings);
             report.Scope = decision.Scope;
             report.BaselineFrom = decision.AdoptFrom;
@@ -79,7 +87,7 @@ namespace Hissal.AgentSkillsSync
 
             // The checkout's prefs as the restore leaves them: its bookkeeping, the decided choices, and every source
             // synced anywhere in the repository.
-            var effective = LocalPrefs.Load(_unityRoot);
+            var effective = newWorktree ? LocalPrefs.Empty(_unityRoot) : LocalPrefs.Load(_unityRoot);
             if (decision.Choices != null) effective.CopyChoicesFrom(decision.Choices);
             effective.ChoiceScope = decision.Scope;
             effective.SyncedSources = SharedChoices.Union(
@@ -96,12 +104,15 @@ namespace Hissal.AgentSkillsSync
 
             var fetcher = new SnapshotFetcher(_state.Snapshots, resolutions, service.Mode);
             var missing = new List<MissingSnapshot>();
-            foreach (var skill in service.ToFetch())
+            var freshPlan = newWorktree ? InstallPlanner.Plan(service.Lock, ProjectState.Empty, service.Choices) : null;
+            var toFetch = freshPlan == null ? service.ToFetch()
+                : freshPlan.Actions.Where(a => a.NeedsFetch).Select(a => a.Skill).Distinct().ToList();
+            foreach (var skill in toFetch)
                 if (fetcher.Locate(skill, out var reason) == null) missing.Add(new MissingSnapshot(skill.Name, reason));
             report.MissingSnapshots = missing;
             if (missing.Count > 0) return report.With(RestoreStatus.SnapshotsMissing);
 
-            report.Plan = service.Plan();
+            report.Plan = freshPlan ?? service.Plan();
             if (dryRun) return report.With(RestoreStatus.Ready);
 
             // The sync reads the checkout's prefs from disk, so they are saved first, and put back if it changes nothing.
