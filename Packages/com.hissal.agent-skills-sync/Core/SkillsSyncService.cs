@@ -1,44 +1,55 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using UnityEngine;
+using System.Linq;
 
-namespace Hissal.AgentSkillsSync.Editor
+namespace Hissal.AgentSkillsSync
 {
     /// <summary>
-    /// Loads one sync's lock, mode, skill groups and machine choices. Both entry points check consent against this
-    /// snapshot and run it unchanged. Construction and planning are offline and never save state.
+    /// Loads one sync's lock, mode, skill groups and machine choices. Every entry point (the sync window, the Pipeline
+    /// command, the standalone command and <see cref="WorktreeRestore"/>) checks consent against this snapshot and runs
+    /// it unchanged. Construction and planning are offline and never save state. In a Git checkout the choices are read
+    /// through <see cref="SharedChoices"/>, and a successful sync shares its synced sources and records its installed
+    /// skills as snapshots (<see cref="SnapshotRecorder"/>).
     /// </summary>
     internal sealed class SkillsSyncService
     {
         readonly string _unityRoot;
         readonly UserEnvironment _environment;
         readonly Func<InstallMode, ISkillFetcher> _fetcher;
+        readonly bool _recordSnapshots;
 
-        internal static string UnityProjectRoot => Path.GetDirectoryName(Application.dataPath);
-        internal static string SkillsRoot => Lockfile.FindRoot(UnityProjectRoot) ?? UnityProjectRoot;
-
+        /// <param name="prefs">The checkout's prefs to read choices from; null = <see cref="SharedChoices.Load"/>.</param>
+        /// <param name="recordSnapshots">
+        /// Whether a successful run records its installed skills as snapshots: true for a sync, false for a restore,
+        /// which installs recorded snapshots.
+        /// </param>
         internal SkillsSyncService(string unityRoot, UserEnvironment environment = null,
-            Func<InstallMode, ISkillFetcher> fetcher = null, InstallMode? modeOverride = null)
+            Func<InstallMode, ISkillFetcher> fetcher = null, InstallMode? modeOverride = null, LocalPrefs prefs = null,
+            bool recordSnapshots = true)
         {
             _unityRoot = unityRoot;
             _environment = environment ?? UserEnvironment.Current;
             _fetcher = fetcher ?? (mode => new GitHubSkillFetcher(mode: mode));
-            Root = Lockfile.FindRoot(unityRoot);
-            if (Root == null)
-                throw new LockfileException(
-                    $"No {Lockfile.FileName} found in the Unity project folder ({unityRoot}) or the folder above it " +
-                    $"({Path.GetDirectoryName(unityRoot)}).");
+            _recordSnapshots = recordSnapshots;
+            Root = FindSkillsRoot(unityRoot);
             Lock = Lockfile.Load(Root);
             // Validate settings even when the invocation overrides the mode.
             var settings = ProjectSyncSettings.Load(unityRoot);
             Mode = modeOverride ?? settings.InstallMode;
             Groups = settings.Groups;
-            var prefs = LocalPrefs.Load(unityRoot);
+            prefs = prefs ?? SharedChoices.Load(unityRoot, _environment);
             Choices = MachineChoices.Read(Root, prefs, _environment, groups: Groups);
             NewSources = SourceConsent.NewSources(Lock, prefs, Choices.Skills);
             NewSkills = SeenSkills.New(prefs, Lock, Choices.Skills);
         }
+
+        /// <summary>The folder holding the Unity project's <c>skills-lock.json</c> (see <see cref="Lockfile.FindRoot"/>).</summary>
+        /// <exception cref="LockfileException">Neither the project folder nor the one above it holds one.</exception>
+        internal static string FindSkillsRoot(string unityRoot) =>
+            Lockfile.FindRoot(unityRoot) ?? throw new LockfileException(
+                $"No {Lockfile.FileName} found in the Unity project folder ({unityRoot}) or the folder above it " +
+                $"({Path.GetDirectoryName(Path.GetFullPath(unityRoot))}).");
 
         internal string Root { get; }
         internal Lockfile Lock { get; }
@@ -58,6 +69,9 @@ namespace Hissal.AgentSkillsSync.Editor
         internal InstallPlan Plan() => Sync(null).Plan(Lock);
         internal IReadOnlyList<string> InstalledDiffersFromLock() => Sync(null).InstalledDiffersFromLock(Lock);
 
+        /// <summary>The locked skills a run would fetch now (see <see cref="SkillSync.ToFetch"/>), offline.</summary>
+        internal IReadOnlyList<LockedSkill> ToFetch() => Sync(null).ToFetch(Lock);
+
         /// <summary>
         /// Syncs only after every new source is confirmed. The window also passes the mode and skill groups it
         /// showed, so a changed project setting requires another review. Records consent only on success, and
@@ -66,7 +80,7 @@ namespace Hissal.AgentSkillsSync.Editor
         internal SyncSummary Run(IEnumerable<string> confirmedSources, InstallMode? expectedMode = null,
             SkillGroups expectedGroups = null)
         {
-            var unconfirmed = SourceConsent.Unconfirmed(Lock, LocalPrefs.Load(_unityRoot), confirmedSources, Choices.Skills);
+            var unconfirmed = SourceConsent.Unconfirmed(Lock, SharedChoices.Load(_unityRoot, _environment), confirmedSources, Choices.Skills);
             if (unconfirmed.Count > 0) throw new SourceConsentException(unconfirmed);
             if (expectedMode.HasValue && expectedMode.Value != Mode)
                 throw new InstallModeChangedException(Mode);
@@ -77,11 +91,15 @@ namespace Hissal.AgentSkillsSync.Editor
             try
             {
                 // Reload because the executor has just recorded ownership in these prefs.
-                var prefs = LocalPrefs.Load(_unityRoot);
+                var prefs = SharedChoices.Load(_unityRoot, _environment);
                 FolderSelection.Save(prefs, Choices.Layout, Choices.Selected, _environment);
                 StartupCheck.RecordSynced(prefs, SyncStatus.Read(Root, Choices, _unityRoot));
                 SourceConsent.RecordSynced(prefs, Lock, Choices.Skills);
-                prefs.Save();
+                SharedChoices.Save(prefs, _unityRoot, _environment);
+                SharedChoices.RecordSync(_unityRoot, _environment, Choices.Skills.SelectedIn(Lock).Select(s => s.Source));
+                var state = SharedChoices.StateOf(_unityRoot, _environment);
+                if (_recordSnapshots && state != null)
+                    SnapshotRecorder.RecordSync(state, Root, _unityRoot, Lock, Choices, Mode);
             }
             catch (Exception e) when (e is LockfileException || e is IOException || e is UnauthorizedAccessException)
             {
@@ -119,5 +137,14 @@ namespace Hissal.AgentSkillsSync.Editor
             => Summary = summary;
 
         internal SyncSummary Summary { get; }
+    }
+
+    /// <summary>The project is not where a command needs it to be (in a Git checkout, or the named baseline); the message says why.</summary>
+    public sealed class RepositoryException : Exception
+    {
+        public RepositoryException(string message) : base(message) { }
+
+        internal static RepositoryException NotInCheckout(string unityRoot) =>
+            new RepositoryException($"The Unity project at {unityRoot} is not in a Git checkout, so it has no shared choices or snapshots.");
     }
 }

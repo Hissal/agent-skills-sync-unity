@@ -22,6 +22,8 @@ The script resolves the host project from its own location, writes NUnit results
 to a temporary file, and prints total / passed / failed counts and failure details.
 A failed launch or compile, invalid report, failing test, or zero tests exits nonzero.
 
-This is an Editor-only package with no PlayMode tests and no player build.
+The Unity package is Editor-only, with no PlayMode tests and no player build.
+Its standalone command (`Packages/com.hissal.agent-skills-sync/Tools~/AgentSkillsSync.Cli`) builds with the
+.NET SDK; `StandaloneCommandTests` in the EditMode suite build and run it, and are ignored without `dotnet`.
 Local verification stops at the full EditMode suite. CI is tracked in
 [#42](https://github.com/Hissal/agent-skills-sync-unity/issues/42).

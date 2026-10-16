@@ -34,11 +34,12 @@ namespace Hissal.AgentSkillsSync.Editor
             {
                 var layout = FolderLayout.Default;
                 var environment = UserEnvironment.Current;
-                var prefs = LocalPrefs.Load(unityRoot);
-                OfferNewFolders(prefs, layout, environment);
+                var prefs = SharedChoices.Load(unityRoot, environment);
+                OfferNewFolders(prefs, unityRoot, layout, environment);
 
                 var groups = ProjectSyncSettings.Load(unityRoot).Groups;
                 var status = SyncStatus.Read(skillsRoot, MachineChoices.Read(skillsRoot, prefs, environment, layout, groups), unityRoot);
+                // Seeding and declining record this checkout's notices only, never a choice, so they never touch the shared choices.
                 if (StartupCheck.Seed(prefs, status)) prefs.Save();
                 if (!StartupCheck.ShouldNotify(status, prefs)) return;
 
@@ -62,7 +63,7 @@ namespace Hissal.AgentSkillsSync.Editor
         }
 
         /// <summary>One dialog per folder whose home appeared and was neither selected nor declined; saves each answer.</summary>
-        static void OfferNewFolders(LocalPrefs prefs, FolderLayout layout, UserEnvironment environment)
+        static void OfferNewFolders(LocalPrefs prefs, string unityRoot, FolderLayout layout, UserEnvironment environment)
         {
             foreach (var folder in FolderSelection.Offers(prefs, layout, environment))
             {
@@ -75,7 +76,7 @@ namespace Hissal.AgentSkillsSync.Editor
                     "Not Now");
                 if (add) FolderSelection.Accept(prefs, layout, folder, environment);
                 else FolderSelection.Decline(prefs, folder);
-                prefs.Save();
+                SharedChoices.Save(prefs, unityRoot, environment);
             }
         }
     }

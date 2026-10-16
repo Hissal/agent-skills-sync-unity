@@ -34,6 +34,12 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>The source was downloaded but is unusable: not an owner/repo source, the skill is missing, or it cannot be extracted.</summary>
         SourceUnusable,
+
+        /// <summary>
+        /// A restore, which never downloads, found no usable snapshot recorded for the lock entry
+        /// (<see cref="SnapshotFetcher"/>): an explicit sync (or an import) has to record one first.
+        /// </summary>
+        NotRecorded,
     }
 
     /// <summary>A skill could not be fetched; the message names the skill or source, the reason, and what to do.</summary>

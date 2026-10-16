@@ -1,14 +1,16 @@
 # Agent Skills Sync (Unity)
 
-Editor-only Unity package that treats a project's committed `skills-lock.json` as the source of truth. It installs
-the locked agent skills into `.agents/skills/` (one copy) and `.claude/skills/` (a link to it), and detects skills
-contributors already have at user scope, so every agent gets each skill exactly once.
+Unity Editor package that treats a project's committed `skills-lock.json` as the source of truth. It installs the
+locked agent skills into `.agents/skills/` (one copy) and `.claude/skills/` (a link to it), and detects skills
+contributors already have at user scope, so every agent gets each skill exactly once. A standalone command restores
+them in a new Git worktree before an agent starts there.
 
 Status: in development. See the [spec](https://github.com/Hissal/agent-skills-sync-unity/issues/1).
 
 ## Requirements
 
-- Unity 6000.3 or later. The package is Editor-only.
+- Unity 6000.3 or later. The package is Editor-only; its [standalone restore command](#worktrees-restore-skills-before-an-agent-starts)
+  runs without Unity and needs the .NET SDK 8 or later.
 - A `skills-lock.json` written by the [`skills` CLI](https://github.com/vercel-labs/skills) (lockfile `version` 1),
   in the Unity project folder or the folder directly above it (a repo that keeps its Unity project in a subfolder).
   The skills folders are installed next to the lock; the sync window shows which lock it uses. The tool installs
@@ -407,6 +409,117 @@ changed on disk. Confirmed sources are recorded per machine after a successful s
 install modes. In Latest mode, the window also tells you that skills differing from the lock will be installed.
 The [CLI command](#unity-cli-for-agents-and-ci) uses an explicit flag to confirm all new sources for its invocation.
 
+## Worktrees: restore skills before an agent starts
+
+A new Git worktree gets `skills-lock.json` and the generated `.gitignore` blocks from Git, but not the installed
+skills (they are ignored) or `UserSettings/`. An agent started there finds none of the project's skills, and Unity
+offers to sync only once it opens. The standalone `restore` command prepares the worktree first, without Unity and
+without the network.
+
+The order for a worktree launcher (configuring a particular launcher is up to you):
+
+1. Create the checkout (`git worktree add …`).
+2. Restore its skills, and go on only when the command exits 0:
+   `agent-skills-sync restore --project <worktree>/<unity-project>`.
+3. Start the agent.
+4. Optionally open Unity. Its startup check finds the checkout in sync.
+
+An agent that was already running when its skills were restored may need to refresh its skill list or restart.
+
+### Installing the command
+
+The command needs the [.NET SDK](https://dotnet.microsoft.com/download) 8 or later. It is the package's
+`Tools~/AgentSkillsSync.Cli` project, which compiles the package's Unity-free `Core` sources; Unity ignores the
+folder. A new worktree has not imported the package yet, so run it from a copy of the package outside the worktree,
+such as a clone of this repository:
+
+```sh
+git clone --depth 1 --branch latest https://github.com/Hissal/agent-skills-sync-unity.git ~/agent-skills-sync-tool
+dotnet build ~/agent-skills-sync-tool/Packages/com.hissal.agent-skills-sync/Tools~/AgentSkillsSync.Cli -c Release -o ~/agent-skills-sync-tool/bin
+dotnet ~/agent-skills-sync-tool/bin/agent-skills-sync.dll restore --project <worktree>
+```
+
+To update, `git pull` the clone and build again. Any other copy of the package works too, such as
+`Library/PackageCache/com.hissal.agent-skills-sync@…/` in a checkout Unity has opened:
+`dotnet run --project <package>/Tools~/AgentSkillsSync.Cli -- restore --project <worktree>`. In a checkout whose
+editor runs with `com.unity.pipeline`, `unity command skills_restore` runs the same restore (`--dry_run true`,
+`--consent_new_sources true`, `--baseline <checkout>`).
+
+### Commands
+
+`--project` names the Unity project and defaults to the current folder.
+
+| Command | Does |
+| --- | --- |
+| `restore [--dry-run] [--confirm-source <owner/repo>]… [--baseline <checkout>]` | Installs the selected skills from recorded snapshots, offline. `--dry-run` reports what a run would do and writes nothing. |
+| `sync [--confirm-source <owner/repo>]… [--install-mode latest\|pinned]` | The sync window's sync: fetches from GitHub, installs, and records the snapshots later restores install. |
+| `import` | Records the skills an earlier version of this package installed as snapshots, as found on disk. |
+| `scope --shared \| --worktree` | Makes the checkout follow the repository's shared choices, or keep its own. `--shared` in a repository with no shared choices yet shares this checkout's. |
+
+Each run prints one JSON object with a `status`. A restore also reports `unconfirmedSources`, `missingSnapshots`
+(each with a `reason`), `baselineCandidates`, `choices` (`scope` and `baselineFrom`), the planned `actions`, and, once
+run, a `summary` of what changed. Exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Restored, synced, or (dry run) ready to restore. |
+| 1 | Failed, for example a snapshot could not be copied. A failed restore leaves no skill half-installed. |
+| 2 | Invalid input: no lockfile, unusable project settings, a project in no Git checkout, or unknown options. |
+| 3 | Needs you: sources to confirm, snapshots to record with `sync` or `import`, or a baseline to name. Nothing changed. |
+
+### What a restore installs
+
+- **Requirements:** the worktree's own `skills-lock.json` and [skill groups](#skill-groups), read on every restore.
+  The lockfile is never written.
+- **Choices:** this machine's choices for the repository (see [Shared choices](#shared-choices)), over the skill
+  groups' defaults. A skill that is not selected is not installed and needs no snapshot or consent.
+- **User scope:** a fresh scan of this machine's user-scope copies and enabled plugins. Use mine and install anyway
+  apply as in a sync.
+- **Consent:** a source synced in any checkout of the repository on this machine needs no new consent. A source new
+  to the repository stops the restore with `unconfirmedSources`, before anything is installed. Confirm it only with
+  the user's explicit approval, as with [consent](#consent), by passing `--confirm-source <owner/repo>`.
+- **Content:** each lock entry's recorded snapshot: the exact bytes the last explicit sync installed for that entry
+  (see [Snapshots](#snapshots)). In Latest mode a restore never fetches newer upstream content; a sync, from the
+  window, the Pipeline command or `agent-skills-sync sync`, is how content is updated. A lock entry with no recorded
+  snapshot stops the restore with `missingSnapshots`, rather than downloading.
+
+The worktree gets its own copies, links within itself, and its own bookkeeping, so removing or syncing one worktree
+never touches another. Project-authored skills and entries the tool does not own are kept as in a sync. Repeating a
+restore changes nothing.
+
+### Shared choices
+
+A restore keeps the repository's shared choices on this machine, in `AgentSkillsSync/repos/<key>/choices.json` in
+your local application data folder (`AGENT_SKILLS_SYNC_STATE_DIR` overrides the folder), never in a checkout:
+folder selection, opt-ins and opt-outs, install-anyway choices, and the sources synced so far. Each checkout keeps the
+rest itself: which entries it owns, its sync fingerprints, which skills it has seen and what it dismissed.
+
+The key is the repository's Git common directory, which all its worktrees share, plus the Unity project's path in the
+checkout. So every worktree of one repository shares choices, and two clones, or two Unity projects in one
+repository, share nothing.
+
+A restored checkout follows the shared choices: a choice made in its sync window becomes the shared one and reaches
+other worktrees at their next restore. `scope --worktree` makes a checkout keep its own choices, which then win over
+the shared ones; `scope --shared` makes it follow them again.
+
+**Migration.** The first restore in a repository with no shared choices adopts the choices its checkouts already
+have, when they all agree. If they disagree, it stops with `baselineRequired` and lists them in
+`baselineCandidates`; pass `--baseline <checkout>` to choose, or run `scope --shared` in that checkout. The checkout
+whose choices were adopted follows the shared choices from then on, so a choice made in its sync window still reaches
+new worktrees. Any other checkout whose own existing choices differ from the shared ones keeps them, as if it had run
+`scope --worktree`. A dry run reports what it would adopt without saving it.
+
+### Snapshots
+
+Every sync records each selected skill it installed as a snapshot, stored once by content hash in
+`AgentSkillsSync/snapshots/` in local application data, and records which snapshot each complete lock entry resolved
+to in `repos/<key>/resolutions.json`. Each record names its provenance: `sync` (fetched by a Latest sync, or verified
+against the lock by a Pinned one) or `import`, the install mode, and whether the bytes match the lock's
+`computedHash` (`lockVerified`, never assumed). In Pinned mode a restore installs only lock-verified snapshots.
+
+Skills installed by an earlier version of this package have no snapshots. Run `agent-skills-sync import` in that
+checkout to record them as found, or sync it once.
+
 ## Migrating a project that commits vendored skills
 
 1. Make sure `skills-lock.json` lists every vendored skill that came from a GitHub repo. If the skills were added with
@@ -453,9 +566,10 @@ does not change plugin settings itself.
 ## Repository layout
 
 - `Packages/com.hissal.agent-skills-sync/`: the package (embedded in the dev project).
-  - `Core/`: engine-free core (`noEngineReferences`), Editor-only.
+  - `Core/`: engine-free core (`noEngineReferences`): Editor-only in Unity, and compiled outside it by `Tools~/`.
   - `Editor/`: Unity front end (sync window, startup check).
   - `Pipeline/`: optional Editor command, compiled only when `com.unity.pipeline` is installed.
+  - `Tools~/AgentSkillsSync.Cli/`: the standalone command (.NET), which Unity does not import.
   - `Tests/Editor/`: EditMode tests.
 - `Assets/`, `ProjectSettings/`, `Packages/manifest.json`: minimal Unity 6000.3 host project used
   to develop and test the package. Open the repo root in Unity.

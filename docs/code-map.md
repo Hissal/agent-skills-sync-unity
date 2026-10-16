@@ -43,6 +43,30 @@ Editor, which hands their results to the `SkillSync` constructor.
    withdrawn skills the previous sync had so recorded and that are optional now
    (`SkillSelection.IsNoLongerSelectedByDefault`), never a choice the contributor made or dropped.
 
+## A restore
+
+`WorktreeRestore` prepares a checkout without Unity or the network, for a worktree launcher (the standalone command in
+`Tools~/AgentSkillsSync.Cli`, whose `Program` maps it to JSON and exit codes). `WorktreeRestore.Plan` writes nothing;
+`WorktreeRestore.Run` checks everything before its first write and returns a `RestoreReport` whose `RestoreStatus`
+says what stopped it.
+
+1. **Find the repository.** `RepositoryIdentity.Find` reads the checkout's `.git` file or folder and `commondir`;
+   its `RepositoryIdentity.Key` (common directory + project path) names the `SharedState` folder.
+2. **Decide the choices.** The checkout's own (`ChoiceScope.Worktree`) or the `SharedChoices`; while none are
+   shared, the other checkouts' (`SharedState.ProjectFolders`: Git's checkouts plus the projects that synced) when
+   they agree, else the named baseline or `RestoreStatus.BaselineRequired`. Synced sources of every checkout and the
+   shared ones count as approved.
+3. **Check.** Unapproved sources (`RestoreStatus.SourcesNeedConfirmation`), then each skill the run would fetch
+   (`SkillSync.ToFetch`) without a recorded snapshot (`SnapshotFetcher.Locate`, `RestoreStatus.SnapshotsMissing`).
+4. **Run** steps 1–5 of a sync through `SkillsSyncService` with the `SnapshotFetcher`, which hands out the
+   `SnapshotStore` copy its `SnapshotResolutions` names for the lock entry (Pinned: only lock-verified ones).
+
+A sync through `SkillsSyncService` (window, Pipeline, the command's `sync`) records what it installed with
+`SnapshotRecorder.RecordSync`; `SnapshotRecorder.Import` records an older installation as found
+(`SnapshotProvenance.Import`). The optional Pipeline `SkillsRestoreCommand` runs the same `WorktreeRestore` in an open
+editor. A restore that adopted a baseline records it (`SharedChoices.Adopt`, `LocalPrefs.BaselineProject`), so that
+checkout keeps sharing its choices without a scope of its own (`SharedChoices.Follows`).
+
 `SyncStatus` is the cheap, offline cousin of steps 1–3 (names and links only; it hashes no project copy, only
 user-scope copies a skip checks against the lock) for the startup check. `SyncStatus.ToRemove` tells skills only
 waiting for removal from missing ones.
@@ -53,7 +77,7 @@ waiting for removal from missing ones.
 | --- | --- | --- | --- |
 | `Lockfile` | `skills-lock.json` (committed, `skills` CLI format) | `SkillSync`, `SyncStatus`, Editor | never by this package |
 | `ProjectSyncSettings` (`InstallMode`, `SkillGroups`) | `ProjectSettings/AgentSkillsSync.json` (committed) | `SkillsSyncService`, `StartupNotifier` | `SkillsSyncWindow` (`InstallMode` only; groups are edited in the file and kept by `ProjectSyncSettings.Save`) |
-| `LocalPrefs` | `UserSettings/AgentSkillsSync.json` (per machine) | the ↳ rows' readers, `ProjectScanner` | `PlanExecutor`, `SkillSync`, `SkillsSyncService`, `SkillsSyncWindow`, `StartupNotifier` |
+| `LocalPrefs` | `UserSettings/AgentSkillsSync.json` (per machine and checkout) | the ↳ rows' readers, `ProjectScanner` | `PlanExecutor`, `SkillSync`, `SkillsSyncService`, `SkillsSyncWindow`, `StartupNotifier` |
 | ↳ folder selection | `LocalPrefs.SelectedFolders` / declined offers | `FolderSelection` | `FolderSelection.Save` |
 | ↳ install anyway | `LocalPrefs.InstallAnywaySkills` | `InstallAnywayChoices` | `InstallAnywayChoices.Set` |
 | ↳ skill selection | `LocalPrefs.OptedOutSkills` / `OptedInSkills` | `SkillSelection` | `SkillSelection.Set` |
@@ -63,17 +87,23 @@ waiting for removal from missing ones.
 | ↳ seen skills | `LocalPrefs.SeenSkills` | `SeenSkills.New` | `SeenSkills.Seed` (through `StartupCheck.Seed`) / `Mark` / `RecordSynced` |
 | ↳ new-skill notice | `LocalPrefs.NotifyNewSkills` | `StartupCheck.NewSkills` | `SkillsSyncWindow` |
 | ↳ managed skills | `LocalPrefs.ManagedSkills` | `ProjectScanner` | `PlanExecutor` |
+| ↳ choice scope | `LocalPrefs.ChoiceScope` | `SharedChoices`, `WorktreeRestore` | `WorktreeRestore`, `SharedChoices.SetScope` |
+| `SharedChoices` | `repos/<key>/choices.json` in `UserEnvironment.StateDirectory` (per machine and repository) | `SharedChoices.Load` (window, notifier, `SkillsSyncService`, `SnapshotRecorder.Import`, the command's `sync`), `WorktreeRestore` | `SharedChoices.Save` (choices, while the checkout follows them), `SharedChoices.SetScope`, `SharedChoices.RecordSync` (synced sources, `LocalPrefs.KnownProjects`), `SharedChoices.Adopt` |
+| `SnapshotResolutions` | `repos/<key>/resolutions.json` in the state directory | `SnapshotFetcher`, `SnapshotRecorder` | `SnapshotRecorder` |
+| `SnapshotStore` | `snapshots/<hash>/` in the state directory (all repositories) | `SnapshotFetcher` | `SnapshotRecorder` |
 | `ManagedStateFile` | block in each skills folder's `.gitignore` (committed) | `ProjectScanner` | `PlanExecutor` |
 | `MachineChoices` | in memory, built by `MachineChoices.Read` from `LocalPrefs` + `UserEnvironment` | `SkillSync`, `SyncStatus` | — |
 
-The `Record*`/`Seed`/`Set`/`Save` helpers change a loaded `LocalPrefs`; the caller then calls `LocalPrefs.Save`.
+The `Record*`/`Seed`/`Set`/`Save` helpers change a loaded `LocalPrefs`; the caller then calls `LocalPrefs.Save`, or
+`SharedChoices.Save` where the change is a choice a checkout following the shared choices shares. Writes to the state
+directory take `SharedState.Lock`; snapshots are published by renaming a finished copy.
 `UserEnvironment` (home folder + environment variables) resolves each `UserScopeLocation`; tests pass a fake one.
 
 ## Seams tests fake
 
 | Seam | Real implementation | Faked in tests by |
 | --- | --- | --- |
-| `ISkillFetcher` | `GitHubSkillFetcher` (downloads repo archives) | small fetchers in the test class, or `GitHubSkillFetcher` over `FakeGitHub` |
+| `ISkillFetcher` | `GitHubSkillFetcher` (downloads repo archives); `SnapshotFetcher` (a restore) | small fetchers in the test class, or `GitHubSkillFetcher` over `FakeGitHub` |
 | `IArchiveDownloader` | `HttpArchiveDownloader` | `FakeGitHub` |
 | `ILinkCreator` (`LinkMethod`) | `FallbackLinkCreator.Default`: `SymlinkCreator` → `JunctionCreator` → `CopyLinkCreator` | failing and recording linkers in `LinkFallbackTests` |
 | `IInstalledCopyCheck` | `LockedHashCheck` (Pinned), `UpstreamHashCheck` (Latest), `FixedCheck` (Latest's preview and fetch, `SyncStatus`) | an always-stale check in `InstallPlannerTests` |
@@ -81,7 +111,8 @@ The `Record*`/`Seed`/`Set`/`Save` helpers change a loaded `LocalPrefs`; the call
 
 ## Editor side
 
-- `SkillsSyncService` — shared setup for the window and optional Pipeline `skills_sync` command: resolves roots,
+- `SkillsSyncService` (Core) — shared setup for the window, the optional Pipeline `skills_sync` command, the standalone
+  command and `WorktreeRestore`: resolves roots,
   loads one lock, mode and `SkillGroups`, reads machine choices, checks source consent, runs that snapshot, then records consent
   and notification state. Planning is offline; the fetcher is created only after the consent and mode checks.
   Tests pass a temp user environment and a fetcher backed by `FakeGitHub`.
@@ -111,6 +142,8 @@ The `Record*`/`Seed`/`Set`/`Save` helpers change a loaded `LocalPrefs`; the call
 `Packages/com.hissal.agent-skills-sync/Tests/Editor/`, one `*Tests.cs` per Core type or behaviour. Helpers:
 
 - `FakeGitHub` — serves fixture-built repo zips in place of GitHub, or fails as if offline.
+- `GitTestRepo` — a real temporary Git repository with linked worktrees, for `WorktreeRestoreTests`.
+- `StandaloneCommandTests` build `Tools~/AgentSkillsSync.Cli` with `dotnet` and run it as a process.
 - `TempDirectory` — deletes temp trees safely even when they hold symlinks or junctions.
 - `Fixtures~/` — skill folders with known `skills` CLI hashes (read by `SkillFolderHashTests`,
   `FakeGitHub` and others).

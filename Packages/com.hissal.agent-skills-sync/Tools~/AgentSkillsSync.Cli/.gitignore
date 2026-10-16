@@ -1,0 +1,4 @@
+bin/
+obj/
+# The root .gitignore drops Unity-generated project files; this one is the command itself.
+!AgentSkillsSync.Cli.csproj
