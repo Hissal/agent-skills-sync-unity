@@ -14,6 +14,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and removed on save. Previously un-skipped skills also switch to use mine; the next sync withdraws managed
   project copies and links that are no longer needed.
 
+## [0.3.0](https://github.com/Hissal/agent-skills-sync-unity/compare/v0.2.0...v0.3.0) (2026-10-17)
+
+
+### Added
+
+* restore new worktrees with a git hook ([#83](https://github.com/Hissal/agent-skills-sync-unity/issues/83)) ([9728088](https://github.com/Hissal/agent-skills-sync-unity/commit/9728088fcf2bb9e28dcd94a8e4e3767456e0a774))
+* restore selected skills before worktree agents start ([#80](https://github.com/Hissal/agent-skills-sync-unity/issues/80)) ([5d02e39](https://github.com/Hissal/agent-skills-sync-unity/commit/5d02e39f8327c7b5f0aa2f814c1880ff523162b7))
+* set up worktree restore from the sync window ([#84](https://github.com/Hissal/agent-skills-sync-unity/issues/84)) ([ff3562c](https://github.com/Hissal/agent-skills-sync-unity/commit/ff3562cd17e55c965ebc01dff20d1fc95fa602d8))
+* ship a skill that teaches agents worktree restore ([#85](https://github.com/Hissal/agent-skills-sync-unity/issues/85)) ([3390069](https://github.com/Hissal/agent-skills-sync-unity/commit/3390069a34a1ddd75e0f3e98897ce6350c5f9ce2))
+
+
+### Fixed
+
+* exclude disabled codex plugin skills from user scope ([#87](https://github.com/Hissal/agent-skills-sync-unity/issues/87)) ([94db57c](https://github.com/Hissal/agent-skills-sync-unity/commit/94db57caa790e84014522e02a36749691a26a259))
+* keep line endings of the skills folders' .gitignore ([#81](https://github.com/Hissal/agent-skills-sync-unity/issues/81)) ([ff1fdf4](https://github.com/Hissal/agent-skills-sync-unity/commit/ff1fdf4d295232103efafca8d9f585286678ab57))
+
 ## [0.2.0](https://github.com/Hissal/agent-skills-sync-unity/compare/v0.1.0...v0.2.0) (2026-10-13)
 
 
