@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -7,23 +8,49 @@ using System.Text.RegularExpressions;
 namespace Hissal.AgentSkillsSync
 {
     /// <summary>
-    /// Reads only plugins."id" tables and their enabled boolean. Other TOML values are skipped as complete
+    /// Reads plugin enablement and ordered skills.config rules. Other TOML values are skipped as complete
     /// statements, including multiline arrays, inline tables and strings. Invalid relevant state fails closed.
     /// This is a config subset reader, not a general TOML parser.
     /// </summary>
-    internal static class CodexPluginConfig
+    internal sealed class CodexPluginConfig
     {
-        public static Dictionary<string, bool?> Read(string path)
+        public Dictionary<string, bool?> Plugins { get; } = new Dictionary<string, bool?>(StringComparer.Ordinal);
+        readonly List<SkillRule> _rules = new List<SkillRule>();
+
+        sealed class SkillRule
         {
-            var result = new Dictionary<string, bool?>(StringComparer.Ordinal);
+            public string Name;
+            public string Path;
+            public bool? Enabled;
+            public bool Valid = true;
+        }
+
+        public bool SkillEnabled(string name, string document)
+        {
+            var enabled = true;
+            foreach (var rule in _rules)
+            {
+                // Both/neither selector and empty names are ignored, not schema failures.
+                if ((rule.Name == null) == (rule.Path == null)) continue;
+                if (rule.Name != null ? rule.Name.Length > 0 && rule.Name == name :
+                    DirectoryLink.ResolvesTo(rule.Path, document)) enabled = rule.Enabled.Value;
+            }
+            return enabled;
+        }
+
+        public static CodexPluginConfig Read(string path)
+        {
+            var config = new CodexPluginConfig();
+            var result = config.Plugins;
+            SkillRule rule = null;
             string plugin = null;
             var tables = new HashSet<string>(StringComparer.Ordinal);
             var keys = new HashSet<string>(StringComparer.Ordinal);
             string table = "";
             string text;
             try { text = File.ReadAllText(path); }
-            catch (FileNotFoundException) { return result; }
-            catch (DirectoryNotFoundException) { return result; }
+            catch (FileNotFoundException) { return config; }
+            catch (DirectoryNotFoundException) { return config; }
             foreach (var statement in Statements(text))
             {
                 if (statement.StartsWith("[", StringComparison.Ordinal))
@@ -36,6 +63,8 @@ namespace Hissal.AgentSkillsSync
                     if (!array && !tables.Add(table)) throw new FormatException("Duplicate TOML table.");
                     if (array) keys.Clear();
                     plugin = !array && parts.Count == 2 && parts[0] == "plugins" ? parts[1] : null;
+                    rule = array && table == "skills\nconfig" ? new SkillRule() : null;
+                    if (rule != null) config._rules.Add(rule);
                     if (!array && parts.Count >= 2 && parts[0] == "plugins" && !result.ContainsKey(parts[1]))
                         result.Add(parts[1], null);
                     continue;
@@ -46,11 +75,66 @@ namespace Hissal.AgentSkillsSync
                 if (!keys.Add(table + "\n" + string.Join("\n", key))) throw new FormatException("Duplicate TOML key.");
                 var value = statement.Substring(equals + 1).Trim();
                 if (value.Length == 0) throw new FormatException("Missing TOML value.");
+                if (rule != null && key.Count == 1)
+                {
+                    if ((key[0] == "name" || key[0] == "path" || key[0] == "enabled") &&
+                        !SkillValueSyntax(value))
+                        throw new FormatException("Invalid TOML skill rule value.");
+                    if (key[0] == "name" || key[0] == "path")
+                    {
+                        var selector = StringValue(value);
+                        if (selector == null) rule.Valid = false;
+                        else if (key[0] == "name") rule.Name = selector.Trim();
+                        else rule.Path = selector;
+                    }
+                    if (key[0] == "enabled")
+                    {
+                        if (value == "true" || value == "false") rule.Enabled = value == "true";
+                        else rule.Valid = false;
+                    }
+                }
                 if (plugin == null || key.Count != 1 || key[0] != "enabled") continue;
                 if (value != "true" && value != "false") throw new FormatException("Plugin enabled must be a boolean.");
                 result[plugin] = value == "true";
             }
-            return result;
+            // Upstream deserializes the user's entire skills configuration at once. A required
+            // field/type failure discards all its rules, without disabling configured plugins.
+            if (config._rules.Exists(r => !r.Valid || !r.Enabled.HasValue)) config._rules.Clear();
+            return config;
+        }
+
+        static string StringValue(string value)
+        {
+            if (value.Length < 2) return null;
+            if (value.StartsWith("'''", StringComparison.Ordinal) && value.EndsWith("'''", StringComparison.Ordinal) && value.Length >= 6)
+                return TrimFirstNewline(value.Substring(3, value.Length - 6));
+            if (value.StartsWith("\"\"\"", StringComparison.Ordinal) && value.EndsWith("\"\"\"", StringComparison.Ordinal) && value.Length >= 6)
+            {
+                var content = TrimFirstNewline(value.Substring(3, value.Length - 6));
+                content = Regex.Replace(content, @"\\\r?\n\s*", "");
+                return JsonReader.Read("\"" + content.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t") + "\"") as string;
+            }
+            if (value[0] == '\'' && value[value.Length - 1] == '\'') return value.Substring(1, value.Length - 2);
+            if (value[0] == '"' && value[value.Length - 1] == '"') return JsonReader.Read(value) as string;
+            return null;
+        }
+
+        static string TrimFirstNewline(string value) => value.StartsWith("\r\n", StringComparison.Ordinal) ? value.Substring(2)
+            : value.StartsWith("\n", StringComparison.Ordinal) ? value.Substring(1) : value;
+
+        // Validate the whole bare token before distinguishing TOML syntax errors from schema
+        // failures (e.g. enabled = 1oops versus enabled = 42). Containers/strings are lexed above.
+        static bool SkillValueSyntax(string value)
+        {
+            if ("\"'[{".IndexOf(value[0]) >= 0) return true;
+            const string digits = @"[0-9](?:_?[0-9])*";
+            const string integer = @"(?:0|[1-9](?:_?[0-9])*)";
+            var number = @"[+\-]?" + integer + @"(?:\." + digits + @")?(?:[eE][+\-]?" + digits + @")?";
+            if (Regex.IsMatch(value, @"\A(?:true|false|[+\-]?(?:inf|nan)|" + number +
+                @"|0x[0-9A-Fa-f](?:_?[0-9A-Fa-f])*|0o[0-7](?:_?[0-7])*|0b[01](?:_?[01])*)\z")) return true;
+            // Date/time values are valid TOML but invalid selector/boolean field types.
+            return Regex.IsMatch(value, @"\A(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{2}:[0-9]{2}:[0-9]{2})") &&
+                DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
         }
 
         static int Assignment(string text)

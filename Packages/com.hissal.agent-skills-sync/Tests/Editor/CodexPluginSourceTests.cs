@@ -50,6 +50,191 @@ namespace Hissal.AgentSkillsSync.Tests
             project == null ? null : UserScopeScanner.DefaultSourcesFor(project));
         void Config(string text) => File.WriteAllText(Path.Combine(_codex, "config.toml"), text);
 
+        [TestCase("false", false)]
+        [TestCase("true", true)]
+        [TestCase(null, true)]
+        public void Scan_PerSkillEnablement_PreservesEnabledSiblings(string enabled, bool detected)
+        {
+            Install();
+            Install(name: "cli");
+            Config("[plugins.\"unity@market\"]\n" + (enabled == null ? "" :
+                "[[skills.config]]\nname = 'unity:ui'\nenabled = " + enabled));
+
+            Assert.That(Scan().Has(Agents, "ui"), Is.EqualTo(detected));
+            Assert.That(Scan().Has(Agents, "cli"), Is.True);
+        }
+
+        [TestCase("unity:display-name", false)]
+        [TestCase(" unity:display-name ", false)]
+        [TestCase("unity:ui", true)]
+        [TestCase("display-name", true)]
+        [TestCase("unity@market:display-name", true)]
+        [TestCase("Unity:display-name", true)]
+        public void Scan_NameSelector_UsesExactQualifiedMetadataName(string selector, bool detected)
+        {
+            var skill = Install();
+            File.WriteAllText(Path.Combine(skill, "SKILL.md"), "---\nname: 'display-name'\ndescription: test\n---\nbody");
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\nname = '" + selector + "'\nenabled = false");
+            Assert.That(Scan().Has(Agents, "ui"), Is.EqualTo(detected));
+        }
+
+        [TestCase("display-name # comment")]
+        [TestCase("'display-name' # comment")]
+        [TestCase("\"display-name\" # comment")]
+        public void Scan_MetadataNameWithComment_StillMatches(string name)
+        {
+            var skill = Install();
+            Install(name: "cli");
+            File.WriteAllText(Path.Combine(skill, "SKILL.md"), "---\nname: " + name + "\n---\nbody");
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\nname = 'unity:display-name'\nenabled = false");
+            Assert.That(Scan().Copies.Select(c => c.SkillName), Is.EqualTo(new[] { "cli" }));
+        }
+
+        [TestCase("true", "false", false)]
+        [TestCase("false", "true", true)]
+        public void Scan_RepeatedNameRules_LastDeclarationWins(string first, string last, bool detected)
+        {
+            Install();
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\nname = 'unity:ui'\nenabled = " + first +
+                "\n[[skills.config]]\nname = 'unity:ui'\nenabled = " + last);
+            Assert.That(Scan().Has(Agents, "ui"), Is.EqualTo(detected));
+        }
+
+        [TestCase("name = 'unity:ui'\nenabled = nope")]
+        [TestCase("name = 'unity:ui'\nenabled = 1oops")]
+        [TestCase("name = 1oops\nenabled = false")]
+        [TestCase("name = 'unity:ui'\nenabled = false\nbroken")]
+        [TestCase("name = 'unity:ui'\nenabled = false\nenabled = true")]
+        [TestCase("name = 'unity:ui'\nenabled = false\nother = [")]
+        public void Scan_MalformedSkillRules_FindsNothing(string malformed)
+        {
+            Install();
+            Install(name: "cli");
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\n" + malformed);
+            Assert.That(Scan().Copies, Is.Empty);
+        }
+
+        [TestCase("'''unity:ui'''")]
+        [TestCase("\"\"\"unity:ui\"\"\"")]
+        public void Scan_MultilineTomlName_Matches(string selector)
+        {
+            Install();
+            Install(name: "cli");
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\nname = " + selector + "\nenabled = false");
+            Assert.That(Scan().Copies.Select(c => c.SkillName), Is.EqualTo(new[] { "cli" }));
+        }
+
+        [TestCase(false, false)]
+        [TestCase(true, true)]
+        public void Scan_DocumentPathSelector_LastMatchingNameOrPathWins(bool pathLast, bool detected)
+        {
+            var skill = Install();
+            var pathRule = "[[skills.config]]\npath = '" + Path.Combine(skill, ".", "SKILL.md") + "'\nenabled = true\n";
+            var nameRule = "[[skills.config]]\nname = 'unity:ui'\nenabled = false\n";
+            Config("[plugins.\"unity@market\"]\n" + (pathLast ? nameRule + pathRule : pathRule + nameRule));
+            Assert.That(Scan().Has(Agents, "ui"), Is.EqualTo(detected));
+        }
+
+        [TestCase("SKILL.md", false)]
+        [TestCase("", true)]
+        [TestCase("missing.md", true)]
+        public void Scan_PathSelector_MatchesDocumentOnly(string file, bool detected)
+        {
+            var skill = Install();
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\npath = '" + Path.Combine(skill, file) + "'\nenabled = false");
+            Assert.That(Scan().Has(Agents, "ui"), Is.EqualTo(detected));
+        }
+
+        [Test]
+        public void Scan_PathThroughDirectoryLink_MatchesCanonicalDocument()
+        {
+            var skill = Install();
+            var alias = Path.Combine(_root, "alias");
+            try { new SymlinkCreator().CreateDirectoryLink(alias, skill); }
+            catch (IOException e) { Assert.Ignore("This machine cannot create symlinks: " + e.Message); }
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\npath = '" + Path.Combine(alias, "SKILL.md") + "'\nenabled = false");
+            Assert.That(Scan().Copies, Is.Empty);
+        }
+
+        [TestCase("name = 'unity:cli'")]
+        [TestCase("name = 'unity:cli'\nenabled = 'false'")]
+        [TestCase("name = 42\nenabled = false")]
+        [TestCase("path = 42\nenabled = false")]
+        [TestCase("name = 'unity:cli'\nenabled = 42")]
+        [TestCase("name = 'unity:cli'\nenabled = 1.5")]
+        [TestCase("name = 'unity:cli'\nenabled = 0xFF")]
+        [TestCase("name = 'unity:cli'\nenabled = 1979-05-27")]
+        public void Scan_InvalidSkillSchema_IgnoresEntireUserRuleSet(string invalid)
+        {
+            Install();
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\nname = 'unity:ui'\nenabled = false\n[[skills.config]]\n" + invalid);
+            Assert.That(Scan().Has(Agents, "ui"), Is.True);
+        }
+
+        [TestCase("name = 'unity:ui'\npath = '/somewhere/SKILL.md'\nenabled = true")]
+        [TestCase("enabled = true")]
+        [TestCase("name = '   '\nenabled = true")]
+        public void Scan_InvalidSelector_IgnoresOnlyThatEntry(string ignored)
+        {
+            Install();
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\nname = 'unity:ui'\nenabled = false\n[[skills.config]]\n" + ignored);
+            Assert.That(Scan().Copies, Is.Empty);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void Scan_ProjectSkillRules_DoNotOverrideUserRules(bool userEnabled)
+        {
+            Install();
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\nname = 'unity:ui'\nenabled = " + userEnabled.ToString().ToLowerInvariant());
+            var project = Path.Combine(_root, "project");
+            Directory.CreateDirectory(Path.Combine(project, ".codex"));
+            File.WriteAllText(Path.Combine(project, ".codex", "config.toml"),
+                "[[skills.config]]\nname = 'unity:ui'\nenabled = " + (!userEnabled).ToString().ToLowerInvariant());
+            Assert.That(Scan(project).Has(Agents, "ui"), Is.EqualTo(userEnabled));
+        }
+
+        [Test]
+        public void Scan_TableShapedSkillRulesInsideMultilineValue_AreIgnored()
+        {
+            Install();
+            Config("[plugins.\"unity@market\"]\ndescription = '''\n[[skills.config]]\nname = 'unity:ui'\nenabled = false\n'''\n");
+            Assert.That(Scan().Has(Agents, "ui"), Is.True);
+        }
+
+        [Test]
+        public void Scan_NameRuleAcrossMarketplaces_PathCanReenableOneCopy()
+        {
+            var skill = Install();
+            var other = Path.Combine(_codex, "plugins", "cache", "other", "unity", "1.0.0");
+            Directory.CreateDirectory(Path.Combine(other, "skills", "ui"));
+            File.Copy(Path.Combine(skill, "SKILL.md"), Path.Combine(other, "skills", "ui", "SKILL.md"));
+            File.WriteAllText(Path.Combine(other, "plugin.json"), "{\"name\":\"unity\"}");
+            Config("[plugins.\"unity@market\"]\n[plugins.\"unity@other\"]\n[[skills.config]]\nname = 'unity:ui'\nenabled = false\n" +
+                "[[skills.config]]\npath = '" + Path.Combine(skill, "SKILL.md") + "'\nenabled = true");
+            Assert.That(Scan().Copies.Select(c => c.Plugin), Is.EqualTo(new[] { "unity@market" }));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void Plan_DisabledPluginCopy_InstallsUnlessAnotherUsableCopyExists(bool otherCopy)
+        {
+            Install(name: "tdd");
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\nname = 'unity:tdd'\nenabled = false");
+            if (otherCopy)
+            {
+                var plain = Path.Combine(_codex, "skills", "tdd");
+                Directory.CreateDirectory(plain);
+                File.WriteAllText(Path.Combine(plain, "SKILL.md"), "plain skill");
+            }
+            var locked = new Lockfile(new[] { new LockedSkill("tdd", "owner/repo", "github", "skills/tdd/SKILL.md", FakeGitHub.MinimalHash) });
+            var plan = InstallPlanner.Plan(locked, ProjectState.Empty, FolderLayout.Default, selected: new[] { Agents }, userScope: Scan());
+            Assert.That(plan.Actions.Any(a => a.Kind == PlanActionKind.SkipUserScope), Is.EqualTo(otherCopy));
+            Assert.That(plan.Actions.Any(a => a.Kind == PlanActionKind.WarnUserScopeDiffers), Is.EqualTo(otherCopy));
+            Assert.That(plan.Actions.Any(a => a.Kind == PlanActionKind.Install), Is.EqualTo(!otherCopy));
+            Assert.That(plan.Actions.SelectMany(a => a.UserScopeCopies).Any(c => c.Plugin == "unity@market"), Is.False);
+        }
+
         string Install(string version = "1.0.0", string name = "ui", bool manifest = true)
         {
             var root = Path.Combine(_codex, "plugins", "cache", "market", "unity", version);

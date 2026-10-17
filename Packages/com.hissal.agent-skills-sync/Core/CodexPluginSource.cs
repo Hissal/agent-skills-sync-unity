@@ -28,11 +28,11 @@ namespace Hissal.AgentSkillsSync
                 {
                     var projectConfig = Path.Combine(_projectRoot, ".codex", "config.toml");
                     if (File.Exists(projectConfig))
-                        foreach (var entry in CodexPluginConfig.Read(projectConfig))
-                            config[entry.Key] = entry.Value ?? (config.TryGetValue(entry.Key, out var prior) ? prior : null);
+                        foreach (var entry in CodexPluginConfig.Read(projectConfig).Plugins)
+                            config.Plugins[entry.Key] = entry.Value ?? (config.Plugins.TryGetValue(entry.Key, out var prior) ? prior : null);
                 }
                 var copies = new List<UserScopeCopy>();
-                foreach (var entry in config.OrderBy(e => e.Key, StringComparer.Ordinal))
+                foreach (var entry in config.Plugins.OrderBy(e => e.Key, StringComparer.Ordinal))
                 {
                     if (entry.Value == false) continue;
                     var id = entry.Key.Split('@');
@@ -43,7 +43,8 @@ namespace Hissal.AgentSkillsSync
                     var active = versions.FirstOrDefault(p => Path.GetFileName(p) == "local") ?? versions.LastOrDefault();
                     if (active == null || !HasManifest(active)) continue;
                     foreach (var skill in Children(Path.Combine(active, "skills")))
-                        if (SkillName.IsSafe(Path.GetFileName(skill)) && File.Exists(Path.Combine(skill, UserScopeLocationSource.SkillFileName)))
+                        if (SkillName.IsSafe(Path.GetFileName(skill)) && File.Exists(Path.Combine(skill, UserScopeLocationSource.SkillFileName))
+                            && config.SkillEnabled(id[0] + ":" + MetadataName(skill), Path.Combine(skill, UserScopeLocationSource.SkillFileName)))
                             copies.Add(new UserScopeCopy(folder, Path.GetFileName(skill), skill,
                                 "Codex plugin " + entry.Key, "Codex", entry.Key));
                 }
@@ -53,6 +54,34 @@ namespace Hissal.AgentSkillsSync
                                       e is ArgumentException || e is NotSupportedException)
             {
                 return Array.Empty<UserScopeCopy>();
+            }
+        }
+
+        // Only the name is needed for enablement. Keep user-scope identity based on the folder.
+        // Ordinary scalar YAML names are supported; this does not validate the full skill schema.
+        static string MetadataName(string skill)
+        {
+            using (var reader = File.OpenText(Path.Combine(skill, UserScopeLocationSource.SkillFileName)))
+            {
+                if (reader.ReadLine()?.Trim() != "---") return Path.GetFileName(skill);
+                string line;
+                while ((line = reader.ReadLine()) != null && line.Trim() != "---")
+                {
+                    if (!line.StartsWith("name:", StringComparison.Ordinal)) continue;
+                    var value = line.Substring(5).Trim();
+                    var scalar = Regex.Match(value, "\\A('(?:[^']|'')*'|\"(?:[^\"\\\\]|\\\\.)*\")(?:\\s+#.*)?\\z");
+                    if (scalar.Success) value = scalar.Groups[1].Value;
+                    if (value.StartsWith("'", StringComparison.Ordinal) && value.EndsWith("'", StringComparison.Ordinal) && value.Length >= 2)
+                        value = value.Substring(1, value.Length - 2).Replace("''", "'");
+                    else if (value.StartsWith("\"", StringComparison.Ordinal)) value = JsonReader.Read(value) as string;
+                    else
+                    {
+                        var comment = value.IndexOf(" #", StringComparison.Ordinal);
+                        if (comment >= 0) value = value.Substring(0, comment);
+                    }
+                    return string.IsNullOrWhiteSpace(value) ? Path.GetFileName(skill) : Regex.Replace(value.Trim(), @"\s+", " ");
+                }
+                return Path.GetFileName(skill);
             }
         }
 

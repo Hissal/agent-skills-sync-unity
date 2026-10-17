@@ -65,7 +65,7 @@ namespace Hissal.AgentSkillsSync
         }
 
         /// <summary>
-        /// True when the symlink or junction at <paramref name="linkPath"/> resolves to the existing folder
+        /// True when <paramref name="linkPath"/> resolves through any links to the existing file or folder
         /// <paramref name="targetPath"/>. False when the link is broken, points anywhere else, or the target is missing.
         /// </summary>
         public static bool ResolvesTo(string linkPath, string targetPath)
@@ -76,7 +76,7 @@ namespace Hissal.AgentSkillsSync
             return string.Equals(link, target, Paths.Comparison);
         }
 
-        /// <summary>The fully resolved path of an existing folder (every link followed), or null when it can't be resolved.</summary>
+        /// <summary>The fully resolved path of an existing file or folder (every link followed), or null when it can't be resolved.</summary>
         static string FinalPath(string path)
         {
             try
