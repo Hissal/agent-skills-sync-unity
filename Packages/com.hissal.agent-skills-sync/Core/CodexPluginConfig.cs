@@ -16,6 +16,7 @@ namespace Hissal.AgentSkillsSync
     {
         public Dictionary<string, bool?> Plugins { get; } = new Dictionary<string, bool?>(StringComparer.Ordinal);
         readonly List<SkillRule> _rules = new List<SkillRule>();
+        public bool HasNameRules => _rules.Exists(r => r.Path == null && !string.IsNullOrEmpty(r.Name));
 
         sealed class SkillRule
         {
@@ -38,7 +39,7 @@ namespace Hissal.AgentSkillsSync
             return enabled;
         }
 
-        public static CodexPluginConfig Read(string path)
+        public static CodexPluginConfig Read(string path, string homeDirectory)
         {
             var config = new CodexPluginConfig();
             var result = config.Plugins;
@@ -85,7 +86,7 @@ namespace Hissal.AgentSkillsSync
                         var selector = StringValue(value);
                         if (selector == null) rule.Valid = false;
                         else if (key[0] == "name") rule.Name = selector.Trim();
-                        else rule.Path = selector;
+                        else rule.Path = ExpandHome(selector, homeDirectory);
                     }
                     if (key[0] == "enabled")
                     {
@@ -122,11 +123,21 @@ namespace Hissal.AgentSkillsSync
         static string TrimFirstNewline(string value) => value.StartsWith("\r\n", StringComparison.Ordinal) ? value.Substring(2)
             : value.StartsWith("\n", StringComparison.Ordinal) ? value.Substring(1) : value;
 
+        static string ExpandHome(string path, string home)
+        {
+            if (path == "~") return home;
+            if (path.StartsWith("~/", StringComparison.Ordinal)) return Path.Combine(home, path.Substring(2).TrimStart('/'));
+            if (Path.DirectorySeparatorChar == '\\' && path.StartsWith("~\\", StringComparison.Ordinal))
+                return Path.Combine(home, path.Substring(2).TrimStart('\\'));
+            return path;
+        }
+
         // Validate the whole bare token before distinguishing TOML syntax errors from schema
-        // failures (e.g. enabled = 1oops versus enabled = 42). Containers/strings are lexed above.
+        // failures (e.g. enabled = 1oops versus enabled = 42). Compound values must also end
+        // at their closing delimiter, rather than silently accepting another token after it.
         static bool SkillValueSyntax(string value)
         {
-            if ("\"'[{".IndexOf(value[0]) >= 0) return true;
+            if ("\"'[{".IndexOf(value[0]) >= 0) return CompleteCompoundValue(value);
             const string digits = @"[0-9](?:_?[0-9])*";
             const string integer = @"(?:0|[1-9](?:_?[0-9])*)";
             var number = @"[+\-]?" + integer + @"(?:\." + digits + @")?(?:[eE][+\-]?" + digits + @")?";
@@ -135,6 +146,40 @@ namespace Hissal.AgentSkillsSync
             // Date/time values are valid TOML but invalid selector/boolean field types.
             return Regex.IsMatch(value, @"\A(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{2}:[0-9]{2}:[0-9]{2})") &&
                 DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
+        }
+
+        static bool CompleteCompoundValue(string value)
+        {
+            // Statements already checks balanced delimiters. Locate the first complete value
+            // using the same quote rules, including strings nested inside containers.
+            var depth = 0;
+            char quote = '\0';
+            var multiline = false;
+            for (var i = 0; i < value.Length; i++)
+            {
+                var c = value[i];
+                if (quote != '\0')
+                {
+                    if (quote == '"' && c == '\\') { i++; continue; }
+                    if (c != quote) continue;
+                    if (multiline)
+                    {
+                        if (i + 2 >= value.Length || value[i + 1] != c || value[i + 2] != c) continue;
+                        i += 2;
+                    }
+                    quote = '\0';
+                    if (depth == 0) return i == value.Length - 1;
+                }
+                else if (c == '"' || c == '\'')
+                {
+                    quote = c;
+                    multiline = i + 2 < value.Length && value[i + 1] == c && value[i + 2] == c;
+                    if (multiline) i += 2;
+                }
+                else if (c == '[' || c == '{') depth++;
+                else if ((c == ']' || c == '}') && --depth == 0) return i == value.Length - 1;
+            }
+            return false;
         }
 
         static int Assignment(string text)

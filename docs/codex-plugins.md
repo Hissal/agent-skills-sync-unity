@@ -20,6 +20,8 @@ Per-skill rules checked on 2026-10-17 against commit `5009a99dfc07830ddf7464c26f
 - [Skill configuration and rule resolution](https://github.com/openai/codex/blob/5009a99dfc07830ddf7464c26f310a2b8532b55d/codex-rs/config/src/skills_config.rs),
   required fields, user/session layers, selector validation and last-match precedence.
 - [Upstream rule tests](https://github.com/openai/codex/blob/5009a99dfc07830ddf7464c26f310a2b8532b55d/codex-rs/config/src/skills_config_tests.rs).
+- [Home-relative path expansion](https://github.com/openai/codex/blob/5009a99dfc07830ddf7464c26f310a2b8532b55d/codex-rs/utils/absolute-path/src/lib.rs),
+  `maybe_expand_home_directory`.
 - [Plugin namespace qualification](https://github.com/openai/codex/blob/5009a99dfc07830ddf7464c26f310a2b8532b55d/codex-rs/ext/skills/src/loader/namespace.rs)
   and [metadata loading](https://github.com/openai/codex/blob/5009a99dfc07830ddf7464c26f310a2b8532b55d/codex-rs/ext/skills/src/loader/host.rs).
 
@@ -73,7 +75,8 @@ or `unity@market:ui-uitk` does not match `unity:ui-uitk`. Leading/trailing white
 The skill's frontmatter `name` supplies its base name, with the directory name as fallback when absent. Its
 reported `UserScopeCopy` identity still uses the directory name to match the project's locked skill.
 
-Alternatively, `path` selects the absolute `SKILL.md` document, not its directory. Existing paths are resolved
+Alternatively, `path` selects the absolute `SKILL.md` document, not its directory. `~` and `~/` expand to the
+OS user home, independently of `CODEX_HOME`; Windows also accepts `~\`. Existing paths are resolved
 through links, including directory symlinks/junctions, before comparison. A path to a missing document does
 not match. Entries apply in declaration order; the last matching name or path wins, and no match means enabled.
 A name can affect copies in multiple marketplaces; a later path can re-enable just one copy.
@@ -105,6 +108,9 @@ every TOML string escape or inline/dotted forms replacing the skill-rule array, 
 Codex's full skills schema. Frontmatter name detection supports ordinary plain and quoted scalar names, not
 general YAML features such as aliases, tags or block scalars. Plugin namespaces assume the configured plugin
 name; nested manifests and renamed manifest namespaces are outside this scanner's discovery scope.
+Names are read only when a name-based rule needs them. An unreadable or unparseable name then excludes that
+skill alone, preserving detection of siblings and other plugins. Without name rules, metadata parsing does
+not affect discovery; path rules still apply.
 
 ## Shared-folder skips
 

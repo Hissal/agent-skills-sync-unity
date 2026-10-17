@@ -145,6 +145,63 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(Scan().Has(Agents, "ui"), Is.EqualTo(detected));
         }
 
+        [TestCase("~/")]
+        [TestCase("~//")]
+        [TestCase("~\\")]
+        public void Scan_HomeRelativePathSelector_UsesUserHomeEvenWithCustomCodexHome(string prefix)
+        {
+            if (prefix.Contains("\\") && Path.DirectorySeparatorChar != '\\') Assert.Ignore("Windows path separator.");
+            _codex = Path.Combine(Environment.HomeDirectory, "custom-codex");
+            Directory.CreateDirectory(_codex);
+            Install();
+            Install(name: "cli");
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\npath = '" + prefix +
+                "custom-codex/plugins/cache/market/unity/1.0.0/skills/ui/SKILL.md'\nenabled = false");
+
+            Assert.That(Scan().Has(Agents, "ui"), Is.False);
+            Assert.That(Scan().Has(Agents, "cli"), Is.True);
+        }
+
+        [TestCase("'unity:ui'junk")]
+        [TestCase("\"unity:ui\"junk")]
+        [TestCase("'''unity:ui'''junk")]
+        [TestCase("\"\"\"unity:ui\"\"\"junk")]
+        [TestCase("[true]junk")]
+        [TestCase("{ name = 'unity:ui' }junk")]
+        public void Scan_SkillRuleWithTrailingToken_FailsClosed(string malformed)
+        {
+            Install();
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\nname = " + malformed + "\nenabled = false");
+            Assert.That(Scan().Copies, Is.Empty);
+        }
+
+        [TestCase(false, "\"unterminated")]
+        [TestCase(true, "\"unterminated")]
+        [TestCase(false, "\"ui\\_name\"")]
+        [TestCase(true, "\"ui\\_name\"")]
+        public void Scan_UnparseableMetadataName_DoesNotHideEnabledSibling(bool withRules, string metadataName)
+        {
+            var skill = Install();
+            Install(name: "cli");
+            File.WriteAllText(Path.Combine(skill, "SKILL.md"), "---\nname: " + metadataName + "\n---\nbody");
+            Config("[plugins.\"unity@market\"]\n" + (withRules ?
+                "[[skills.config]]\nname = 'unity:ui'\nenabled = false" : ""));
+
+            Assert.That(Scan().Has(Agents, "cli"), Is.True);
+            Assert.That(Scan().Has(Agents, "ui"), Is.EqualTo(!withRules));
+        }
+
+        [TestCase("'not-a-name'")]
+        [TestCase("[true, { nested = ['value', false] }]")]
+        [TestCase("{ name = 'unity:ui', nested = [true] }")]
+        public void Scan_ValidCompoundSchemaMismatch_PreservesPluginCopies(string value)
+        {
+            Install();
+            Config("[plugins.\"unity@market\"]\n[[skills.config]]\nname = 'unity:ui'\nenabled = false\n" +
+                "[[skills.config]]\nname = 'unity:cli'\nenabled = " + value);
+            Assert.That(Scan().Has(Agents, "ui"), Is.True);
+        }
+
         [Test]
         public void Scan_PathThroughDirectoryLink_MatchesCanonicalDocument()
         {
