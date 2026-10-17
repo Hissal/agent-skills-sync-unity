@@ -1,0 +1,30 @@
+name: Package skills
+
+# Fails when a skill the package ships has bad frontmatter or names a standalone or Pipeline command or flag that no
+# longer exists, for example after a rename. It checks names only; review checks what the skill says about them
+# (CODING_STANDARDS.md).
+on:
+  pull_request:
+    paths:
+      - Packages/**
+      - .github/scripts/package-skills/**
+      - .github/workflows/package-skills.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+
+      - name: Test
+        run: node --test .github/scripts/package-skills/check.test.mjs
+
+      - name: Check skills
+        run: node .github/scripts/package-skills/main.mjs
