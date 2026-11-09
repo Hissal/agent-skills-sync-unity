@@ -11,7 +11,7 @@
       "source": "Unity-Technologies/skills",
       "sourceType": "github",
       "skillPath": "skills/unity-cli/SKILL.md",
-      "computedHash": "3dc226a7f8fdb938126606c6f7ed4c97a1eee541e9f0ae1a38e8d7918f37964e"
+      "computedHash": "f11c62f5d0b79957a50457251df4fdc64c02bef93f05869b22136a3b70c72e8d"
     },
     "unity-pipeline": {
       "source": "com.unity.pipeline",
