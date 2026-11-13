@@ -301,6 +301,26 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(File.ReadAllText(Path.Combine(folder, "alias.md")), Is.EqualTo("{ \"a\": 1 }"));
         }
 
+        // realpath resolves a link before a following "..", and an absolute target leaves the folder. Hash and layout
+        // from `skills@1.8.1 add` over the same tree with real symlinks.
+        [Test]
+        public void Fetch_Version2Lock_LinkTargets_ResolveComponentByComponent()
+        {
+            _github.File("owner/skills", "skills/tdd/a/b/keep.txt", "keep\n")
+                .File("owner/skills", "skills/tdd/a/x.txt", "ax\n")
+                .File("owner/skills", "skills/tdd/x.txt", "top\n")
+                .File("owner/skills", "skills/tdd/b.txt", "root\n")
+                .File("owner/skills", "skills/tdd/docs/value.txt", "in\n")
+                .Symlink("owner/skills", "skills/tdd/l", "a/b")
+                .Symlink("owner/skills", "skills/tdd/m.txt", "l/../x.txt")
+                .Symlink("owner/skills", "skills/tdd/docs/alias.md", "/value.txt");
+
+            var folder = Fetcher().Fetch(SkillV2("tdd", "a748fd3a19f8c01b3cacec6bf2dcd45589545a3ec4403f48ef1620a349cde3c7"));
+
+            Assert.That(File.ReadAllText(Path.Combine(folder, "m.txt")), Is.EqualTo("ax\n"));
+            Assert.That(File.Exists(Path.Combine(folder, "docs", "alias.md")), Is.False);
+        }
+
         // Windows trims a trailing space, so ".. " climbs. The entry alone stays inside the skill folder; copied through
         // a link from a shallower folder it would land outside the fetch cache.
         [Test]

@@ -286,59 +286,42 @@ namespace Hissal.AgentSkillsSync
                     .ToList();
             }
 
-            // realpath within the skill folder: every link on the path followed. Null when the path leaves the folder,
-            // names nothing, or loops.
+            // realpath within the skill folder, one component at a time: a link is replaced by its target, read from
+            // the link's folder, and ".." leaves the folder resolved so far, as POSIX resolves it. Null when the path
+            // leaves the skill folder (an absolute target included), names nothing, or loops.
             string RealPath(string path)
             {
                 var hops = 0;
-                var real = "";
-                var parts = new Queue<string>(path.Split('/'));
+                var real = new List<string>();
+                var parts = new LinkedList<string>(path.Split('/'));
                 while (parts.Count > 0)
                 {
-                    var next = Join(real, parts.Dequeue());
+                    var part = parts.First.Value;
+                    parts.RemoveFirst();
+                    if (part.Length == 0 || part == ".") continue;
+                    if (part == "..")
+                    {
+                        if (real.Count == 0) return null;
+                        real.RemoveAt(real.Count - 1);
+                        continue;
+                    }
+                    var next = Join(string.Join("/", real), part);
                     if (_links.TryGetValue(next, out var target))
                     {
                         if (++hops > MaxLinkHops) return null;
-                        var linked = Normalize(Join(Parent(next), target));
-                        if (linked == Outside) return null;
-                        // Resolve the link's target from the skill folder, then whatever remained of the path.
-                        parts = new Queue<string>((linked.Length == 0 ? new string[0] : linked.Split('/')).Concat(parts.ToList()));
-                        real = "";
+                        if (target.StartsWith("/", StringComparison.Ordinal) || target.Contains("\\") || target.Contains(":"))
+                            return null;
+                        var targetParts = target.Split('/');
+                        for (var i = targetParts.Length - 1; i >= 0; i--) parts.AddFirst(targetParts[i]);
                         continue;
                     }
                     if (!_files.ContainsKey(next) && !_folders.Contains(next)) return null;
-                    real = next;
+                    real.Add(part);
                 }
-                return real;
+                return string.Join("/", real);
             }
 
             static string Join(string folder, string name) => folder.Length == 0 ? name : folder + "/" + name;
-
-            static string Parent(string path)
-            {
-                var slash = path.LastIndexOf('/');
-                return slash < 0 ? "" : path.Substring(0, slash);
-            }
-        }
-
-        const string Outside = "\0outside";
-
-        // Folds "." and ".." in a folder-relative path; Outside when it climbs out or is absolute.
-        static string Normalize(string path)
-        {
-            if (path.StartsWith("/", StringComparison.Ordinal) || path.Contains("\\") || path.Contains(":")) return Outside;
-            var parts = new List<string>();
-            foreach (var part in path.Split('/'))
-            {
-                if (part.Length == 0 || part == ".") continue;
-                if (part == "..")
-                {
-                    if (parts.Count == 0) return Outside;
-                    parts.RemoveAt(parts.Count - 1);
-                }
-                else parts.Add(part);
-            }
-            return string.Join("/", parts);
         }
 
         static string FindFolderByName(List<(ZipArchiveEntry Entry, string Path)> entries, string name)
