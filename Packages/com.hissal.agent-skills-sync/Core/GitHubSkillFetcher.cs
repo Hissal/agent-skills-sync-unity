@@ -162,9 +162,9 @@ namespace Hissal.AgentSkillsSync
                     var prefix = folderInRepo.Length == 0 ? "" : folderInRepo + "/";
                     var fullDestination = Path.GetFullPath(destination) + Path.DirectorySeparatorChar;
                     var found = false;
-                    // Version 2 hashes a symlink as the content it points to, as the CLI's installer writes it, and leaves
-                    // out what that installer never writes (metadata.json, Python caches), so nothing installed goes unhashed.
-                    var links = skill.HashAlgorithm == SkillHashAlgorithm.Version2 ? new Dictionary<string, string>() : null;
+                    // Version 2 hashes the files the CLI's installer writes, so it is extracted the way that installer
+                    // copies: from a tree of the archive's entries, with links followed (InstallerTree).
+                    var tree = skill.HashAlgorithm == SkillHashAlgorithm.Version2 ? new InstallerTree() : null;
 
                     foreach (var (entry, path) in entries)
                     {
@@ -173,17 +173,16 @@ namespace Hissal.AgentSkillsSync
                         var target = Path.GetFullPath(Path.Combine(destination, relative));
                         if (!target.StartsWith(fullDestination, StringComparison.Ordinal)) continue; // zip-slip guard
                         found = true;
-                        if (links != null && SkillFolderHash.IsExcludedPathVersion2(relative)) continue;
-                        if (links != null && IsSymlink(entry))
+                        if (tree != null)
                         {
-                            using (var reader = new StreamReader(entry.Open())) links[relative] = reader.ReadToEnd();
+                            tree.Add(relative, entry);
                             continue;
                         }
                         Directory.CreateDirectory(Path.GetDirectoryName(target));
                         entry.ExtractToFile(target);
                     }
 
-                    if (links != null) WriteLinkedContent(destination, links);
+                    tree?.CopyTo(destination);
 
                     if (!found)
                         throw new SkillFetchException(skill.Name, SkillFetchFailure.SourceUnusable,
@@ -205,64 +204,120 @@ namespace Hissal.AgentSkillsSync
         static bool IsSymlink(ZipArchiveEntry entry) => ((entry.ExternalAttributes >> 16) & 0xF000) == 0xA000;
 
         /// <summary>
-        /// Writes, at each archived symlink's path (folder-relative, <c>/</c>-separated, to its target), the file or
-        /// folder the link points to, as the <c>skills</c> CLI 1.8 installs and hashes it (docs/skills-cli-findings.md
-        /// §1a). A link that leaves the skill folder, dangles, or points at a folder holding it (a cycle) is left out,
-        /// as the CLI leaves it out of the hash.
+        /// A skill folder as a GitHub archive holds it (files, and symlinks as entries holding their target), copied as
+        /// the <c>skills</c> CLI 1.8's installer copies a checkout: <c>copyDirectory</c> in
+        /// <a href="https://github.com/vercel-labs/skills/blob/v1.8.1/src/installer.ts">src/installer.ts</a>, whose
+        /// output the version 2 hash covers. Excluded names are left out at every level; a link is replaced by the
+        /// content it points to, unless it leaves the skill folder or dangles; a folder already on the current branch
+        /// (a link cycle) adds nothing.
         /// </summary>
-        static void WriteLinkedContent(string destination, Dictionary<string, string> links)
+        sealed class InstallerTree
         {
-            // Resolves a folder-relative path through any links on it; null when it leaves the folder or loops.
-            string Resolve(string path)
+            const int MaxLinkHops = 40;
+
+            readonly Dictionary<string, ZipArchiveEntry> _files = new Dictionary<string, ZipArchiveEntry>(StringComparer.Ordinal);
+            readonly Dictionary<string, string> _links = new Dictionary<string, string>(StringComparer.Ordinal);
+            readonly HashSet<string> _folders = new HashSet<string>(StringComparer.Ordinal) { "" };
+
+            /// <summary>Adds an entry by its path in the skill folder (<c>/</c>-separated).</summary>
+            public void Add(string path, ZipArchiveEntry entry)
             {
-                for (var hops = 0; hops <= links.Count; hops++)
+                if (IsSymlink(entry))
+                    using (var reader = new StreamReader(entry.Open())) _links[path] = reader.ReadToEnd();
+                else _files[path] = entry;
+                for (var slash = path.LastIndexOf('/'); slash > 0; slash = path.LastIndexOf('/', slash - 1))
+                    _folders.Add(path.Substring(0, slash));
+            }
+
+            string _root;
+
+            public void CopyTo(string destination)
+            {
+                _root = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                Copy("", destination, new HashSet<string>(StringComparer.Ordinal));
+            }
+
+            // The zip-slip guard again, on each path written: a linked folder's copy joins the link's path with names
+            // from under its target, and Windows trims trailing dots and spaces, so ".. " can climb out on its own.
+            bool Inside(string path) => (Path.GetFullPath(path) + Path.DirectorySeparatorChar).StartsWith(_root, StringComparison.Ordinal);
+
+            // copyDirectory: realSource is the folder's real path, so a folder reached again on this branch stops here.
+            void Copy(string realSource, string destination, HashSet<string> ancestors)
+            {
+                if (ancestors.Contains(realSource)) return;
+                var branch = new HashSet<string>(ancestors, StringComparer.Ordinal) { realSource };
+                Directory.CreateDirectory(destination);
+                foreach (var name in Children(realSource))
                 {
-                    var parts = path.Split('/');
-                    string linked = null;
-                    var at = 0;
-                    for (; at < parts.Length; at++)
+                    var path = Join(realSource, name);
+                    var isLink = _links.ContainsKey(path);
+                    var isFolder = !isLink && _folders.Contains(path);
+                    if (SkillFolderHash.IsExcludedVersion2(name, isFolder)) continue;
+                    var real = path;
+                    if (isLink)
                     {
-                        var head = string.Join("/", parts, 0, at + 1);
-                        if (links.TryGetValue(head, out var target))
-                        {
-                            var parent = at == 0 ? "" : string.Join("/", parts, 0, at);
-                            linked = Normalize(parent.Length == 0 ? target : parent + "/" + target);
-                            break;
-                        }
+                        real = RealPath(path);
+                        if (real == null) continue; // dangling, looping, or outside the skill folder
+                        isFolder = _folders.Contains(real);
+                        if (isFolder && SkillFolderHash.IsExcludedVersion2(name, true)) continue;
                     }
-                    if (linked == null) return path;
-                    if (linked == Outside) return null;
-                    var rest = string.Join("/", parts, at + 1, parts.Length - at - 1);
-                    path = rest.Length == 0 ? linked : linked.Length == 0 ? rest : linked + "/" + rest;
+                    var target = Path.Combine(destination, name);
+                    if (!Inside(target)) continue;
+                    if (isFolder)
+                    {
+                        Copy(real, target, branch);
+                    }
+                    else
+                    {
+                        using (var input = _files[real].Open())
+                        using (var output = File.Create(target))
+                            input.CopyTo(output);
+                    }
                 }
-                return null;
             }
 
-            var resolved = links.Keys.Select(link => (Link: link, Target: Resolve(link))).Where(l => l.Target != null).ToList();
-
-            // Files first, so a linked folder is copied with the files its own links point to.
-            foreach (var (link, target) in resolved)
+            IEnumerable<string> Children(string folder)
             {
-                var source = Path.Combine(destination, target);
-                if (!File.Exists(source)) continue;
-                var copy = Path.Combine(destination, link);
-                Directory.CreateDirectory(Path.GetDirectoryName(copy));
-                File.Copy(source, copy);
+                var prefix = folder.Length == 0 ? "" : folder + "/";
+                return _files.Keys.Concat(_links.Keys).Concat(_folders)
+                    .Where(p => p.Length > prefix.Length && p.StartsWith(prefix, StringComparison.Ordinal) && p.IndexOf('/', prefix.Length) < 0)
+                    .Select(p => p.Substring(prefix.Length))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
             }
 
-            // Then each folder link, once every folder link inside its target is written, so the copy holds them too.
-            // A link inside its own target is a cycle the CLI leaves out too. Folder links into each other's targets are
-            // left out as well, where the CLI keeps one level of each: such a rare source then fails Pinned verification
-            // rather than installing unverified.
-            var pending = resolved
-                .Where(l => Directory.Exists(Path.Combine(destination, l.Target)) && !IsWithin(l.Link, l.Target))
-                .ToList();
-            while (true)
+            // realpath within the skill folder: every link on the path followed. Null when the path leaves the folder,
+            // names nothing, or loops.
+            string RealPath(string path)
             {
-                var ready = pending.FirstOrDefault(l => !pending.Any(other => other.Link != l.Link && IsWithin(other.Link, l.Target)));
-                if (ready.Link == null) break;
-                pending.Remove(ready);
-                Paths.CopyDirectory(Path.Combine(destination, ready.Target), Path.Combine(destination, ready.Link));
+                var hops = 0;
+                var real = "";
+                var parts = new Queue<string>(path.Split('/'));
+                while (parts.Count > 0)
+                {
+                    var next = Join(real, parts.Dequeue());
+                    if (_links.TryGetValue(next, out var target))
+                    {
+                        if (++hops > MaxLinkHops) return null;
+                        var linked = Normalize(Join(Parent(next), target));
+                        if (linked == Outside) return null;
+                        // Resolve the link's target from the skill folder, then whatever remained of the path.
+                        parts = new Queue<string>((linked.Length == 0 ? new string[0] : linked.Split('/')).Concat(parts.ToList()));
+                        real = "";
+                        continue;
+                    }
+                    if (!_files.ContainsKey(next) && !_folders.Contains(next)) return null;
+                    real = next;
+                }
+                return real;
+            }
+
+            static string Join(string folder, string name) => folder.Length == 0 ? name : folder + "/" + name;
+
+            static string Parent(string path)
+            {
+                var slash = path.LastIndexOf('/');
+                return slash < 0 ? "" : path.Substring(0, slash);
             }
         }
 
@@ -285,10 +340,6 @@ namespace Hissal.AgentSkillsSync
             }
             return string.Join("/", parts);
         }
-
-        // Whether folder-relative `path` is `folder` or inside it ("" is the skill folder itself).
-        static bool IsWithin(string path, string folder) =>
-            folder.Length == 0 || path == folder || path.StartsWith(folder + "/", StringComparison.Ordinal);
 
         static string FindFolderByName(List<(ZipArchiveEntry Entry, string Path)> entries, string name)
         {

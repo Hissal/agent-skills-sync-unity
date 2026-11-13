@@ -250,9 +250,10 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(File.ReadAllText(Path.Combine(folder, "a", "base.txt")), Is.EqualTo("base\n"));
         }
 
-        // Two folder links into each other's targets are a cycle the CLI's walk leaves out after one level.
+        // Two folder links into each other's targets: the CLI's installer copies one level of each, then its branch
+        // check stops. Hash and layout from `skills@1.8.1 add` over the same tree with real symlinks.
         [Test]
-        public void Fetch_Version2Lock_FolderLinksIntoEachOther_FinishWithoutLooping()
+        public void Fetch_Version2Lock_FolderLinksIntoEachOther_CopyOneLevelOfEachAsTheCli()
         {
             _github.Fixture("owner/skills", "skills/tdd", "minimal")
                 .File("owner/skills", "skills/tdd/x/file.txt", "x\n")
@@ -260,9 +261,10 @@ namespace Hissal.AgentSkillsSync.Tests
                 .Symlink("owner/skills", "skills/tdd/x/to-y", "../y")
                 .Symlink("owner/skills", "skills/tdd/y/to-x", "../x");
 
-            var folder = new GitHubSkillFetcher(_cache, _github, InstallMode.Latest).Fetch(SkillV2("tdd", ""));
+            var folder = Fetcher().Fetch(SkillV2("tdd", "352b3fd20829a715853beb076940f3d83119b896e5095d5964e1e1cf45080618"));
 
-            Assert.That(File.Exists(Path.Combine(folder, "SKILL.md")), Is.True);
+            Assert.That(FilesUnder(folder),
+                Is.EqualTo(new[] { "SKILL.md", "x/file.txt", "x/to-y/file.txt", "y/file.txt", "y/to-x/file.txt" }));
         }
 
         // What the version 2 hash leaves out is not installed either, as the CLI's installer leaves it out: an upstream
@@ -274,12 +276,45 @@ namespace Hissal.AgentSkillsSync.Tests
                 .File("owner/skills", "skills/code-review/scripts/__pycache__/run.cpython-312.pyc", "not checked")
                 .File("owner/skills", "skills/code-review/__pypackages__/3.12/lib/x.py", "import os")
                 .File("owner/skills", "skills/code-review/.git/HEAD", "ref")
-                .Symlink("owner/skills", "skills/code-review/docs/metadata.json", "../alpha.md");
+                .Symlink("owner/skills", "skills/code-review/docs/metadata.json", "../alpha.md")
+                .Symlink("owner/skills", "skills/code-review/__pypackages__", "scripts");
 
             var folder = Fetcher().Fetch(SkillV2("code-review", FakeGitHub.NestedHashV2));
 
             Assert.That(FilesUnder(folder), Is.EqualTo(FilesUnder(Path.GetFullPath(
                 "Packages/com.hissal.agent-skills-sync/Tests/Editor/Fixtures~/SkillFolderHash/nested"))));
+        }
+
+        // A link with an allowed name counts as its target's content even when the target's own name is excluded. The
+        // hash is skills@1.8.1's computeSkillFolderHash over the same tree with real symlinks.
+        [Test]
+        public void Fetch_Version2Lock_LinkToAnExcludedFile_InstallsItsContentUnderTheLinkName()
+        {
+            _github.File("owner/skills", "skills/tdd/metadata.json", "{ \"a\": 1 }")
+                .Symlink("owner/skills", "skills/tdd/alias.md", "metadata.json")
+                .File("owner/skills", "skills/tdd/__pycache__/x.pyc", "pyc")
+                .Symlink("owner/skills", "skills/tdd/cache-link", "__pycache__");
+
+            var folder = Fetcher().Fetch(SkillV2("tdd", "9a8e7fcb5787b771b3d0039701146dd323f09561aba1d08eba4bcf10c8369198"));
+
+            Assert.That(FilesUnder(folder), Is.EqualTo(new[] { "SKILL.md", "alias.md", "cache-link/x.pyc" }));
+            Assert.That(File.ReadAllText(Path.Combine(folder, "alias.md")), Is.EqualTo("{ \"a\": 1 }"));
+        }
+
+        // Windows trims a trailing space, so ".. " climbs. The entry alone stays inside the skill folder; copied through
+        // a link from a shallower folder it would land outside the fetch cache.
+        [Test]
+        public void Fetch_Version2Lock_LinkedCopyThatWouldClimbOut_IsNotWritten()
+        {
+            if (Path.DirectorySeparatorChar != '\\') Assert.Ignore("Only Windows trims trailing spaces from path names.");
+            _github.File("owner/skills", "skills/tdd/b/c/.. /.. /escaped.txt", "x")
+                .Symlink("owner/skills", "skills/tdd/a", "b/c");
+
+            new GitHubSkillFetcher(_cache, _github, InstallMode.Latest).Fetch(SkillV2("tdd", ""));
+
+            Assert.That(Directory.GetFiles(_cache, "escaped.txt", SearchOption.AllDirectories)
+                .Where(f => !f.StartsWith(Path.Combine(_cache, "skills", "owner", "skills", "tdd") + Path.DirectorySeparatorChar)), Is.Empty);
+            Assert.That(File.Exists(Path.Combine(_cache, "skills", "owner", "skills", "escaped.txt")), Is.False);
         }
 
         // Version 1 hashed a clone that skipped symlinks; its archive extraction is unchanged.
