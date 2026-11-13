@@ -232,6 +232,56 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(FilesUnder(folder).Any(f => DirectoryLink.IsLink(Path.Combine(folder, f))), Is.False);
         }
 
+        // A folder link whose target holds another folder link is copied after that inner link is written.
+        [TestCase("a", "real/nested")]
+        [TestCase("real/nested", "a")]
+        public void Fetch_Version2Lock_FolderLinkHoldingAnotherFolderLink_CopiesTheInnerContent(string first, string second)
+        {
+            _github.Fixture("owner/skills", "skills/tdd", "minimal")
+                .File("owner/skills", "skills/tdd/real/base.txt", "base\n")
+                .File("owner/skills", "skills/tdd/other/value.txt", "value\n");
+            var targets = new Dictionary<string, string> { ["a"] = "real", ["real/nested"] = "../other" };
+            foreach (var link in new[] { first, second }) _github.Symlink("owner/skills", "skills/tdd/" + link, targets[link]);
+
+            var folder = new GitHubSkillFetcher(_cache, _github, InstallMode.Latest).Fetch(SkillV2("tdd", ""));
+
+            Assert.That(File.ReadAllText(Path.Combine(folder, "a", "nested", "value.txt")), Is.EqualTo("value\n"));
+            Assert.That(File.ReadAllText(Path.Combine(folder, "real", "nested", "value.txt")), Is.EqualTo("value\n"));
+            Assert.That(File.ReadAllText(Path.Combine(folder, "a", "base.txt")), Is.EqualTo("base\n"));
+        }
+
+        // Two folder links into each other's targets are a cycle the CLI's walk leaves out after one level.
+        [Test]
+        public void Fetch_Version2Lock_FolderLinksIntoEachOther_FinishWithoutLooping()
+        {
+            _github.Fixture("owner/skills", "skills/tdd", "minimal")
+                .File("owner/skills", "skills/tdd/x/file.txt", "x\n")
+                .File("owner/skills", "skills/tdd/y/file.txt", "y\n")
+                .Symlink("owner/skills", "skills/tdd/x/to-y", "../y")
+                .Symlink("owner/skills", "skills/tdd/y/to-x", "../x");
+
+            var folder = new GitHubSkillFetcher(_cache, _github, InstallMode.Latest).Fetch(SkillV2("tdd", ""));
+
+            Assert.That(File.Exists(Path.Combine(folder, "SKILL.md")), Is.True);
+        }
+
+        // What the version 2 hash leaves out is not installed either, as the CLI's installer leaves it out: an upstream
+        // change there can't reach a Pinned copy unverified.
+        [Test]
+        public void Fetch_Version2Lock_LeavesOutWhatTheHashExcludes()
+        {
+            _github.File("owner/skills", "skills/code-review/metadata.json", "{ \"changed\": true }")
+                .File("owner/skills", "skills/code-review/scripts/__pycache__/run.cpython-312.pyc", "not checked")
+                .File("owner/skills", "skills/code-review/__pypackages__/3.12/lib/x.py", "import os")
+                .File("owner/skills", "skills/code-review/.git/HEAD", "ref")
+                .Symlink("owner/skills", "skills/code-review/docs/metadata.json", "../alpha.md");
+
+            var folder = Fetcher().Fetch(SkillV2("code-review", FakeGitHub.NestedHashV2));
+
+            Assert.That(FilesUnder(folder), Is.EqualTo(FilesUnder(Path.GetFullPath(
+                "Packages/com.hissal.agent-skills-sync/Tests/Editor/Fixtures~/SkillFolderHash/nested"))));
+        }
+
         // Version 1 hashed a clone that skipped symlinks; its archive extraction is unchanged.
         [Test]
         public void Fetch_Version1Lock_ArchivedSymlink_IsExtractedAsBefore()

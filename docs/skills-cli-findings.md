@@ -52,7 +52,7 @@ The only hard part is step 3. `localeCompare` uses ICU collation for the process
 4. Content with no NUL byte has each CRLF replaced by LF; a lone CR stays.
 5. SHA-256 over, for each file in order: path bytes, `\0`, the normalised content's byte length as a decimal string, `\0`, the normalised content. Lowercase hex.
 
-The upstream comment says "symlinks count as the content they point to": the installer writes the linked content. A GitHub archive holds a symlink as a small entry whose content is its target, so for a version 2 lock `GitHubSkillFetcher` writes the linked file or folder at the link's path instead, and leaves out links that leave the skill folder, dangle or form a cycle.
+The upstream comment says "symlinks count as the content they point to": the installer writes the linked content. A GitHub archive holds a symlink as a small entry whose content is its target, so for a version 2 lock `GitHubSkillFetcher` writes the linked file or folder at the link's path instead, and leaves out links that leave the skill folder, dangle or form a cycle. It also leaves out every path the version 2 hash excludes, as the CLI's installer does (`copyDirectory` filters with the same `isExcluded`, [`src/installer.ts`](https://github.com/vercel-labs/skills/blob/v1.8.1/src/installer.ts)), so no installed byte goes unverified in Pinned mode.
 
 `SkillFolderHash.Compute(folder, SkillHashAlgorithm.Version2)` reproduces it. So version 2 needs neither of version 1's exceptions: a CRLF checkout hashes like the LF archive, and non-ASCII paths sort exactly. The C# walk resolves real paths with `realpath` (Unix) or `GetFinalPathNameByHandle` (Windows); the Windows case is not tested against the CLI.
 

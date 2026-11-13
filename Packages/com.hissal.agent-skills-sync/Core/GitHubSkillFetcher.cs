@@ -162,7 +162,8 @@ namespace Hissal.AgentSkillsSync
                     var prefix = folderInRepo.Length == 0 ? "" : folderInRepo + "/";
                     var fullDestination = Path.GetFullPath(destination) + Path.DirectorySeparatorChar;
                     var found = false;
-                    // Version 2 hashes a symlink as the content it points to, as the CLI's installer writes it.
+                    // Version 2 hashes a symlink as the content it points to, as the CLI's installer writes it, and leaves
+                    // out what that installer never writes (metadata.json, Python caches), so nothing installed goes unhashed.
                     var links = skill.HashAlgorithm == SkillHashAlgorithm.Version2 ? new Dictionary<string, string>() : null;
 
                     foreach (var (entry, path) in entries)
@@ -172,6 +173,7 @@ namespace Hissal.AgentSkillsSync
                         var target = Path.GetFullPath(Path.Combine(destination, relative));
                         if (!target.StartsWith(fullDestination, StringComparison.Ordinal)) continue; // zip-slip guard
                         found = true;
+                        if (links != null && SkillFolderHash.IsExcludedPathVersion2(relative)) continue;
                         if (links != null && IsSymlink(entry))
                         {
                             using (var reader = new StreamReader(entry.Open())) links[relative] = reader.ReadToEnd();
@@ -236,24 +238,31 @@ namespace Hissal.AgentSkillsSync
                 return null;
             }
 
+            var resolved = links.Keys.Select(link => (Link: link, Target: Resolve(link))).Where(l => l.Target != null).ToList();
+
             // Files first, so a linked folder is copied with the files its own links point to.
-            var resolved = links.Keys.Select(link => (Link: link, Target: Resolve(link)))
-                .Where(l => l.Target != null)
-                .OrderBy(l => Directory.Exists(Path.Combine(destination, l.Target)) ? 1 : 0)
-                .ToList();
             foreach (var (link, target) in resolved)
             {
                 var source = Path.Combine(destination, target);
+                if (!File.Exists(source)) continue;
                 var copy = Path.Combine(destination, link);
-                if (File.Exists(source))
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(copy));
-                    File.Copy(source, copy);
-                }
-                else if (Directory.Exists(source) && !IsWithin(link, target))
-                {
-                    Paths.CopyDirectory(source, copy);
-                }
+                Directory.CreateDirectory(Path.GetDirectoryName(copy));
+                File.Copy(source, copy);
+            }
+
+            // Then each folder link, once every folder link inside its target is written, so the copy holds them too.
+            // A link inside its own target is a cycle the CLI leaves out too. Folder links into each other's targets are
+            // left out as well, where the CLI keeps one level of each: such a rare source then fails Pinned verification
+            // rather than installing unverified.
+            var pending = resolved
+                .Where(l => Directory.Exists(Path.Combine(destination, l.Target)) && !IsWithin(l.Link, l.Target))
+                .ToList();
+            while (true)
+            {
+                var ready = pending.FirstOrDefault(l => !pending.Any(other => other.Link != l.Link && IsWithin(other.Link, l.Target)));
+                if (ready.Link == null) break;
+                pending.Remove(ready);
+                Paths.CopyDirectory(Path.Combine(destination, ready.Target), Path.Combine(destination, ready.Link));
             }
         }
 

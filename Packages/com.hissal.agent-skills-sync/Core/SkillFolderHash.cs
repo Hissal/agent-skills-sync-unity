@@ -159,6 +159,18 @@ namespace Hissal.AgentSkillsSync
             }
         }
 
+        /// <summary>
+        /// Whether a folder-relative path (<c>/</c> or <c>\\</c> separated) is one the version 2 hash leaves out, and so the
+        /// CLI's installer never writes: the CLI's <c>isExcludedPath</c>.
+        /// </summary>
+        internal static bool IsExcludedPathVersion2(string relativePath)
+        {
+            var parts = relativePath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+            for (var i = 0; i < parts.Length; i++)
+                if (IsExcludedVersion2(parts[i], i < parts.Length - 1)) return true;
+            return false;
+        }
+
         // A file name is excluded whether the entry is a file or a folder, as in the CLI's isExcluded.
         static bool IsExcludedVersion2(string name, bool isDirectory) =>
             name == "metadata.json" || (isDirectory && (name == ".git" || name == "__pycache__" || name == "__pypackages__"));
