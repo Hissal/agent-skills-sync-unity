@@ -48,7 +48,7 @@ namespace Hissal.AgentSkillsSync
 
     /// <summary>
     /// One repository's recorded resolutions (<see cref="SharedState"/>): for each complete lock entry (name, source,
-    /// source type, skill path, locked hash and ref), the snapshot its last explicit sync or import installed. A
+    /// source type, skill path, locked hash, its <see cref="SkillHashAlgorithm"/>, and ref), the snapshot its last explicit sync or import installed. A
     /// restore installs that snapshot instead of fetching upstream again, so an unchanged lock entry gets the same
     /// bytes in every worktree; a changed entry is another key, with no resolution until it is synced.
     /// Kept in a JSON file; entries that are not well formed are ignored, and an unreadable file reads as empty.
@@ -104,8 +104,10 @@ namespace Hissal.AgentSkillsSync
             else File.Move(temp, _path);
         }
 
+        // Version 1 keys stay as they were before version 2 existed, so their records still match.
         static string KeyOf(LockedSkill skill) => string.Join("\n",
-            skill.Name, skill.Source, skill.SourceType, skill.SkillPath ?? "", skill.ComputedHash ?? "", skill.Ref ?? "");
+            skill.Name, skill.Source, skill.SourceType, skill.SkillPath ?? "", skill.ComputedHash ?? "", skill.Ref ?? "")
+            + (skill.HashAlgorithm == SkillHashAlgorithm.Version1 ? "" : "\nhash" + (int)skill.HashAlgorithm);
 
         static IEnumerable<List<KeyValuePair<string, object>>> ReadItems(string path)
         {
@@ -136,8 +138,16 @@ namespace Hissal.AgentSkillsSync
             if (!Enum.TryParse(Get(entry, "installMode") as string, true, out InstallMode mode)) return null;
             if (!(Get(entry, "lockVerified") is bool verified)) return null;
 
+            // Absent means version 1 (records written before version 2); anything but a 2 is not well formed.
+            var algorithm = SkillHashAlgorithm.Version1;
+            var recordedAlgorithm = Get(entry, "hashAlgorithm");
+            if (recordedAlgorithm != null)
+            {
+                if (!(recordedAlgorithm is double number) || number != (int)SkillHashAlgorithm.Version2) return null;
+                algorithm = SkillHashAlgorithm.Version2;
+            }
             var skill = new LockedSkill(name, source, Get(entry, "sourceType") as string ?? Lockfile.GitHubSourceType,
-                Get(entry, "skillPath") as string, Get(entry, "computedHash") as string, Get(entry, "ref") as string);
+                Get(entry, "skillPath") as string, Get(entry, "computedHash") as string, Get(entry, "ref") as string, algorithm);
             return (skill, new SnapshotResolution(snapshot, provenance, mode, verified, Get(entry, "recordedAt") as string));
         }
 
@@ -153,6 +163,7 @@ namespace Hissal.AgentSkillsSync
             Add("sourceType", skill.SourceType);
             Add("skillPath", skill.SkillPath);
             Add("computedHash", skill.ComputedHash);
+            if (skill.HashAlgorithm != SkillHashAlgorithm.Version1) Add("hashAlgorithm", (double)(int)skill.HashAlgorithm);
             Add("ref", skill.Ref);
             Add("snapshot", resolution.Snapshot);
             Add("provenance", resolution.Provenance.ToString().ToLowerInvariant());

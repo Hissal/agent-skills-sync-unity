@@ -76,7 +76,7 @@ namespace Hissal.AgentSkillsSync
         public IReadOnlyList<string> InstalledDiffersFromLock(Lockfile lockfile)
         {
             var layout = _choices.Layout;
-            var canonical = ProjectScanner.Scan(_projectRoot, layout, prefsRoot: _prefsRoot).For(layout.Canonical);
+            var canonical = ProjectScanner.Scan(_projectRoot, layout, prefsRoot: _prefsRoot, algorithm: lockfile.HashAlgorithm).For(layout.Canonical);
             var canonicalPath = Paths.InProject(_projectRoot, layout.Canonical.RelativePath);
             return _choices.Skills.SelectedIn(lockfile)
                 .Where(s => canonical.InstalledHash(s.Name) != null // a managed copy
@@ -87,14 +87,14 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>What syncing <paramref name="lockfile"/> would do now, without doing it (see <see cref="Plan()"/>).</summary>
         public InstallPlan Plan(Lockfile lockfile) =>
-            PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout, prefsRoot: _prefsRoot), _strategy.PreviewCheck);
+            PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout, prefsRoot: _prefsRoot, algorithm: lockfile.HashAlgorithm), _strategy.PreviewCheck);
 
         /// <summary>
         /// The locked skills <see cref="Run(Lockfile)"/> would fetch now, in plan order, found without fetching: in
         /// Pinned mode the missing and stale ones, in Latest mode every selected one installed or to install.
         /// </summary>
         public IReadOnlyList<LockedSkill> ToFetch(Lockfile lockfile) =>
-            PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout, prefsRoot: _prefsRoot), _strategy.FetchCheck)
+            PlanWith(lockfile, ProjectScanner.Scan(_projectRoot, _choices.Layout, prefsRoot: _prefsRoot, algorithm: lockfile.HashAlgorithm), _strategy.FetchCheck)
                 .Actions.Where(a => a.NeedsFetch).Select(a => a.Skill).Distinct().ToList();
 
         /// <summary>Plans with this sync's machine choices.</summary>
@@ -113,7 +113,7 @@ namespace Hissal.AgentSkillsSync
         /// <exception cref="SyncAbortedException">One or more skills could not be fetched or verified; nothing was changed.</exception>
         public SyncSummary Run(Lockfile lockfile)
         {
-            var project = ProjectScanner.Scan(_projectRoot, _choices.Layout, prefsRoot: _prefsRoot);
+            var project = ProjectScanner.Scan(_projectRoot, _choices.Layout, prefsRoot: _prefsRoot, algorithm: lockfile.HashAlgorithm);
 
             // Latest compares every managed copy with upstream, so it fetches them all; Pinned only what the lock says is stale.
             var toFetch = PlanWith(lockfile, project, _strategy.FetchCheck);
@@ -126,7 +126,7 @@ namespace Hissal.AgentSkillsSync
                 try
                 {
                     var folder = _fetcher.Fetch(action.Skill);
-                    var hash = SkillFolderHash.Compute(folder);
+                    var hash = SkillFolderHash.Compute(folder, lockfile.HashAlgorithm);
                     _strategy.Accept(action.Skill, hash);
                     fetched[action.SkillName] = folder;
                     upstreamHashes[action.SkillName] = hash;

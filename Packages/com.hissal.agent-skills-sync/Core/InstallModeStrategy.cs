@@ -25,7 +25,7 @@ namespace Hissal.AgentSkillsSync
         public abstract void Accept(LockedSkill skill, string hash);
 
         /// <summary>
-        /// The check the applied plan uses, given each fetched copy's <see cref="SkillFolderHash"/>; null applies the
+        /// The check the applied plan uses, given each fetched copy's <see cref="SkillFolderHash"/> (the lock's algorithm); null applies the
         /// plan made with <see cref="FetchCheck"/> as it is.
         /// </summary>
         public abstract IInstalledCopyCheck ApplyCheck(IReadOnlyDictionary<string, string> upstreamHashes);
@@ -46,6 +46,7 @@ namespace Hissal.AgentSkillsSync
             // Pinned refuses a changed source whichever fetcher is in use.
             public override void Accept(LockedSkill skill, string hash)
             {
+                if (LockVerification.LacksMigratedHash(skill)) throw LockVerification.NoLockedHash(skill);
                 if (LockVerification.CanVerify(skill) && !LockVerification.MatchesLock(skill, hash))
                     throw LockVerification.SourceChangedSinceLocked(skill, hash);
             }

@@ -1,0 +1,62 @@
+{
+  "comment": "Skill folders built at run time (by generate-hashes.mjs and SkillFolderHashTests) because git or some file systems can't hold them: excluded folders, symlinks, non-ASCII names. Each tree copies the committed fixture named by base, then adds files (UTF-8 text), empty dirs, and symlinks (link path to its target, written as is). outside holds files written next to the skill folder, for links that leave it.",
+  "trees": {
+    "crlf-mixed": {
+      "base": "minimal",
+      "files": {
+        "crlf.md": "line one\r\nline two\r\n",
+        "lone-cr.md": "a\rb\r\nc\n",
+        "nul-crlf.bin": "x\r\n\u0000y\r\n"
+      }
+    },
+    "excluded-names": {
+      "base": "nested",
+      "files": {
+        "metadata.json": "{\"version\":1}\n",
+        "scripts/metadata.json": "{}\n",
+        "docs/metadata.json/inner.md": "a folder named metadata.json\n",
+        "__pycache__/run.cpython-312.pyc": "pyc\n",
+        "scripts/__pycache__/util.cpython-312.pyc": "pyc\n",
+        "__pypackages__/3.12/lib/x.py": "x = 1\n",
+        ".git/HEAD": "ref: refs/heads/main\n"
+      },
+      "dirs": ["empty", "references/empty"]
+    },
+    "node-modules": {
+      "base": "nested",
+      "files": {
+        "node_modules/pkg/index.js": "module.exports = 1;\n",
+        "scripts/node_modules/y.js": "y\n"
+      }
+    },
+    "symlinks": {
+      "base": "nested",
+      "links": {
+        "alpha-link.md": "alpha.md",
+        "build-link": "build",
+        "references/up-link.md": "../README.md",
+        "loop": ".",
+        "__pycache__": "build",
+        "outside-link.md": "../outside.md",
+        "outside-dir": "../outside-dir",
+        "dangling.md": "missing.md"
+      },
+      "outside": {
+        "outside.md": "outside the skill folder\n",
+        "outside-dir/x.md": "outside too\n"
+      }
+    },
+    "non-ascii-names": {
+      "base": "minimal",
+      "files": {
+        "a.md": "a\n",
+        "z.md": "z\n",
+        "ä.md": "a umlaut\n",
+        "é.md": "e acute\n",
+        "Ångström/ö.md": "nested\n",
+        "日本.md": "cjk\n",
+        "Ω.md": "omega\n"
+      }
+    }
+  }
+}

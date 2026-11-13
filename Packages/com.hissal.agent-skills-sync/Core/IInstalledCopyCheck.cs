@@ -11,7 +11,9 @@ namespace Hissal.AgentSkillsSync
     public interface IInstalledCopyCheck
     {
         /// <param name="skill">The locked skill.</param>
-        /// <param name="installedHash">The <see cref="SkillFolderHash"/> of the installed copy; null when it could not be hashed.</param>
+        /// <param name="installedHash">
+        /// The <see cref="SkillFolderHash"/> of the installed copy, made with the lock's algorithm; null when it could not be hashed.
+        /// </param>
         bool IsCurrent(LockedSkill skill, string installedHash);
     }
 

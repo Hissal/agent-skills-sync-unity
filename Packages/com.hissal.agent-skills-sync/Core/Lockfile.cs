@@ -7,20 +7,40 @@ namespace Hissal.AgentSkillsSync
 {
     /// <summary>
     /// The parsed <c>skills-lock.json</c>, the project's source of truth for which skills to install.
-    /// Reads the <c>skills</c> CLI's format; only <c>version</c> 1 is accepted. Only <c>github</c> sources are installed;
-    /// entries of any other source type are listed in <see cref="Unsupported"/> and left to whatever installs them.
+    /// Reads the <c>skills</c> CLI's format, <c>version</c> 1 or 2; the version picks how its <c>computedHash</c>es are
+    /// made (<see cref="HashAlgorithm"/>). Only <c>github</c> sources are installed; entries of any other source type
+    /// are listed in <see cref="Unsupported"/> and left to whatever installs them.
     /// </summary>
     public sealed class Lockfile
     {
         public const string FileName = "skills-lock.json";
-        public const int SupportedVersion = 1;
+        public const int MinSupportedVersion = 1;
+        public const int MaxSupportedVersion = 2;
+
+        [Obsolete("The lockfile reads versions 1 and 2; use MinSupportedVersion and MaxSupportedVersion.")]
+        public const int SupportedVersion = MinSupportedVersion;
         public const string GitHubSourceType = "github";
 
-        public Lockfile(IReadOnlyList<LockedSkill> skills, IReadOnlyList<UnsupportedSkill> unsupported = null)
+        /// <exception cref="ArgumentException">A skill's hash algorithm is not this lock version's.</exception>
+        public Lockfile(IReadOnlyList<LockedSkill> skills, IReadOnlyList<UnsupportedSkill> unsupported = null, int version = MinSupportedVersion)
         {
+            if (version < MinSupportedVersion || version > MaxSupportedVersion)
+                throw new ArgumentOutOfRangeException(nameof(version), version, "Unsupported lockfile version.");
+            Version = version;
+            HashAlgorithm = (SkillHashAlgorithm)version;
+            foreach (var skill in skills)
+                if (skill.HashAlgorithm != HashAlgorithm)
+                    throw new ArgumentException(
+                        $"Skill \"{skill.Name}\" has {skill.HashAlgorithm} hashes, but a version {version} lock uses {HashAlgorithm}.", nameof(skills));
             Skills = skills;
             Unsupported = unsupported ?? Array.Empty<UnsupportedSkill>();
         }
+
+        /// <summary>The lock's format <c>version</c>: 1 or 2.</summary>
+        public int Version { get; }
+
+        /// <summary>How every <c>computedHash</c> in this lock was made; compare copies with it using only this algorithm.</summary>
+        public SkillHashAlgorithm HashAlgorithm { get; }
 
         /// <summary>The locked <c>github</c> skills this tool installs, in lockfile order.</summary>
         public IReadOnlyList<LockedSkill> Skills { get; }
@@ -65,10 +85,11 @@ namespace Hissal.AgentSkillsSync
                 throw new LockfileException($"{FileName} must contain a JSON object.");
 
             var version = Get(rootObject, "version");
-            if (!(version is double number) || number != SupportedVersion)
+            if (!(version is double number) || (number != 1 && number != 2))
                 throw new LockfileException(
-                    $"{FileName} has format version {Describe(version)}, but this tool only understands version {SupportedVersion}. " +
-                    "Update the Agent Skills Sync package.");
+                    $"{FileName} has format version {Describe(version)}, but this tool only understands versions " +
+                    $"{MinSupportedVersion} and {MaxSupportedVersion}. Update the Agent Skills Sync package.");
+            var algorithm = (SkillHashAlgorithm)(int)number;
 
             if (!(Get(rootObject, "skills") is List<KeyValuePair<string, object>> skillsObject))
                 throw new LockfileException($"{FileName} has no \"skills\" object.");
@@ -82,13 +103,13 @@ namespace Hissal.AgentSkillsSync
                     throw new LockfileException($"Skill \"{entry.Key}\" in {FileName} must be a JSON object.");
                 if (!(Get(skill, "sourceType") is string sourceType) || sourceType.Length == 0)
                     throw new LockfileException($"Skill \"{entry.Key}\" in {FileName} has no source type.");
-                if (sourceType == GitHubSourceType) skills.Add(ParseSkill(entry.Key, skill));
+                if (sourceType == GitHubSourceType) skills.Add(ParseSkill(entry.Key, skill, algorithm));
                 else unsupported.Add(new UnsupportedSkill(entry.Key, sourceType));
             }
-            return new Lockfile(skills, unsupported);
+            return new Lockfile(skills, unsupported, (int)number);
         }
 
-        static LockedSkill ParseSkill(string name, List<KeyValuePair<string, object>> skill)
+        static LockedSkill ParseSkill(string name, List<KeyValuePair<string, object>> skill, SkillHashAlgorithm algorithm)
         {
             var source = Get(skill, "source") as string;
             if (string.IsNullOrEmpty(source))
@@ -100,7 +121,8 @@ namespace Hissal.AgentSkillsSync
                 GitHubSourceType,
                 Get(skill, "skillPath") as string,
                 Get(skill, "computedHash") as string,
-                ParseRef(name, Get(skill, "ref")));
+                ParseRef(name, Get(skill, "ref")),
+                algorithm);
         }
 
         // The ref goes into the archive URL and the fetch cache path, so only plain git ref names are accepted

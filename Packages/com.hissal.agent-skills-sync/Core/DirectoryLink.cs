@@ -77,7 +77,7 @@ namespace Hissal.AgentSkillsSync
         }
 
         /// <summary>The fully resolved path of an existing file or folder (every link followed), or null when it can't be resolved.</summary>
-        static string FinalPath(string path)
+        internal static string FinalPath(string path)
         {
             try
             {

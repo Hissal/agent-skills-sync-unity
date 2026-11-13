@@ -93,6 +93,31 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(File.Exists(Path.Combine(worktree, ".agents", "skills", Skill, "SKILL.md")), Is.True);
         }
 
+        // A lock the skills CLI 1.8 wrote. The fake GitHub serves only the in-process sync, so the command's own sync
+        // passes offline only when it finds the installed copy matching the version 2 hash.
+        [Test]
+        public void Version2Lock_RestoreInstallsItsSnapshotAndPinnedSyncFindsTheCopyCurrent()
+        {
+            var version2 = Lock.Replace(@"""version"": 1", @"""version"": 2").Replace(FakeGitHub.MinimalHash, FakeGitHub.MinimalHashV2);
+            _repo.Commit("lock version 2", (Lockfile.FileName, version2));
+            var github = new FakeGitHub().Fixture("owner/skills", "skills/" + Skill, "minimal");
+            var service = new SkillsSyncService(_repo.Root, _environment,
+                m => new GitHubSkillFetcher(Path.Combine(_root, "cache"), github, m), modeOverride: InstallMode.Pinned);
+            service.Run(service.NewSources);
+            var worktree = _repo.AddWorktree(Path.Combine(_root, "elsewhere", "wt"));
+
+            var (restoreCode, restore) = Command("restore", "--project", worktree);
+            var (syncCode, sync) = Command("sync", "--project", _repo.Root, "--install-mode", "pinned");
+
+            Assert.That(syncCode, Is.EqualTo(0), JsonWriter.Write(sync));
+            Assert.That(Member(sync, "status"), Is.EqualTo("synced"));
+            Assert.That(Member((List<KeyValuePair<string, object>>)Member(sync, "summary"), "installed"), Is.Empty);
+            Assert.That(restoreCode, Is.EqualTo(0), JsonWriter.Write(restore));
+            Assert.That(Member(restore, "status"), Is.EqualTo("restored"));
+            Assert.That(SkillFolderHash.Compute(Path.Combine(worktree, ".agents", "skills", Skill), SkillHashAlgorithm.Version2),
+                Is.EqualTo(FakeGitHub.MinimalHashV2));
+        }
+
         [Test]
         public void RestoreDryRun_ListsActionsAndChangesNothing()
         {

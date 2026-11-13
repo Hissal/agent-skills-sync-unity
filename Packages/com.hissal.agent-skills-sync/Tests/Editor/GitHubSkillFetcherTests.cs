@@ -30,6 +30,9 @@ namespace Hissal.AgentSkillsSync.Tests
         static LockedSkill Skill(string name, string hash, string source = "owner/skills", string reference = null) =>
             new LockedSkill(name, source, "github", $"skills/{name}/SKILL.md", hash, reference);
 
+        static LockedSkill SkillV2(string name, string hash, string source = "owner/skills") =>
+            new LockedSkill(name, source, "github", $"skills/{name}/SKILL.md", hash, hashAlgorithm: SkillHashAlgorithm.Version2);
+
         static LockedSkill Tdd => Skill("tdd", FakeGitHub.MinimalHash);
         static LockedSkill CodeReview => Skill("code-review", FakeGitHub.NestedHash);
 
@@ -154,6 +157,208 @@ namespace Hissal.AgentSkillsSync.Tests
             var error = Assert.Throws<SkillFetchException>(() => Fetcher().Fetch(Skill("tdd", null)));
 
             Assert.That(error.Failure, Is.EqualTo(SkillFetchFailure.HashMismatch));
+        }
+
+        [Test]
+        public void Fetch_Version2Lock_ContentMatches_ReturnsTheCopy()
+        {
+            var folder = Fetcher().Fetch(SkillV2("code-review", FakeGitHub.NestedHashV2));
+
+            Assert.That(SkillFolderHash.Compute(folder, SkillHashAlgorithm.Version2), Is.EqualTo(FakeGitHub.NestedHashV2));
+        }
+
+        [Test]
+        public void Fetch_Version2Lock_ContentChanged_ThrowsHashMismatch()
+        {
+            _github.File("owner/skills", "skills/tdd/SKILL.md", "# tdd, edited upstream after locking");
+
+            var error = Assert.Throws<SkillFetchException>(() => Fetcher().Fetch(SkillV2("tdd", FakeGitHub.MinimalHashV2)));
+
+            Assert.That(error.Failure, Is.EqualTo(SkillFetchFailure.HashMismatch));
+            Assert.That(error.Message, Does.Contain("changed since it was locked"));
+            Assert.That(Directory.Exists(Path.Combine(_cache, "skills", "owner", "skills", "tdd")), Is.False);
+        }
+
+        // Only the lock's algorithm counts: a version 1 hash in a version 2 lock is a mismatch, never a fallback.
+        [Test]
+        public void Fetch_Version2Lock_HoldingTheVersion1Hash_ThrowsHashMismatch()
+        {
+            var error = Assert.Throws<SkillFetchException>(() => Fetcher().Fetch(SkillV2("tdd", FakeGitHub.MinimalHash)));
+
+            Assert.That(error.Failure, Is.EqualTo(SkillFetchFailure.HashMismatch));
+        }
+
+        [TestCase("")]
+        [TestCase(null)]
+        public void Fetch_Version2Lock_NoHash_RefusesNamingTheMigrationAndTheFix(string hash)
+        {
+            var error = Assert.Throws<SkillFetchException>(() => Fetcher().Fetch(SkillV2("tdd", hash)));
+
+            Assert.That(error.Failure, Is.EqualTo(SkillFetchFailure.Unverifiable));
+            Assert.That(error.Message, Does.Contain("no content hash")
+                .And.Contain("migration")
+                .And.Contain("npx skills add owner/skills --skill tdd")
+                .And.Contain("commit " + Lockfile.FileName));
+            Assert.That(_github.Requested, Is.Empty, "nothing is downloaded for a hash that can't be checked");
+        }
+
+        [Test]
+        public void Fetch_Version2Lock_NoHash_LatestModeFetches()
+        {
+            var folder = new GitHubSkillFetcher(_cache, _github, InstallMode.Latest).Fetch(SkillV2("tdd", ""));
+
+            Assert.That(FilesUnder(folder), Is.EqualTo(new[] { "SKILL.md" }));
+        }
+
+        // A GitHub archive of generated-trees.json's "symlinks" tree (links as git archives them, outside files beside
+        // the skill folder) fetches to a copy holding the linked content, which hashes to the CLI's version 2 vector.
+        [Test]
+        public void Fetch_Version2Lock_ArchivedSymlinks_InstallTheLinkedContentAndMatchTheCliHash()
+        {
+            var tree = SkillFolderHashTests.GeneratedTree("symlinks");
+            _github.Fixture("owner/skills", "skills/symlinks", (string)SkillFolderHashTests.Value(tree, "base"));
+            foreach (var link in SkillFolderHashTests.Member(tree, "links"))
+                _github.Symlink("owner/skills", "skills/symlinks/" + link.Key, (string)link.Value);
+            foreach (var file in SkillFolderHashTests.Member(tree, "outside"))
+                _github.File("owner/skills", "skills/" + file.Key, (string)file.Value);
+
+            var folder = Fetcher().Fetch(SkillV2("symlinks", SkillFolderHashTests.SymlinksTreeHashV2));
+
+            Assert.That(File.ReadAllText(Path.Combine(folder, "alpha-link.md")), Is.EqualTo(File.ReadAllText(Path.Combine(folder, "alpha.md"))));
+            Assert.That(File.Exists(Path.Combine(folder, "build-link", "out.txt")), Is.True);
+            Assert.That(File.Exists(Path.Combine(folder, "outside-link.md")), Is.False, "a link out of the skill folder is left out");
+            Assert.That(File.Exists(Path.Combine(folder, "dangling.md")), Is.False);
+            Assert.That(Directory.Exists(Path.Combine(folder, "loop")), Is.False, "a link to the folder holding it is a cycle");
+            Assert.That(FilesUnder(folder).Any(f => DirectoryLink.IsLink(Path.Combine(folder, f))), Is.False);
+        }
+
+        // A folder link whose target holds another folder link is copied after that inner link is written.
+        [TestCase("a", "real/nested")]
+        [TestCase("real/nested", "a")]
+        public void Fetch_Version2Lock_FolderLinkHoldingAnotherFolderLink_CopiesTheInnerContent(string first, string second)
+        {
+            _github.Fixture("owner/skills", "skills/tdd", "minimal")
+                .File("owner/skills", "skills/tdd/real/base.txt", "base\n")
+                .File("owner/skills", "skills/tdd/other/value.txt", "value\n");
+            var targets = new Dictionary<string, string> { ["a"] = "real", ["real/nested"] = "../other" };
+            foreach (var link in new[] { first, second }) _github.Symlink("owner/skills", "skills/tdd/" + link, targets[link]);
+
+            var folder = new GitHubSkillFetcher(_cache, _github, InstallMode.Latest).Fetch(SkillV2("tdd", ""));
+
+            Assert.That(File.ReadAllText(Path.Combine(folder, "a", "nested", "value.txt")), Is.EqualTo("value\n"));
+            Assert.That(File.ReadAllText(Path.Combine(folder, "real", "nested", "value.txt")), Is.EqualTo("value\n"));
+            Assert.That(File.ReadAllText(Path.Combine(folder, "a", "base.txt")), Is.EqualTo("base\n"));
+        }
+
+        // Two folder links into each other's targets: the CLI's installer copies one level of each, then its branch
+        // check stops. Hash and layout from `skills@1.8.1 add` over the same tree with real symlinks.
+        [Test]
+        public void Fetch_Version2Lock_FolderLinksIntoEachOther_CopyOneLevelOfEachAsTheCli()
+        {
+            _github.Fixture("owner/skills", "skills/tdd", "minimal")
+                .File("owner/skills", "skills/tdd/x/file.txt", "x\n")
+                .File("owner/skills", "skills/tdd/y/file.txt", "y\n")
+                .Symlink("owner/skills", "skills/tdd/x/to-y", "../y")
+                .Symlink("owner/skills", "skills/tdd/y/to-x", "../x");
+
+            var folder = Fetcher().Fetch(SkillV2("tdd", "352b3fd20829a715853beb076940f3d83119b896e5095d5964e1e1cf45080618"));
+
+            Assert.That(FilesUnder(folder),
+                Is.EqualTo(new[] { "SKILL.md", "x/file.txt", "x/to-y/file.txt", "y/file.txt", "y/to-x/file.txt" }));
+        }
+
+        // What the version 2 hash leaves out is not installed either, as the CLI's installer leaves it out: an upstream
+        // change there can't reach a Pinned copy unverified.
+        [Test]
+        public void Fetch_Version2Lock_LeavesOutWhatTheHashExcludes()
+        {
+            _github.File("owner/skills", "skills/code-review/metadata.json", "{ \"changed\": true }")
+                .File("owner/skills", "skills/code-review/scripts/__pycache__/run.cpython-312.pyc", "not checked")
+                .File("owner/skills", "skills/code-review/__pypackages__/3.12/lib/x.py", "import os")
+                .File("owner/skills", "skills/code-review/.git/HEAD", "ref")
+                .Symlink("owner/skills", "skills/code-review/docs/metadata.json", "../alpha.md")
+                .Symlink("owner/skills", "skills/code-review/__pypackages__", "scripts");
+
+            var folder = Fetcher().Fetch(SkillV2("code-review", FakeGitHub.NestedHashV2));
+
+            Assert.That(FilesUnder(folder), Is.EqualTo(FilesUnder(Path.GetFullPath(
+                "Packages/com.hissal.agent-skills-sync/Tests/Editor/Fixtures~/SkillFolderHash/nested"))));
+        }
+
+        // A link with an allowed name counts as its target's content even when the target's own name is excluded. The
+        // hash is skills@1.8.1's computeSkillFolderHash over the same tree with real symlinks.
+        [Test]
+        public void Fetch_Version2Lock_LinkToAnExcludedFile_InstallsItsContentUnderTheLinkName()
+        {
+            _github.File("owner/skills", "skills/tdd/metadata.json", "{ \"a\": 1 }")
+                .Symlink("owner/skills", "skills/tdd/alias.md", "metadata.json")
+                .File("owner/skills", "skills/tdd/__pycache__/x.pyc", "pyc")
+                .Symlink("owner/skills", "skills/tdd/cache-link", "__pycache__");
+
+            var folder = Fetcher().Fetch(SkillV2("tdd", "9a8e7fcb5787b771b3d0039701146dd323f09561aba1d08eba4bcf10c8369198"));
+
+            Assert.That(FilesUnder(folder), Is.EqualTo(new[] { "SKILL.md", "alias.md", "cache-link/x.pyc" }));
+            Assert.That(File.ReadAllText(Path.Combine(folder, "alias.md")), Is.EqualTo("{ \"a\": 1 }"));
+        }
+
+        // realpath resolves a link before a following "..", and an absolute target leaves the folder. Hash and layout
+        // from `skills@1.8.1 add` over the same tree with real symlinks.
+        [Test]
+        public void Fetch_Version2Lock_LinkTargets_ResolveComponentByComponent()
+        {
+            _github.File("owner/skills", "skills/tdd/a/b/keep.txt", "keep\n")
+                .File("owner/skills", "skills/tdd/a/x.txt", "ax\n")
+                .File("owner/skills", "skills/tdd/x.txt", "top\n")
+                .File("owner/skills", "skills/tdd/b.txt", "root\n")
+                .File("owner/skills", "skills/tdd/docs/value.txt", "in\n")
+                .Symlink("owner/skills", "skills/tdd/l", "a/b")
+                .Symlink("owner/skills", "skills/tdd/m.txt", "l/../x.txt")
+                .Symlink("owner/skills", "skills/tdd/docs/alias.md", "/value.txt");
+
+            var folder = Fetcher().Fetch(SkillV2("tdd", "a748fd3a19f8c01b3cacec6bf2dcd45589545a3ec4403f48ef1620a349cde3c7"));
+
+            Assert.That(File.ReadAllText(Path.Combine(folder, "m.txt")), Is.EqualTo("ax\n"));
+            Assert.That(File.Exists(Path.Combine(folder, "docs", "alias.md")), Is.False);
+        }
+
+        // Windows trims a trailing space, so ".. " climbs. The entry alone stays inside the skill folder; copied through
+        // a link from a shallower folder it would land outside the fetch cache.
+        [Test]
+        public void Fetch_Version2Lock_LinkedCopyThatWouldClimbOut_IsNotWritten()
+        {
+            if (Path.DirectorySeparatorChar != '\\') Assert.Ignore("Only Windows trims trailing spaces from path names.");
+            _github.File("owner/skills", "skills/tdd/b/c/.. /.. /escaped.txt", "x")
+                .Symlink("owner/skills", "skills/tdd/a", "b/c");
+
+            new GitHubSkillFetcher(_cache, _github, InstallMode.Latest).Fetch(SkillV2("tdd", ""));
+
+            Assert.That(Directory.GetFiles(_cache, "escaped.txt", SearchOption.AllDirectories)
+                .Where(f => !f.StartsWith(Path.Combine(_cache, "skills", "owner", "skills", "tdd") + Path.DirectorySeparatorChar)), Is.Empty);
+            Assert.That(File.Exists(Path.Combine(_cache, "skills", "owner", "skills", "escaped.txt")), Is.False);
+        }
+
+        // Version 1 hashed a clone that skipped symlinks; its archive extraction is unchanged.
+        [Test]
+        public void Fetch_Version1Lock_ArchivedSymlink_IsExtractedAsBefore()
+        {
+            _github.Symlink("owner/skills", "skills/tdd/link.md", "SKILL.md");
+
+            var folder = new GitHubSkillFetcher(_cache, _github, InstallMode.Latest).Fetch(Tdd);
+
+            Assert.That(File.ReadAllText(Path.Combine(folder, "link.md")), Is.EqualTo("SKILL.md"));
+        }
+
+        // skills@1.8 locks a skills.sh install with the version 2 hash of the snapshot's files (computeSnapshotHash),
+        // which the GitHub archive reproduces: checked on vercel-labs/agent-skills web-design-guidelines.
+        [TestCase("vercel-labs/agent-skills")]
+        [TestCase("zapier/connectors")]
+        public void Fetch_Version2Lock_SkillsShSource_VerifiesTheHash(string source)
+        {
+            _github.Fixture(source, "skills/tdd", "minimal");
+            var skill = SkillV2("tdd", FakeGitHub.MinimalHashV2, source);
+
+            Assert.That(LockVerification.CanVerify(skill), Is.True);
+            Assert.That(FilesUnder(Fetcher().Fetch(skill)), Is.EqualTo(new[] { "SKILL.md" }));
         }
 
         [Test]

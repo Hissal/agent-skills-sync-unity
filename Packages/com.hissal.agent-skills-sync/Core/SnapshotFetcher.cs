@@ -34,6 +34,11 @@ namespace Hissal.AgentSkillsSync
                     reason = $"the lock holds a skills.sh server hash for {skill.Source}, which Pinned mode cannot verify.";
                     return null;
                 }
+                if (LockVerification.LacksMigratedHash(skill))
+                {
+                    reason = LockVerification.NoLockedHashReason(skill);
+                    return null;
+                }
                 var verified = _store.Find(skill.ComputedHash?.Trim());
                 if (verified != null) return verified;
             }

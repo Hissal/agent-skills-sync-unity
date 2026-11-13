@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.IO.Compression;
 
 namespace Hissal.AgentSkillsSync
@@ -50,6 +51,7 @@ namespace Hissal.AgentSkillsSync
             if (_mode == InstallMode.Pinned && !LockVerification.CanVerify(skill))
                 throw Unverifiable(skill,
                     $"the lock holds a skills.sh server hash for {skill.Source}, which this tool cannot reproduce");
+            if (_mode == InstallMode.Pinned && LockVerification.LacksMigratedHash(skill)) throw LockVerification.NoLockedHash(skill);
             var archive = DownloadOnce(repo, skill);
             var destination = Path.Combine(_cacheRoot, "skills", repo.Owner, repo.Name, skill.Name);
             Extract(archive, SkillFolderInRepo(skill), destination, skill);
@@ -59,16 +61,18 @@ namespace Hissal.AgentSkillsSync
 
         static void Verify(string folder, LockedSkill skill)
         {
-            var actual = SkillFolderHash.Compute(folder);
+            var actual = LockVerification.Hash(skill, folder);
             if (LockVerification.MatchesLock(skill, actual)) return;
-            // Locked from a checkout with core.autocrlf=true: the CLI hashed CRLF text files, the archive has LF.
+            // Version 2 hashes normalise line endings and order paths exactly: a mismatch is a changed source.
+            var version1 = skill.HashAlgorithm == SkillHashAlgorithm.Version1;
+            // Version 1, locked from a checkout with core.autocrlf=true: the CLI hashed CRLF text files, the archive has LF.
             // Hand out that checkout's bytes, so the installed copy hashes to the lock and is not seen as outdated.
-            if (LockVerification.MatchesLock(skill, SkillFolderHash.ComputeAsCrlfCheckout(folder)))
+            if (version1 && LockVerification.MatchesLock(skill, SkillFolderHash.ComputeAsCrlfCheckout(folder)))
             {
                 SkillFolderHash.ConvertToCrlfCheckout(folder);
                 return;
             }
-            var nonAsciiPaths = SkillFolderHash.HasNonAsciiPath(folder);
+            var nonAsciiPaths = version1 && SkillFolderHash.HasNonAsciiPath(folder);
 
             try
             {
@@ -158,16 +162,27 @@ namespace Hissal.AgentSkillsSync
                     var prefix = folderInRepo.Length == 0 ? "" : folderInRepo + "/";
                     var fullDestination = Path.GetFullPath(destination) + Path.DirectorySeparatorChar;
                     var found = false;
+                    // Version 2 hashes the files the CLI's installer writes, so it is extracted the way that installer
+                    // copies: from a tree of the archive's entries, with links followed (InstallerTree).
+                    var tree = skill.HashAlgorithm == SkillHashAlgorithm.Version2 ? new InstallerTree() : null;
 
                     foreach (var (entry, path) in entries)
                     {
                         if (!path.StartsWith(prefix, StringComparison.Ordinal) || path.EndsWith("/", StringComparison.Ordinal)) continue;
-                        var target = Path.GetFullPath(Path.Combine(destination, path.Substring(prefix.Length)));
+                        var relative = path.Substring(prefix.Length);
+                        var target = Path.GetFullPath(Path.Combine(destination, relative));
                         if (!target.StartsWith(fullDestination, StringComparison.Ordinal)) continue; // zip-slip guard
+                        found = true;
+                        if (tree != null)
+                        {
+                            tree.Add(relative, entry);
+                            continue;
+                        }
                         Directory.CreateDirectory(Path.GetDirectoryName(target));
                         entry.ExtractToFile(target);
-                        found = true;
                     }
+
+                    tree?.CopyTo(destination);
 
                     if (!found)
                         throw new SkillFetchException(skill.Name, SkillFetchFailure.SourceUnusable,
@@ -183,6 +198,130 @@ namespace Hissal.AgentSkillsSync
             {
                 throw new SkillFetchException(skill.Name, SkillFetchFailure.SourceUnusable, $"Could not extract skill \"{skill.Name}\" from {skill.Source}: {e.Message}", e);
             }
+        }
+
+        // Git archives keep a symlink's Unix mode in the entry's high external-attribute bits; its content is the target.
+        static bool IsSymlink(ZipArchiveEntry entry) => ((entry.ExternalAttributes >> 16) & 0xF000) == 0xA000;
+
+        /// <summary>
+        /// A skill folder as a GitHub archive holds it (files, and symlinks as entries holding their target), copied as
+        /// the <c>skills</c> CLI 1.8's installer copies a checkout: <c>copyDirectory</c> in
+        /// <a href="https://github.com/vercel-labs/skills/blob/v1.8.1/src/installer.ts">src/installer.ts</a>, whose
+        /// output the version 2 hash covers. Excluded names are left out at every level; a link is replaced by the
+        /// content it points to, unless it leaves the skill folder or dangles; a folder already on the current branch
+        /// (a link cycle) adds nothing.
+        /// </summary>
+        sealed class InstallerTree
+        {
+            const int MaxLinkHops = 40;
+
+            readonly Dictionary<string, ZipArchiveEntry> _files = new Dictionary<string, ZipArchiveEntry>(StringComparer.Ordinal);
+            readonly Dictionary<string, string> _links = new Dictionary<string, string>(StringComparer.Ordinal);
+            readonly HashSet<string> _folders = new HashSet<string>(StringComparer.Ordinal) { "" };
+
+            /// <summary>Adds an entry by its path in the skill folder (<c>/</c>-separated).</summary>
+            public void Add(string path, ZipArchiveEntry entry)
+            {
+                if (IsSymlink(entry))
+                    using (var reader = new StreamReader(entry.Open())) _links[path] = reader.ReadToEnd();
+                else _files[path] = entry;
+                for (var slash = path.LastIndexOf('/'); slash > 0; slash = path.LastIndexOf('/', slash - 1))
+                    _folders.Add(path.Substring(0, slash));
+            }
+
+            string _root;
+
+            public void CopyTo(string destination)
+            {
+                _root = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                Copy("", destination, new HashSet<string>(StringComparer.Ordinal));
+            }
+
+            // The zip-slip guard again, on each path written: a linked folder's copy joins the link's path with names
+            // from under its target, and Windows trims trailing dots and spaces, so ".. " can climb out on its own.
+            bool Inside(string path) => (Path.GetFullPath(path) + Path.DirectorySeparatorChar).StartsWith(_root, StringComparison.Ordinal);
+
+            // copyDirectory: realSource is the folder's real path, so a folder reached again on this branch stops here.
+            void Copy(string realSource, string destination, HashSet<string> ancestors)
+            {
+                if (ancestors.Contains(realSource)) return;
+                var branch = new HashSet<string>(ancestors, StringComparer.Ordinal) { realSource };
+                Directory.CreateDirectory(destination);
+                foreach (var name in Children(realSource))
+                {
+                    var path = Join(realSource, name);
+                    var isLink = _links.ContainsKey(path);
+                    var isFolder = !isLink && _folders.Contains(path);
+                    if (SkillFolderHash.IsExcludedVersion2(name, isFolder)) continue;
+                    var real = path;
+                    if (isLink)
+                    {
+                        real = RealPath(path);
+                        if (real == null) continue; // dangling, looping, or outside the skill folder
+                        isFolder = _folders.Contains(real);
+                        if (isFolder && SkillFolderHash.IsExcludedVersion2(name, true)) continue;
+                    }
+                    var target = Path.Combine(destination, name);
+                    if (!Inside(target)) continue;
+                    if (isFolder)
+                    {
+                        Copy(real, target, branch);
+                    }
+                    else
+                    {
+                        using (var input = _files[real].Open())
+                        using (var output = File.Create(target))
+                            input.CopyTo(output);
+                    }
+                }
+            }
+
+            IEnumerable<string> Children(string folder)
+            {
+                var prefix = folder.Length == 0 ? "" : folder + "/";
+                return _files.Keys.Concat(_links.Keys).Concat(_folders)
+                    .Where(p => p.Length > prefix.Length && p.StartsWith(prefix, StringComparison.Ordinal) && p.IndexOf('/', prefix.Length) < 0)
+                    .Select(p => p.Substring(prefix.Length))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+            }
+
+            // realpath within the skill folder, one component at a time: a link is replaced by its target, read from
+            // the link's folder, and ".." leaves the folder resolved so far, as POSIX resolves it. Null when the path
+            // leaves the skill folder (an absolute target included), names nothing, or loops.
+            string RealPath(string path)
+            {
+                var hops = 0;
+                var real = new List<string>();
+                var parts = new LinkedList<string>(path.Split('/'));
+                while (parts.Count > 0)
+                {
+                    var part = parts.First.Value;
+                    parts.RemoveFirst();
+                    if (part.Length == 0 || part == ".") continue;
+                    if (part == "..")
+                    {
+                        if (real.Count == 0) return null;
+                        real.RemoveAt(real.Count - 1);
+                        continue;
+                    }
+                    var next = Join(string.Join("/", real), part);
+                    if (_links.TryGetValue(next, out var target))
+                    {
+                        if (++hops > MaxLinkHops) return null;
+                        if (target.StartsWith("/", StringComparison.Ordinal) || target.Contains("\\") || target.Contains(":"))
+                            return null;
+                        var targetParts = target.Split('/');
+                        for (var i = targetParts.Length - 1; i >= 0; i--) parts.AddFirst(targetParts[i]);
+                        continue;
+                    }
+                    if (!_files.ContainsKey(next) && !_folders.Contains(next)) return null;
+                    real.Add(part);
+                }
+                return string.Join("/", real);
+            }
+
+            static string Join(string folder, string name) => folder.Length == 0 ? name : folder + "/" + name;
         }
 
         static string FindFolderByName(List<(ZipArchiveEntry Entry, string Path)> entries, string name)

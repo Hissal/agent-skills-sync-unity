@@ -389,7 +389,7 @@ which writes the field and keeps the rest of the file.
 **In both modes, `skills-lock.json` is never rewritten.** To lock what upstream has now, run `npx skills update` and
 commit the lockfile.
 
-Some lock hashes can't be checked:
+Some lock hashes can't be checked. In a lock the `skills` CLI 1.7 or older wrote (`"version": 1`):
 
 - **Sources locked with a skills.sh server hash:** the GitHub owners `vercel`, `vercel-labs`, `heygen-com` and
   `remotion-dev`, and the repo `zapier/connectors`. The CLI installs those from skills.sh snapshots and records a
@@ -397,6 +397,11 @@ Some lock hashes can't be checked:
   check ("hash not verifiable").
 - **Skills with non-ASCII file names** whose hash doesn't match. The CLI orders such names by locale, so a mismatch
   doesn't prove a change. Pinned refuses them as "can't verify lock hash". Latest installs them.
+
+A lock the CLI 1.8 or newer wrote (`"version": 2`) has neither exception: its hash is checked for every source and
+file name. One case remains: an entry whose `computedHash` is empty, which the CLI writes when it moves a version 1
+lock to version 2 and finds no installed copy matching the old hash. Pinned refuses it and says so; reinstall that
+skill with the CLI and commit `skills-lock.json`. Latest installs it.
 
 ## Consent
 

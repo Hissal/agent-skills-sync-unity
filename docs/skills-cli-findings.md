@@ -2,7 +2,9 @@
 
 Spike for [#2](https://github.com/Hissal/agent-skills-sync-unity/issues/2). Read against the npm package `skills` **1.7.0** (published 2026-09-17, repo `vercel-labs/skills`), lockfile `version: 1`, on 2026-10-06. Line numbers refer to `dist/cli.mjs` in that tarball.
 
-## 1. How `computedHash` is computed
+`skills` **1.8.0** introduced lockfile `version: 2`, with a new hash algorithm. §1 describes version 1; [§1a](#1a-lockfile-version-2-skills-18x) describes version 2, read against `skills` **1.8.1** on 2026-11-13 for [#94](https://github.com/Hissal/agent-skills-sync-unity/issues/94). The lock's `version` picks the algorithm: `Lockfile.HashAlgorithm` (`SkillHashAlgorithm.Version1` or `Version2`), and every comparison with that lock uses only that algorithm.
+
+## 1. How `computedHash` is computed (lockfile version 1)
 
 `computeSkillFolderHash(skillDir)` (line 1138). The function is byte-identical in 1.5.18, 1.5.26, 1.6.0 and 1.7.0.
 
@@ -37,9 +39,33 @@ The only hard part is step 3. `localeCompare` uses ICU collation for the process
 
 **Fallback** when a hash can't be reproduced (cases above): compare a freshly fetched copy with the installed copy. Run `SkillFolderHash.Compute` over both, and treat the lock's hash as advisory.
 
+## 1a. Lockfile version 2 (`skills` 1.8.x)
+
+`computeSkillFolderHash`, `collectFiles` and `hashSkillFiles` in [`src/skill-hash.ts` at `v1.8.1`](https://github.com/vercel-labs/skills/blob/v1.8.1/src/skill-hash.ts) (bundled as `dist/_chunks/remove.mjs` in the npm package; the two agree). Lock version 2 came with [vercel-labs/skills#2685](https://github.com/vercel-labs/skills/pull/2685) ("verifiable, portable computedHash and lock v2") in the [1.8.0 release](https://github.com/vercel-labs/skills/releases/tag/v1.8.0); the migration is `readLocalLock` / `migrateComputedHash` in [`src/local-lock.ts`](https://github.com/vercel-labs/skills/blob/v1.8.1/src/local-lock.ts).
+
+1. Walk `skillDir` (`readdir` with `withFileTypes`).
+   - Skip entries named `metadata.json` (a file or a folder), and folders named `.git`, `__pycache__` or `__pypackages__`, at any depth. `node_modules` is **no longer** skipped.
+   - Follow a symlink when its real path is the skill folder's real path or inside it; skip it when it points outside or is dangling. A link to a folder named like an excluded folder is skipped. A folder whose real path is already on the current branch of the walk (a link cycle) adds nothing. Node reports a Windows junction as a symlink, so junctions are followed by the same rule.
+   - Skip anything else that is neither file nor folder. Empty folders add nothing.
+2. Each file's key is its path relative to `skillDir`, with `/` separators (every `\` in it becomes `/`, even in a Unix file name), as UTF-8 bytes.
+3. Sort the keys by their bytes (`Buffer.compare`): exact for every name, no locale involved.
+4. Content with no NUL byte has each CRLF replaced by LF; a lone CR stays.
+5. SHA-256 over, for each file in order: path bytes, `\0`, the normalised content's byte length as a decimal string, `\0`, the normalised content. Lowercase hex.
+
+The upstream comment says "symlinks count as the content they point to": the hash covers what the installer writes, and the installer (`copyDirectory` in [`src/installer.ts`](https://github.com/vercel-labs/skills/blob/v1.8.1/src/installer.ts)) walks the checkout the same way, writing each link's content and never an excluded name. A GitHub archive holds a symlink as a small entry whose content is its target. So for a version 2 lock `GitHubSkillFetcher` reads the skill's entries into a tree and copies it with that walk: links followed by real path, links that leave the skill folder or dangle skipped, a folder already on the current branch skipped (so two folders linking into each other get one level each), and excluded names left out at every level. Nothing the hash omits is installed; the hash still can't tell CRLF from LF in text files.
+
+`SkillFolderHash.Compute(folder, SkillHashAlgorithm.Version2)` reproduces it. So version 2 needs neither of version 1's exceptions: a CRLF checkout hashes like the LF archive, and non-ASCII paths sort exactly. The C# walk resolves real paths with `realpath` (Unix) or `GetFinalPathNameByHandle` (Windows); the Windows case is not tested against the CLI.
+
+**Other version 2 changes that matter here:**
+
+- `readLocalLock` accepts versions 1 and 2. On reading a version 1 lock it migrates each entry: when `.agents/skills/<name>` exists and still hashes to the old (version 1) hash, the entry gets its version 2 hash; otherwise `computedHash` becomes `""`. Pinned mode refuses such an entry and names this cause (`LockVerification.NoLockedHash`); Latest installs it, and "differs from lock" can't judge it.
+- Entries may carry `sourceUrl`, `via`, `installMode` and `version`. This tool ignores them.
+- **skills.sh blob installs** now lock `computeSnapshotHash(files)`: the same `hashSkillFiles` over the server's files with excluded paths dropped, and only after `hasCurrentSnapshot` checked each file's git blob SHA against the GitHub tree. So the version 2 hash of the GitHub archive reproduces it, and `LockVerification.CanVerify` is true for every version 2 entry. Checked on 2026-11-13: `skills@1.8.1 add vercel-labs/agent-skills --skill web-design-guidelines` locked `4f68ae07…6d92`, the version 2 hash of `skills/web-design-guidelines` in the GitHub archive of `HEAD`.
+- **Snapshots** (`SnapshotStore`) are keyed by the hash of the lock they were recorded against, and resolutions (`SnapshotResolutions`) by the lock entry plus its algorithm. After a lock moves to version 2, a restore reports `RestoreStatus.SnapshotsMissing` until this machine runs one explicit sync.
+
 ## 2. Lockfile version and mismatch behaviour
 
-- `CURRENT_VERSION = 1`. `readLocalLock` treats a missing or non-numeric `version`, a missing `skills`, a version **below** 1, or invalid JSON as an **empty lock**, silently. A version **above** 1 is accepted as is. Our sync should be stricter, as the spec says, and reject unknown versions.
+- (1.7.0) `CURRENT_VERSION = 1`. 1.8.0 raised it to 2; see §1a. `readLocalLock` treats a missing or non-numeric `version`, a missing `skills`, a version **below** 1, or invalid JSON as an **empty lock**, silently. A version **above** 1 is accepted as is. Our sync is stricter, as the spec says: it accepts versions 1 and 2 and rejects any other.
 - `writeLocalLock` sorts skills by name (`Object.keys().sort()`, ordinal) and writes `JSON.stringify(lock, null, 2) + "\n"`.
 
 ### What `npx skills experimental_install` does on a hash mismatch
@@ -118,6 +144,8 @@ Other agents that also read `.claude/skills` (project and/or user): Cursor, Open
 | `punctuation-names` | file and folder names with every Windows-legal ASCII punctuation, digits, and leading `_`/`-`/`0`. ICU and ordinal order differ here. |
 | `byte-exact` | CRLF, no trailing newline, an empty file, a UTF-8 BOM with non-ASCII content, and non-UTF-8 binary |
 
+`generated-trees.json` in the same folder describes trees built at run time, for what git or some file systems can't hold: `crlf-mixed` (CRLF, a lone CR, CRLF with a NUL), `excluded-names` (`metadata.json` files and a folder of that name, `__pycache__`, `__pypackages__`, `.git`, empty folders), `node-modules`, `symlinks` (to a file and a folder inside, a cycle, a link named `__pycache__`, links outside the folder, a dangling link), and `non-ascii-names`. `SkillFolderHashTests` and the generator build them the same way. Their version 2 hashes are tested; their symlink test is ignored where symlinks can't be created.
+
 The `.git`/`node_modules`/empty-folder exclusion test builds its tree at run time, because a `.git` folder can't be committed. Its expected value is the `nested` hash, and `skills@1.7.0` gave that same hash for the same tree, checked by hand.
 
-**How the hashes were generated:** run `node generate-hashes.mjs` in that folder (Node 22, `en-FI` locale, Windows 11). For each fixture it runs `npx skills@1.7.0 add <fixture> -y --agent codex --copy` in a temporary project and prints `computedHash` from the resulting `skills-lock.json`. `.gitattributes` marks the fixtures `-text`, so git never rewrites their line endings.
+**How the hashes were generated:** run `node generate-hashes.mjs [skills-version]` in that folder. For each fixture and generated tree it runs `npx skills@<version> add <folder> -y --agent codex --copy` in a temporary project and prints `computedHash` and the lock's `version` from the resulting `skills-lock.json`. Version 1 hashes: `skills@1.7.0` (Node 22, `en-FI` locale, Windows 11). Version 2 hashes: `skills@1.8.1` (Node 22, `en-US` locale, Ubuntu 24.04); the same run with 1.7.0 there reproduced every committed version 1 hash. `.gitattributes` marks the fixtures `-text`, so git never rewrites their line endings.

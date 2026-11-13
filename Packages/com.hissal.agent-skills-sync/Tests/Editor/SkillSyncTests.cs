@@ -28,7 +28,7 @@ namespace Hissal.AgentSkillsSync.Tests
                 Fetched.Add(skill.Name);
                 if (Failing.Contains(skill.Name)) throw new SkillFetchException($"Could not download {skill.Source}.");
                 if (!Upstream.TryGetValue(skill.Name, out var fixture))
-                    fixture = skill.ComputedHash == FakeGitHub.NestedHash ? "nested" : "minimal";
+                    fixture = skill.ComputedHash == FakeGitHub.NestedHash || skill.ComputedHash == FakeGitHub.NestedHashV2 ? "nested" : "minimal";
                 var folder = Path.Combine(_root, "fetched", skill.Name, Guid.NewGuid().ToString("N"));
                 Paths.CopyDirectory(Path.Combine(FixturesRoot, fixture), folder);
                 return folder;
@@ -413,6 +413,133 @@ namespace Hissal.AgentSkillsSync.Tests
 
             Assert.That(summary.Installed, Is.EquivalentTo(new[] { "tdd", "code-review" }));
             Assert.That(summary.DiffersFromLock, Does.Contain("code-review"));
+        }
+
+        // Lock version 2: every comparison with the lock uses the version 2 hash.
+
+        static string Version2Lock(string tddHash = FakeGitHub.MinimalHashV2) => @"{
+  ""version"": 2,
+  ""skills"": {
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + tddHash + @""", ""installMode"": ""copy"" },
+    ""code-review"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/code-review/SKILL.md"", ""computedHash"": """ + FakeGitHub.NestedHashV2 + @""" }
+  }
+}";
+
+        void WriteLock(string json) => File.WriteAllText(Path.Combine(_project, Lockfile.FileName), json);
+
+        [Test]
+        public void Run_Version2Lock_Pinned_InstallsMatchingSkillsAndASecondRunChangesNothing()
+        {
+            WriteLock(Version2Lock());
+
+            var first = Sync(InstallMode.Pinned).Run();
+            _fetcher.Fetched.Clear();
+            var second = Sync(InstallMode.Pinned).Run();
+
+            Assert.That(first.Installed, Is.EqualTo(new[] { "tdd", "code-review" }));
+            Assert.That(second.NothingChanged, Is.True, "installed copies hash to the version 2 lock");
+            Assert.That(_fetcher.Fetched, Is.Empty);
+        }
+
+        [Test]
+        public void Run_Version2Lock_Pinned_UpstreamChanged_RefusesAndChangesNothing()
+        {
+            WriteLock(Version2Lock());
+            _fetcher.Upstream["tdd"] = "nested";
+
+            var error = Assert.Throws<SyncAbortedException>(() => Sync(InstallMode.Pinned).Run());
+
+            Assert.That(error.Failures.Keys, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(error.Failures["tdd"].Failure, Is.EqualTo(SkillFetchFailure.HashMismatch));
+            Assert.That(Directory.Exists(Path.Combine(_project, ".agents")), Is.False);
+        }
+
+        [Test]
+        public void Run_Version2Lock_Pinned_EmptyHash_RefusesWithTheMigrationMessage()
+        {
+            WriteLock(Version2Lock(tddHash: ""));
+
+            var error = Assert.Throws<SyncAbortedException>(() => Sync(InstallMode.Pinned).Run());
+
+            Assert.That(error.Failures.Keys, Is.EqualTo(new[] { "tdd" }));
+            Assert.That(error.Failures["tdd"].Failure, Is.EqualTo(SkillFetchFailure.Unverifiable));
+            Assert.That(error.Failures["tdd"].Message, Does.Contain("migration").And.Contain("Reinstall the skill"));
+        }
+
+        [Test]
+        public void Run_Version2Lock_Latest_EmptyHash_InstallsAndIsNotReportedAsDiffering()
+        {
+            WriteLock(Version2Lock(tddHash: ""));
+
+            var summary = Sync(InstallMode.Latest).Run();
+
+            Assert.That(summary.Installed, Is.EqualTo(new[] { "tdd", "code-review" }));
+            Assert.That(summary.DiffersFromLock, Is.Empty, "an entry with no hash can't show a difference");
+        }
+
+        [Test]
+        public void Run_Version2Lock_Latest_ReportsOnlyTheUpstreamThatDiffers()
+        {
+            WriteLock(Version2Lock());
+            _fetcher.Upstream["tdd"] = "nested";
+
+            var summary = Sync(InstallMode.Latest).Run();
+
+            Assert.That(summary.DiffersFromLock, Is.EqualTo(new[] { "tdd" }));
+        }
+
+        [Test]
+        public void InstalledDiffersFromLock_Version2Lock_FlagsOnlyTheModifiedCopy()
+        {
+            WriteLock(Version2Lock());
+            Sync(InstallMode.Pinned).Run();
+            File.AppendAllText(Path.Combine(_project, ".agents/skills/tdd/SKILL.md"), "edited locally\n");
+            SkillFolderHash.ConvertToCrlfCheckout(Path.Combine(_project, ".agents/skills/code-review"));
+
+            Assert.That(Sync(InstallMode.Pinned).InstalledDiffersFromLock(), Is.EqualTo(new[] { "tdd" }),
+                "a CRLF copy hashes like the LF original under version 2");
+        }
+
+        [Test]
+        public void StartupCheck_AfterPinnedSyncOfAVersion2Lock_StaysQuiet()
+        {
+            WriteLock(Version2Lock());
+            Sync(InstallMode.Pinned).Run();
+            var prefs = LocalPrefs.Load(_project);
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(_project));
+            prefs.Save();
+
+            var status = SyncStatus.Read(_project);
+
+            Assert.That(status.OutOfSyncSkills, Is.Empty);
+            Assert.That(StartupCheck.ShouldNotify(status, LocalPrefs.Load(_project)), Is.False);
+        }
+
+        // The CLI keeps an empty hash empty when it moves a lock to version 2, so only the version changes.
+        [Test]
+        public void StartupCheck_LockMovedToVersion2WithUnchangedEntries_Notifies()
+        {
+            WriteLock(Lock.Replace(FakeGitHub.MinimalHash, ""));
+            Sync(InstallMode.Latest).Run();
+            var prefs = LocalPrefs.Load(_project);
+            StartupCheck.RecordSynced(prefs, SyncStatus.Read(_project));
+            prefs.Save();
+            WriteLock(Lock.Replace(FakeGitHub.MinimalHash, "").Replace(@"""version"": 1", @"""version"": 2"));
+
+            var status = SyncStatus.Read(_project);
+
+            Assert.That(StartupCheck.ShouldNotify(status, LocalPrefs.Load(_project)), Is.True);
+        }
+
+        [Test]
+        public void StartupCheck_Version2LockNotYetSynced_Notifies()
+        {
+            WriteLock(Version2Lock());
+
+            var status = SyncStatus.Read(_project);
+
+            Assert.That(status.OutOfSyncSkills, Is.EquivalentTo(new[] { "tdd", "code-review" }));
+            Assert.That(StartupCheck.ShouldNotify(status, LocalPrefs.Load(_project)), Is.True);
         }
 
         [Test]

@@ -47,7 +47,7 @@ namespace Hissal.AgentSkillsSync
             MachineChoices choices, InstallMode mode, SnapshotProvenance provenance, bool keepExisting)
         {
             var layout = choices.Layout;
-            var canonical = ProjectScanner.Scan(skillsRoot, layout, prefsRoot: prefsRoot).For(layout.Canonical);
+            var canonical = ProjectScanner.Scan(skillsRoot, layout, prefsRoot: prefsRoot, algorithm: lockfile.HashAlgorithm).For(layout.Canonical);
             var canonicalPath = Paths.InProject(skillsRoot, layout.Canonical.RelativePath);
             var installed = choices.Skills.SelectedIn(lockfile)
                 .Where(s => canonical.InstalledHash(s.Name) != null)
@@ -65,7 +65,7 @@ namespace Hissal.AgentSkillsSync
                     var existing = resolutions.Find(skill);
                     if (keepExisting && existing != null) continue;
                     // Published before it is referenced, so a resolution never names a missing snapshot.
-                    var snapshot = state.Snapshots.Add(Path.Combine(canonicalPath, skill.Name));
+                    var snapshot = state.Snapshots.Add(Path.Combine(canonicalPath, skill.Name), lockfile.HashAlgorithm);
                     recorded.Add(skill.Name);
                     if (existing != null && existing.Snapshot == snapshot && existing.Provenance == provenance) continue;
                     resolutions.Record(skill, new SnapshotResolution(snapshot, provenance, mode,

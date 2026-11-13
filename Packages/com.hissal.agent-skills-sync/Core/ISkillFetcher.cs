@@ -27,8 +27,9 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// The locked <c>computedHash</c> cannot be checked against this source, so the skill is refused rather than
-        /// installed unverified: the source was locked with a skills.sh server hash, or the skill has non-ASCII
-        /// paths, whose order the CLI's hash depends on in a way this tool does not reproduce.
+        /// installed unverified: the source was locked with a skills.sh server hash, the skill has non-ASCII
+        /// paths, whose order the CLI's version 1 hash depends on in a way this tool does not reproduce, or a version 2
+        /// lock entry has no hash at all.
         /// </summary>
         Unverifiable,
 

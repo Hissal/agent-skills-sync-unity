@@ -10,8 +10,9 @@ map says about them.
 `SkillSync.Run` runs the steps; `SkillSync.Plan` stops after step 3, offline. Parts marked _caller_ run before, in the
 Editor, which hands their results to the `SkillSync` constructor.
 
-1. **Read the lock.** _Caller:_ `Lockfile.FindRoot` finds it. `Lockfile` loads `skills-lock.json` into `LockedSkill`s;
-   `LockfileException` when it is missing or unusable. `LockfileHash` hashes it for the startup check: the whole
+1. **Read the lock.** _Caller:_ `Lockfile.FindRoot` finds it. `Lockfile` loads `skills-lock.json` (version 1 or 2)
+   into `LockedSkill`s; `LockfileException` when it is missing or unusable. The version picks `Lockfile.HashAlgorithm`,
+   a `SkillHashAlgorithm` that each `LockedSkill.HashAlgorithm` carries: every hash compared with that lock uses it. `LockfileHash` hashes it for the startup check: the whole
    file, and (`LockfileHash.OfSelected`) only the entries this machine installs.
    `SkillName` owns the folder-name rule; `LockedSkill`, `UnsupportedSkill` and `PlanAction` enforce it on construction.
    Skill names read from `LocalPrefs` (managed, opted out, opted in, seen, synced by default) and from `.gitignore`
@@ -33,9 +34,12 @@ Editor, which hands their results to the `SkillSync` constructor.
    (`PlanActionKind`), deciding whether a managed copy is current through an `IInstalledCopyCheck`. A skill
    `SkillSelection` leaves out gets no action but the withdrawal of its managed entries, so step 4 never fetches it.
 4. **Fetch and verify.** For each action that needs a fetch, the `ISkillFetcher` downloads the skill and
-   `SkillFolderHash` hashes it. `InstallModeStrategy` (picked by `InstallMode`) decides what to fetch, whether a
+   `SkillFolderHash` hashes it with the lock's algorithm (version 1: `localeCompare` path order over raw bytes;
+   version 2: byte order, CRLF normalised, symlinks inside the folder followed; see docs/skills-cli-findings.md).
+   `ProjectScanner` hashes installed copies the same way. `InstallModeStrategy` (picked by `InstallMode`) decides what to fetch, whether a
    changed source is refused, and which check plans step 5. Every `SkillFetchException` is collected and thrown
-   as one `SyncAbortedException` before anything on disk changes. `LockVerification` compares copies with the lock.
+   as one `SyncAbortedException` before anything on disk changes. `LockVerification` compares copies with the lock
+   (`LockVerification.Hash`); Pinned refuses a version 2 entry with no hash (`LockVerification.NoLockedHash`).
 5. **Apply.** `PlanExecutor` copies canonical skills, links them into link folders through an `ILinkCreator`, writes
    each folder's `ManagedStateFile` block and records managed skills in `LocalPrefs`. `SkillSync.Run` then records
    the skills it selected by their default alone (`SkillSelection.RecordSynced`) and returns a `SyncSummary`,
@@ -114,7 +118,7 @@ from the remaining hook.
 | ↳ choice scope | `LocalPrefs.ChoiceScope` | `SharedChoices`, `WorktreeRestore` | `WorktreeRestore`, `SharedChoices.SetScope` |
 | `SharedChoices` | `repos/<key>/choices.json` in `UserEnvironment.StateDirectory` (per machine and repository) | `SharedChoices.Load` (window, notifier, `SkillsSyncService`, `SnapshotRecorder.Import`, the command's `sync`), `WorktreeRestore` | `SharedChoices.Save` (choices, while the checkout follows them), `SharedChoices.SetScope`, `SharedChoices.RecordSync` (synced sources, `LocalPrefs.KnownProjects`), `SharedChoices.Adopt` |
 | `SnapshotResolutions` | `repos/<key>/resolutions.json` in the state directory | `SnapshotFetcher`, `SnapshotRecorder` | `SnapshotRecorder` |
-| `SnapshotStore` | `snapshots/<hash>/` in the state directory (all repositories) | `SnapshotFetcher` | `SnapshotRecorder` |
+| `SnapshotStore` | `snapshots/<hash>/` in the state directory (all repositories), hashed with the recording lock's algorithm | `SnapshotFetcher` | `SnapshotRecorder` |
 | `ManagedStateFile` | block in each skills folder's `.gitignore` (committed) | `ProjectScanner` | `PlanExecutor` |
 | `MachineChoices` | in memory, built by `MachineChoices.Read` from `LocalPrefs` + `UserEnvironment` | `SkillSync`, `SyncStatus` | — |
 
