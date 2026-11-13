@@ -52,14 +52,14 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// Whether this copy's content verifiably differs from <paramref name="skill"/>'s locked hash. False whenever the
-        /// difference can't be judged: no locked hash, a skills.sh hash, a CRLF-checkout match, non-ASCII paths, or a copy that can't be
-        /// read (gone since the scan, no path). It only says "differs", never which side is newer. Reads the copy once per
+        /// difference can't be judged: no locked hash, a skills.sh hash, a copy that can't be read (gone since the scan,
+        /// no path), and for a version 1 lock a CRLF-checkout match or non-ASCII paths. It only says "differs", never which side is newer. Reads the copy once per
         /// locked hash.
         /// </summary>
         public bool DiffersFromLock(LockedSkill skill)
         {
             if (skill == null || string.IsNullOrEmpty(Path)) return false;
-            var key = skill.Source + "|" + (skill.ComputedHash ?? "");
+            var key = skill.Source + "|" + skill.HashAlgorithm + "|" + (skill.ComputedHash ?? "");
             if (_differsByLockHash.TryGetValue(key, out var differs)) return differs;
             try
             {

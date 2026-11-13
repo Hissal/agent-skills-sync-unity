@@ -6,7 +6,9 @@ namespace Hissal.AgentSkillsSync
 {
     /// <summary>
     /// Immutable skill snapshots on this machine, each a skill folder stored under its <see cref="SkillFolderHash"/>, so
-    /// identical content is kept once whichever repository or checkout recorded it. A snapshot is published whole by
+    /// identical content is kept once whichever repository or checkout recorded it. A snapshot is keyed by the algorithm
+    /// of the lock it was recorded against, so a Pinned restore finds it by that lock's <c>computedHash</c>; the same
+    /// content recorded against both lock versions is kept under each hash. A snapshot is published whole by
     /// renaming a finished, verified copy into place: a reader never sees a partial one, and two checkouts adding the
     /// same content at once both end with the one copy. Checkouts install copies of a snapshot, never links to it.
     /// </summary>
@@ -29,11 +31,14 @@ namespace Hissal.AgentSkillsSync
             return Directory.Exists(path) ? path : null;
         }
 
-        /// <summary>Stores a copy of <paramref name="folder"/> unless its content is already stored, and returns its hash.</summary>
+        /// <summary>
+        /// Stores a copy of <paramref name="folder"/> under its <paramref name="algorithm"/> hash unless that is already
+        /// stored, and returns the hash.
+        /// </summary>
         /// <exception cref="IOException">The copy could not be made, or changed while it was made; nothing was stored.</exception>
-        public string Add(string folder)
+        public string Add(string folder, SkillHashAlgorithm algorithm)
         {
-            var hash = SkillFolderHash.Compute(folder);
+            var hash = SkillFolderHash.Compute(folder, algorithm);
             if (Find(hash) != null) return hash;
 
             Directory.CreateDirectory(Root);
@@ -41,7 +46,7 @@ namespace Hissal.AgentSkillsSync
             try
             {
                 Paths.CopyDirectory(folder, staging);
-                if (SkillFolderHash.Compute(staging) != hash)
+                if (SkillFolderHash.Compute(staging, algorithm) != hash)
                     throw new IOException($"{folder} changed while it was being stored; nothing was stored.");
                 try
                 {

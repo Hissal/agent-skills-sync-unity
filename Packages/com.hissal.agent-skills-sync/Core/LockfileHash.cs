@@ -26,15 +26,20 @@ namespace Hissal.AgentSkillsSync
 
         /// <summary>
         /// SHA-256 (lowercase hex) of the lock entries a sync on this machine reads: every field of each skill in
-        /// <paramref name="selection"/> and the name and source type of each unsupported entry, in name order. Locking,
+        /// <paramref name="selection"/> (its hash algorithm too, from lock version 2) and the name and source type of
+        /// each unsupported entry, in name order. Locking,
         /// changing or removing a skill this machine does not install leaves it unchanged, as does reformatting the file.
         /// </summary>
         public static string OfSelected(Lockfile lockfile, SkillSelection selection)
         {
             var text = new StringBuilder();
             foreach (var skill in selection.SelectedIn(lockfile).OrderBy(s => s.Name, StringComparer.Ordinal))
+            {
                 foreach (var field in new[] { skill.Name, skill.Source, skill.SourceType, skill.SkillPath, skill.ComputedHash, skill.Ref })
                     text.Append(field).Append(field == null ? '\u0001' : '\0');
+                // Version 1 fingerprints stay as recorded before version 2 existed; a version change alone still counts.
+                if (skill.HashAlgorithm != SkillHashAlgorithm.Version1) text.Append("hash").Append((int)skill.HashAlgorithm).Append('\0');
+            }
             text.Append('\n');
             foreach (var skill in lockfile.Unsupported.OrderBy(s => s.Name, StringComparer.Ordinal))
                 text.Append(skill.Name).Append('\0').Append(skill.SourceType).Append('\0');

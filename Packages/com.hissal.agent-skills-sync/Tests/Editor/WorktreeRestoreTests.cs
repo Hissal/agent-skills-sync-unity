@@ -284,6 +284,31 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(report.MissingSnapshots.Select(m => m.Skill), Is.EquivalentTo(new[] { "tdd", "review" }));
         }
 
+        // A record's hashAlgorithm: absent is version 1 (written before version 2), 2 is version 2, anything else
+        // is not well formed and ignored.
+        [TestCase(null, "1")]
+        [TestCase("2", "2")]
+        [TestCase("2.5", null)]
+        [TestCase("3", null)]
+        [TestCase("1", null)]
+        [TestCase("\"2\"", null)]
+        [TestCase("true", null)]
+        public void LoadResolutions_HashAlgorithmField_IsReadOnlyWhenWellFormed(string field, string readAs)
+        {
+            var path = Path.Combine(_root, "resolutions.json");
+            File.WriteAllText(path, @"{ ""version"": 1, ""resolutions"": [ { ""skill"": ""tdd"", ""source"": ""owner/skills"",
+                ""sourceType"": ""github"", ""computedHash"": ""h"", ""snapshot"": """ + FakeGitHub.MinimalHash + @""",
+                ""provenance"": ""sync"", ""installMode"": ""latest"", ""lockVerified"": false" +
+                (field == null ? "" : @", ""hashAlgorithm"": " + field) + " } ] }");
+            LockedSkill Entry(SkillHashAlgorithm algorithm) =>
+                new LockedSkill("tdd", "owner/skills", "github", null, "h", hashAlgorithm: algorithm);
+
+            var resolutions = SnapshotResolutions.Load(path);
+
+            Assert.That(resolutions.Find(Entry(SkillHashAlgorithm.Version1)) != null, Is.EqualTo(readAs == "1"));
+            Assert.That(resolutions.Find(Entry(SkillHashAlgorithm.Version2)) != null, Is.EqualTo(readAs == "2"));
+        }
+
         [Test]
         public void SetScopeShared_RepositoryWithNoSharedChoices_SharesThisCheckoutsChoices()
         {
@@ -454,6 +479,67 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(report.Status, Is.EqualTo(RestoreStatus.Restored));
             Assert.That(report.Mode, Is.EqualTo(InstallMode.Pinned));
             Assert.That(SkillFolderHash.Compute(Canonical(worktree, "tdd")), Is.EqualTo(FakeGitHub.MinimalHash));
+        }
+
+        /// <summary>The same entries as <see cref="Lock"/> in a lock the skills CLI 1.8 wrote (version 2 hashes).</summary>
+        const string Version2Lock = @"{
+  ""version"": 2,
+  ""skills"": {
+    ""tdd"": { ""source"": ""owner/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/tdd/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHashV2 + @""" },
+    ""review"": { ""source"": ""other/skills"", ""sourceType"": ""github"", ""skillPath"": ""skills/review/SKILL.md"", ""computedHash"": """ + FakeGitHub.MinimalHashV2 + @""", ""installMode"": ""copy"" }
+  }
+}";
+
+        [Test]
+        public void Run_PinnedModeAfterASyncOfAVersion2Lock_FindsTheRecordedSnapshotsOffline()
+        {
+            _repo.Commit("lock version 2", (Lockfile.FileName, Version2Lock));
+            WritePinned(_repo.Root);
+            Sync(_repo.Root);
+            var worktree = NewWorktree();
+            WritePinned(worktree);
+            _github.Offline = true;
+
+            var report = Restore(worktree).Run();
+
+            Assert.That(report.Status, Is.EqualTo(RestoreStatus.Restored));
+            Assert.That(report.Summary.Installed, Is.EquivalentTo(new[] { "tdd", "review" }));
+            Assert.That(SkillFolderHash.Compute(Canonical(worktree, "tdd"), SkillHashAlgorithm.Version2), Is.EqualTo(FakeGitHub.MinimalHashV2));
+        }
+
+        // Snapshots recorded against a version 1 lock are keyed by version 1 hashes; after the lock moves to version 2
+        // a restore needs one explicit sync on this machine, and then finds the new ones.
+        [Test]
+        public void Run_PinnedModeAfterTheLockMovedToVersion2_NeedsOneExplicitSync()
+        {
+            WritePinned(_repo.Root);
+            Sync(_repo.Root);
+            _repo.Commit("lock version 2", (Lockfile.FileName, Version2Lock));
+            var worktree = NewWorktree();
+            WritePinned(worktree);
+
+            var before = Restore(worktree).Run();
+            Sync(_repo.Root);
+            var after = Restore(worktree).Run();
+
+            Assert.That(before.Status, Is.EqualTo(RestoreStatus.SnapshotsMissing));
+            Assert.That(before.MissingSnapshots.Select(m => m.Reason), Is.All.Contain("Run an explicit sync"));
+            Assert.That(after.Status, Is.EqualTo(RestoreStatus.Restored));
+        }
+
+        [Test]
+        public void Run_PinnedModeVersion2EntryWithNoHash_NamesTheMigration()
+        {
+            Sync(_repo.Root); // confirms the sources
+            _repo.Commit("lock version 2", (Lockfile.FileName, Version2Lock.Replace(FakeGitHub.MinimalHashV2, "")));
+            WritePinned(_repo.Root);
+            var worktree = NewWorktree();
+            WritePinned(worktree);
+
+            var report = Restore(worktree).Run();
+
+            Assert.That(report.Status, Is.EqualTo(RestoreStatus.SnapshotsMissing));
+            Assert.That(report.MissingSnapshots.Select(m => m.Reason), Is.All.Contain("migration"));
         }
 
         [Test]

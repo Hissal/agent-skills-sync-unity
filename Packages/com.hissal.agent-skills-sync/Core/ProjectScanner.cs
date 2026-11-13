@@ -14,18 +14,20 @@ namespace Hissal.AgentSkillsSync
         /// content, so the planner can't see outdated copies (see <see cref="SyncStatus.Read"/>).
         /// </param>
         /// <param name="prefsRoot">The folder holding this machine's <see cref="LocalPrefs"/>; null = <paramref name="projectRoot"/>.</param>
-        public static ProjectState Scan(string projectRoot, FolderLayout layout, bool readContents = true, string prefsRoot = null)
+        /// <param name="algorithm">How to hash installed copies: the algorithm of the lock they will be compared with.</param>
+        public static ProjectState Scan(string projectRoot, FolderLayout layout, bool readContents = true, string prefsRoot = null,
+            SkillHashAlgorithm algorithm = SkillHashAlgorithm.Version1)
         {
             // What this machine manages lives in its local prefs. Until a sync first records it, the names in the
             // committed .gitignore blocks count as managed (before, the block listed exactly this machine's entries).
             // So do they when the record is for another skills root, as after the lock moved.
             var recorded = LocalPrefs.Load(prefsRoot ?? projectRoot).ManagedSkillsFor(projectRoot);
             return new ProjectState(layout.Folders.Select(folder =>
-                ScanFolder(projectRoot, folder, layout.Canonical, readContents, recorded)));
+                ScanFolder(projectRoot, folder, layout.Canonical, readContents, recorded, algorithm)));
         }
 
         static FolderState ScanFolder(string projectRoot, SkillsFolder folder, SkillsFolder canonicalFolder, bool readContents,
-            IReadOnlyDictionary<string, IReadOnlyList<string>> recorded)
+            IReadOnlyDictionary<string, IReadOnlyList<string>> recorded, SkillHashAlgorithm algorithm)
         {
             var path = Paths.InProject(projectRoot, folder.RelativePath);
             if (!Directory.Exists(path))
@@ -49,7 +51,7 @@ namespace Hissal.AgentSkillsSync
                 foreach (var name in managed.Where(names.Contains))
                 {
                     var copy = Path.Combine(path, name);
-                    if (Directory.Exists(copy)) hashes[name] = SkillFolderHash.Compute(copy);
+                    if (Directory.Exists(copy)) hashes[name] = SkillFolderHash.Compute(copy, algorithm);
                 }
 
             // A managed link must show this project's canonical entry. A symlink or junction that is broken or points
@@ -68,7 +70,7 @@ namespace Hissal.AgentSkillsSync
                         if (!DirectoryLink.ResolvesTo(link, canonical)) staleLinks.Add(name);
                     }
                     else if (readContents && Directory.Exists(link) && Directory.Exists(canonical) &&
-                             SkillFolderHash.Compute(link) != SkillFolderHash.Compute(canonical))
+                             SkillFolderHash.Compute(link, algorithm) != SkillFolderHash.Compute(canonical, algorithm))
                     {
                         staleLinks.Add(name);
                     }

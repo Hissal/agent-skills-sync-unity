@@ -8,21 +8,42 @@ using System.Text;
 namespace Hissal.AgentSkillsSync
 {
     /// <summary>
-    /// Computes a skill folder's content hash exactly as the <c>skills</c> CLI (lockfile version 1)
-    /// writes it to <c>computedHash</c> in <c>skills-lock.json</c>.
-    /// See docs/skills-cli-findings.md for the algorithm and its limits.
+    /// Which <c>skills</c> CLI algorithm a <c>computedHash</c> was made with. The lockfile's <c>version</c> picks it
+    /// (<see cref="Lockfile.HashAlgorithm"/>), and every comparison with that lock uses only that one.
+    /// </summary>
+    public enum SkillHashAlgorithm
+    {
+        /// <summary>Lockfile version 1 (<c>skills</c> CLI before 1.8.0): raw bytes in <c>localeCompare</c> path order.</summary>
+        Version1 = 1,
+
+        /// <summary>
+        /// Lockfile version 2 (<c>skills</c> CLI 1.8.0 and later): byte-ordered paths, length-prefixed CRLF-normalised
+        /// content, <c>metadata.json</c> and Python cache folders left out, symlinks inside the folder followed.
+        /// </summary>
+        Version2 = 2,
+    }
+
+    /// <summary>
+    /// Computes a skill folder's content hash exactly as the <c>skills</c> CLI writes it to <c>computedHash</c> in
+    /// <c>skills-lock.json</c>, with the algorithm of either lockfile version (<see cref="SkillHashAlgorithm"/>).
+    /// See docs/skills-cli-findings.md for the algorithms and their limits.
     /// </summary>
     public static class SkillFolderHash
     {
         /// <summary>
-        /// Returns the lowercase hex SHA-256 the CLI would record for the skill folder at
+        /// Returns the lowercase hex SHA-256 the CLI would record in a version 1 lock for the skill folder at
         /// <paramref name="skillDirectory"/> (the folder holding SKILL.md).
         /// </summary>
         /// <exception cref="DirectoryNotFoundException">The folder does not exist.</exception>
         public static string Compute(string skillDirectory) => Compute(skillDirectory, crlfCheckout: false);
 
+        /// <summary>The hash the CLI would record for the folder in a lock whose <c>computedHash</c> uses <paramref name="algorithm"/>.</summary>
+        /// <exception cref="DirectoryNotFoundException">The folder does not exist.</exception>
+        public static string Compute(string skillDirectory, SkillHashAlgorithm algorithm) =>
+            algorithm == SkillHashAlgorithm.Version2 ? ComputeVersion2(skillDirectory) : Compute(skillDirectory);
+
         /// <summary>
-        /// The hash the CLI records when it hashed a git checkout made with <c>core.autocrlf=true</c>: every text
+        /// Version 1 only: the hash the CLI records when it hashed a git checkout made with <c>core.autocrlf=true</c>: every text
         /// file (no NUL and no CR byte, as git decides for autocrlf) with its LF line endings turned into CRLF.
         /// </summary>
         internal static string ComputeAsCrlfCheckout(string skillDirectory) => Compute(skillDirectory, crlfCheckout: true);
@@ -43,7 +64,10 @@ namespace Hissal.AgentSkillsSync
             }
         }
 
-        /// <summary>Whether any file path in the folder has a non-ASCII character, where the path order (and so the hash) is not exact.</summary>
+        /// <summary>
+        /// Whether any file path in the folder has a non-ASCII character, where the version 1 path order (and so the
+        /// hash) is not exact.
+        /// </summary>
         internal static bool HasNonAsciiPath(string skillDirectory)
         {
             var files = new List<(string Path, string FullName)>();
@@ -75,6 +99,97 @@ namespace Hissal.AgentSkillsSync
             }
         }
 
+        // Mirrors the CLI's (1.8.x) computeSkillFolderHash and hashSkillFiles (dist/_chunks/remove.mjs of skills@1.8.1);
+        // docs/skills-cli-findings.md §1a lists every rule it follows.
+        static string ComputeVersion2(string skillDirectory)
+        {
+            if (!Directory.Exists(skillDirectory)) throw new DirectoryNotFoundException($"Skill folder not found: {skillDirectory}");
+            var root = RealPath(skillDirectory);
+
+            var files = new List<(byte[] Path, string FullName)>();
+            CollectFilesVersion2(skillDirectory, "", root, new HashSet<string>(StringComparer.Ordinal), files);
+            files.Sort((a, b) => CompareBytes(a.Path, b.Path));
+
+            using (var sha = SHA256.Create())
+            {
+                var separator = new byte[] { 0 };
+                foreach (var file in files)
+                {
+                    var content = NormalizeLineEndings(File.ReadAllBytes(file.FullName));
+                    var length = Encoding.ASCII.GetBytes(content.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    sha.TransformBlock(file.Path, 0, file.Path.Length, null, 0);
+                    sha.TransformBlock(separator, 0, 1, null, 0);
+                    sha.TransformBlock(length, 0, length.Length, null, 0);
+                    sha.TransformBlock(separator, 0, 1, null, 0);
+                    sha.TransformBlock(content, 0, content.Length, null, 0);
+                }
+                sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+                return string.Concat(sha.Hash.Select(b => b.ToString("x2")));
+            }
+        }
+
+        // The CLI's collectFiles: skip excluded names, follow a symlink (or junction, which Node also reports as a
+        // symlink) only when its real path stays inside the skill folder's, never enter a folder already on the
+        // current branch (a link cycle), and skip anything else that is neither file nor folder.
+        static void CollectFilesVersion2(string directory, string relativePrefix, string root, HashSet<string> ancestors,
+            List<(byte[] Path, string FullName)> files)
+        {
+            var realDirectory = RealPath(directory);
+            if (ancestors.Contains(realDirectory)) return;
+            var branch = new HashSet<string>(ancestors, StringComparer.Ordinal) { realDirectory };
+
+            foreach (var entry in new DirectoryInfo(directory).EnumerateFileSystemInfos())
+            {
+                var isLink = (entry.Attributes & FileAttributes.ReparsePoint) != 0;
+                var isDirectory = !isLink && entry is DirectoryInfo;
+                if (IsExcludedVersion2(entry.Name, isDirectory)) continue;
+                var relativePath = relativePrefix + entry.Name;
+                if (isLink)
+                {
+                    var target = DirectoryLink.FinalPath(entry.FullName);
+                    if (target == null || (target != root && !target.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
+                        continue;
+                    isDirectory = Directory.Exists(target);
+                    if (isDirectory && IsExcludedVersion2(entry.Name, true)) continue;
+                }
+
+                if (isDirectory) CollectFilesVersion2(entry.FullName, relativePath + "/", root, branch, files);
+                // hashSkillFiles turns every backslash into "/", so a Unix name holding one hashes as a path.
+                else files.Add((Encoding.UTF8.GetBytes(relativePath.Replace('\\', '/')), entry.FullName));
+            }
+        }
+
+        // A file name is excluded whether the entry is a file or a folder, as in the CLI's isExcluded.
+        static bool IsExcludedVersion2(string name, bool isDirectory) =>
+            name == "metadata.json" || (isDirectory && (name == ".git" || name == "__pycache__" || name == "__pypackages__"));
+
+        static string RealPath(string path) =>
+            DirectoryLink.FinalPath(path) ?? throw new IOException($"Can't resolve the real path of {path}.");
+
+        // Buffer.compare: unsigned bytes, then length.
+        static int CompareBytes(byte[] x, byte[] y)
+        {
+            var length = Math.Min(x.Length, y.Length);
+            for (var i = 0; i < length; i++)
+                if (x[i] != y[i]) return x[i].CompareTo(y[i]);
+            return x.Length.CompareTo(y.Length);
+        }
+
+        // Content with no NUL byte has each CRLF turned into LF; a lone CR stays.
+        static byte[] NormalizeLineEndings(byte[] content)
+        {
+            const byte Cr = 0x0D, Lf = 0x0A;
+            if (Array.IndexOf(content, (byte)0) >= 0) return content;
+            var hasCrlf = false;
+            for (var i = 0; i + 1 < content.Length && !hasCrlf; i++)
+                hasCrlf = content[i] == Cr && content[i + 1] == Lf;
+            if (!hasCrlf) return content;
+            var normalized = new List<byte>(content.Length);
+            for (var i = 0; i < content.Length; i++)
+                if (!(content[i] == Cr && i + 1 < content.Length && content[i + 1] == Lf)) normalized.Add(content[i]);
+            return normalized.ToArray();
+        }
+
         static byte[] ToCrlf(byte[] content)
         {
             const byte Cr = 0x0D, Lf = 0x0A;
@@ -88,7 +203,7 @@ namespace Hissal.AgentSkillsSync
             return converted.ToArray();
         }
 
-        // Mirrors the CLI's collectFiles: recurse into real folders except .git and node_modules,
+        // Version 1: mirrors the CLI's (1.7.x) collectFiles: recurse into real folders except .git and node_modules,
         // take regular files, and skip symlinks and junctions (Node's Dirent reports them as
         // neither file nor folder).
         static void CollectFiles(DirectoryInfo directory, string relativePrefix, List<(string Path, string FullName)> files)

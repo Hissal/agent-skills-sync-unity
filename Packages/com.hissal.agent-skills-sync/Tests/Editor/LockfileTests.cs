@@ -155,14 +155,72 @@ namespace Hissal.AgentSkillsSync.Tests
             Assert.That(lockfile.Skills[1].Source, Is.EqualTo("Unity-Technologies/skills"));
         }
 
-        [Test]
-        public void Parse_UnknownVersion_RejectsNamingTheVersion()
+        [TestCase("0")]
+        [TestCase("3")]
+        [TestCase("1.5")]
+        public void Parse_UnknownVersion_RejectsNamingTheVersion(string version)
         {
-            const string json = @"{ ""version"": 2, ""skills"": {} }";
+            var json = @"{ ""version"": " + version + @", ""skills"": {} }";
 
             var error = Assert.Throws<LockfileException>(() => Lockfile.Parse(json));
 
-            Assert.That(error.Message, Does.Contain("version 2"));
+            Assert.That(error.Message, Does.Contain("format version " + version)
+                .And.Contain("only understands versions 1 and 2")
+                .And.Contain("Update the Agent Skills Sync package"));
+        }
+
+        [Test]
+        public void Parse_Version1_UsesTheVersion1Hash()
+        {
+            var lockfile = Lockfile.Parse(ValidLock);
+
+            Assert.That(lockfile.Version, Is.EqualTo(1));
+            Assert.That(lockfile.HashAlgorithm, Is.EqualTo(SkillHashAlgorithm.Version1));
+            Assert.That(lockfile.Skills.Select(s => s.HashAlgorithm), Is.All.EqualTo(SkillHashAlgorithm.Version1));
+        }
+
+        // As skills@1.8.1 writes it, with its new optional entry fields and a migrated entry that lost its hash.
+        const string Version2Lock = @"{
+  ""version"": 2,
+  ""skills"": {
+    ""code-review"": {
+      ""source"": ""mattpocock/skills"",
+      ""sourceType"": ""github"",
+      ""sourceUrl"": ""https://github.com/mattpocock/skills.git"",
+      ""skillPath"": ""skills/engineering/code-review/SKILL.md"",
+      ""computedHash"": ""e1e3b7e2753077215f2b2de8d04714f647e2370e692953279db2b85888626dca"",
+      ""installMode"": ""copy"",
+      ""via"": ""add""
+    },
+    ""migrated"": {
+      ""source"": ""owner/repo"",
+      ""sourceType"": ""github"",
+      ""computedHash"": """"
+    },
+    ""pkg"": { ""source"": ""some-package"", ""sourceType"": ""node_modules"", ""version"": ""1.2.3"", ""computedHash"": ""abc"" }
+  }
+}";
+
+        [Test]
+        public void Parse_Version2_ReadsEntriesWithTheVersion2Hash()
+        {
+            var lockfile = Lockfile.Parse(Version2Lock);
+
+            Assert.That(lockfile.Version, Is.EqualTo(2));
+            Assert.That(lockfile.HashAlgorithm, Is.EqualTo(SkillHashAlgorithm.Version2));
+            Assert.That(lockfile.Skills.Select(s => s.Name), Is.EqualTo(new[] { "code-review", "migrated" }));
+            Assert.That(lockfile.Skills.Select(s => s.HashAlgorithm), Is.All.EqualTo(SkillHashAlgorithm.Version2));
+            Assert.That(lockfile.Skills[0].ComputedHash, Is.EqualTo("e1e3b7e2753077215f2b2de8d04714f647e2370e692953279db2b85888626dca"));
+            Assert.That(lockfile.Skills[1].ComputedHash, Is.Empty);
+            Assert.That(lockfile.Unsupported.Select(s => s.Name), Is.EqualTo(new[] { "pkg" }));
+        }
+
+        [Test]
+        public void Constructor_SkillOfAnotherLockVersion_Throws()
+        {
+            var skill = new LockedSkill("tdd", "owner/repo", "github", null, "hash");
+
+            Assert.That(() => new Lockfile(new[] { skill }, version: 2), Throws.ArgumentException);
         }
 
         [Test]

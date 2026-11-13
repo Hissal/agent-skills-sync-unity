@@ -30,6 +30,9 @@ namespace Hissal.AgentSkillsSync.Tests
         static LockedSkill Skill(string name, string hash, string source = "owner/skills", string reference = null) =>
             new LockedSkill(name, source, "github", $"skills/{name}/SKILL.md", hash, reference);
 
+        static LockedSkill SkillV2(string name, string hash, string source = "owner/skills") =>
+            new LockedSkill(name, source, "github", $"skills/{name}/SKILL.md", hash, hashAlgorithm: SkillHashAlgorithm.Version2);
+
         static LockedSkill Tdd => Skill("tdd", FakeGitHub.MinimalHash);
         static LockedSkill CodeReview => Skill("code-review", FakeGitHub.NestedHash);
 
@@ -154,6 +157,103 @@ namespace Hissal.AgentSkillsSync.Tests
             var error = Assert.Throws<SkillFetchException>(() => Fetcher().Fetch(Skill("tdd", null)));
 
             Assert.That(error.Failure, Is.EqualTo(SkillFetchFailure.HashMismatch));
+        }
+
+        [Test]
+        public void Fetch_Version2Lock_ContentMatches_ReturnsTheCopy()
+        {
+            var folder = Fetcher().Fetch(SkillV2("code-review", FakeGitHub.NestedHashV2));
+
+            Assert.That(SkillFolderHash.Compute(folder, SkillHashAlgorithm.Version2), Is.EqualTo(FakeGitHub.NestedHashV2));
+        }
+
+        [Test]
+        public void Fetch_Version2Lock_ContentChanged_ThrowsHashMismatch()
+        {
+            _github.File("owner/skills", "skills/tdd/SKILL.md", "# tdd, edited upstream after locking");
+
+            var error = Assert.Throws<SkillFetchException>(() => Fetcher().Fetch(SkillV2("tdd", FakeGitHub.MinimalHashV2)));
+
+            Assert.That(error.Failure, Is.EqualTo(SkillFetchFailure.HashMismatch));
+            Assert.That(error.Message, Does.Contain("changed since it was locked"));
+            Assert.That(Directory.Exists(Path.Combine(_cache, "skills", "owner", "skills", "tdd")), Is.False);
+        }
+
+        // Only the lock's algorithm counts: a version 1 hash in a version 2 lock is a mismatch, never a fallback.
+        [Test]
+        public void Fetch_Version2Lock_HoldingTheVersion1Hash_ThrowsHashMismatch()
+        {
+            var error = Assert.Throws<SkillFetchException>(() => Fetcher().Fetch(SkillV2("tdd", FakeGitHub.MinimalHash)));
+
+            Assert.That(error.Failure, Is.EqualTo(SkillFetchFailure.HashMismatch));
+        }
+
+        [TestCase("")]
+        [TestCase(null)]
+        public void Fetch_Version2Lock_NoHash_RefusesNamingTheMigrationAndTheFix(string hash)
+        {
+            var error = Assert.Throws<SkillFetchException>(() => Fetcher().Fetch(SkillV2("tdd", hash)));
+
+            Assert.That(error.Failure, Is.EqualTo(SkillFetchFailure.Unverifiable));
+            Assert.That(error.Message, Does.Contain("no content hash")
+                .And.Contain("migration")
+                .And.Contain("npx skills add owner/skills --skill tdd")
+                .And.Contain("commit " + Lockfile.FileName));
+            Assert.That(_github.Requested, Is.Empty, "nothing is downloaded for a hash that can't be checked");
+        }
+
+        [Test]
+        public void Fetch_Version2Lock_NoHash_LatestModeFetches()
+        {
+            var folder = new GitHubSkillFetcher(_cache, _github, InstallMode.Latest).Fetch(SkillV2("tdd", ""));
+
+            Assert.That(FilesUnder(folder), Is.EqualTo(new[] { "SKILL.md" }));
+        }
+
+        // A GitHub archive of generated-trees.json's "symlinks" tree (links as git archives them, outside files beside
+        // the skill folder) fetches to a copy holding the linked content, which hashes to the CLI's version 2 vector.
+        [Test]
+        public void Fetch_Version2Lock_ArchivedSymlinks_InstallTheLinkedContentAndMatchTheCliHash()
+        {
+            var tree = SkillFolderHashTests.GeneratedTree("symlinks");
+            _github.Fixture("owner/skills", "skills/symlinks", (string)SkillFolderHashTests.Value(tree, "base"));
+            foreach (var link in SkillFolderHashTests.Member(tree, "links"))
+                _github.Symlink("owner/skills", "skills/symlinks/" + link.Key, (string)link.Value);
+            foreach (var file in SkillFolderHashTests.Member(tree, "outside"))
+                _github.File("owner/skills", "skills/" + file.Key, (string)file.Value);
+
+            var folder = Fetcher().Fetch(SkillV2("symlinks", SkillFolderHashTests.SymlinksTreeHashV2));
+
+            Assert.That(File.ReadAllText(Path.Combine(folder, "alpha-link.md")), Is.EqualTo(File.ReadAllText(Path.Combine(folder, "alpha.md"))));
+            Assert.That(File.Exists(Path.Combine(folder, "build-link", "out.txt")), Is.True);
+            Assert.That(File.Exists(Path.Combine(folder, "outside-link.md")), Is.False, "a link out of the skill folder is left out");
+            Assert.That(File.Exists(Path.Combine(folder, "dangling.md")), Is.False);
+            Assert.That(Directory.Exists(Path.Combine(folder, "loop")), Is.False, "a link to the folder holding it is a cycle");
+            Assert.That(FilesUnder(folder).Any(f => DirectoryLink.IsLink(Path.Combine(folder, f))), Is.False);
+        }
+
+        // Version 1 hashed a clone that skipped symlinks; its archive extraction is unchanged.
+        [Test]
+        public void Fetch_Version1Lock_ArchivedSymlink_IsExtractedAsBefore()
+        {
+            _github.Symlink("owner/skills", "skills/tdd/link.md", "SKILL.md");
+
+            var folder = new GitHubSkillFetcher(_cache, _github, InstallMode.Latest).Fetch(Tdd);
+
+            Assert.That(File.ReadAllText(Path.Combine(folder, "link.md")), Is.EqualTo("SKILL.md"));
+        }
+
+        // skills@1.8 locks a skills.sh install with the version 2 hash of the snapshot's files (computeSnapshotHash),
+        // which the GitHub archive reproduces: checked on vercel-labs/agent-skills web-design-guidelines.
+        [TestCase("vercel-labs/agent-skills")]
+        [TestCase("zapier/connectors")]
+        public void Fetch_Version2Lock_SkillsShSource_VerifiesTheHash(string source)
+        {
+            _github.Fixture(source, "skills/tdd", "minimal");
+            var skill = SkillV2("tdd", FakeGitHub.MinimalHashV2, source);
+
+            Assert.That(LockVerification.CanVerify(skill), Is.True);
+            Assert.That(FilesUnder(Fetcher().Fetch(skill)), Is.EqualTo(new[] { "SKILL.md" }));
         }
 
         [Test]
