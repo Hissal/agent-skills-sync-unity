@@ -14,6 +14,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and removed on save. Previously un-skipped skills also switch to use mine; the next sync withdraws managed
   project copies and links that are no longer needed.
 
+## [0.3.1](https://github.com/Hissal/agent-skills-sync-unity/compare/v0.3.0...v0.3.1) (2026-11-13)
+
+
+### Fixed
+
+* read the version 2 skills-lock.json that skills CLI 1.8 writes ([#95](https://github.com/Hissal/agent-skills-sync-unity/issues/95)) ([0e9837b](https://github.com/Hissal/agent-skills-sync-unity/commit/0e9837b3550d7fc0258af13a5cd78a5f66d0e5f4))
+
 ## [0.3.0](https://github.com/Hissal/agent-skills-sync-unity/compare/v0.2.0...v0.3.0) (2026-10-17)
 
 
